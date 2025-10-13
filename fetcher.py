@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30
 GITHUB_URL_PATTERN = r"/releases/tag/([^/?#]+)"
+PROTONGE_ASSET_PATTERN = r"GE-Proton\d+[\w.-]*\.tar\.gz"
 
 
 class FetchError(Exception):
@@ -62,6 +63,33 @@ class GitHubReleaseFetcher:
             self._raise(f"Could not determine latest tag from URL: {response.url}")
 
         return match.group(1)
+
+    def find_asset_by_pattern(self, repo: str, tag: str, pattern: str) -> str:
+        """Find an asset matching the given pattern in a GitHub release.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+            tag: Release tag
+            pattern: Regex pattern to match asset names
+
+        Returns:
+            The asset name matching the pattern
+
+        Raises:
+            FetchError: If no matching asset is found
+        """
+        url = f"https://github.com/{repo}/releases/tag/{tag}"
+        try:
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            self._raise(f"Failed to fetch release page for {repo}/{tag}: {e}")
+
+        matches = re.findall(pattern, response.text)
+        if not matches:
+            self._raise(f"No asset matching pattern '{pattern}' found in {repo}/{tag}")
+
+        return matches[0]
 
     def download_asset(
         self, repo: str, tag: str, asset_name: str, out_path: Path
@@ -122,7 +150,7 @@ class GitHubReleaseFetcher:
 
         Args:
             repo: Repository in format 'owner/repo'
-            asset_name: Asset filename to download
+            asset_name: Asset filename to download, or regex pattern to find it
             target_dir: Directory to extract into
 
         Returns:
@@ -130,6 +158,12 @@ class GitHubReleaseFetcher:
         """
         tag = self.fetch_latest_tag(repo)
         logger.info(f"Fetching {asset_name} from {repo} tag {tag}")
+
+        # If asset_name looks like a pattern (contains regex chars), find the actual name
+        # Check for regex metacharacters: [] () + ? | ^ $ \ but not . (common in filenames)
+        if any(c in asset_name for c in r"[]()^$\+?|"):
+            asset_name = self.find_asset_by_pattern(repo, tag, asset_name)
+            logger.info(f"Found asset: {asset_name}")
 
         with tempfile.TemporaryDirectory(prefix="ghrel-") as temp_dir:
             temp_path = Path(temp_dir) / asset_name
@@ -148,14 +182,18 @@ class GitHubReleaseFetcher:
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Fetch and extract the latest GitHub release asset."
+        description="Fetch and extract the latest ProtonGE release asset."
     )
-    parser.add_argument("repo", help="Repository in format owner/repo")
+    # The 'repo' argument has been removed as it is now hardcoded.
     parser.add_argument(
-        "--asset-name", required=True, help="Asset filename to download"
+        "--asset-name",
+        default=PROTONGE_ASSET_PATTERN,
+        help=f"Asset filename to download, or regex pattern to match asset name (default: '{PROTONGE_ASSET_PATTERN}')",
     )
     parser.add_argument(
-        "--target-dir", default=".", help="Directory to extract the asset to"
+        "--target-dir",
+        default=".",
+        help="Directory to extract the asset to (default: current directory)",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"
@@ -168,9 +206,12 @@ def main() -> None:
         format="%(levelname)s: %(message)s",
     )
 
+    # The repository is now hardcoded.
+    repo = "GloriousEggroll/proton-ge-custom"
+
     try:
         fetcher = GitHubReleaseFetcher()
-        fetcher.fetch_and_extract(args.repo, args.asset_name, Path(args.target_dir))
+        fetcher.fetch_and_extract(repo, args.asset_name, Path(args.target_dir))
         print("Success")
     except FetchError as e:
         print(f"Error: {e}")
