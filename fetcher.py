@@ -173,13 +173,14 @@ class GitHubReleaseFetcher:
         return subprocess.run(cmd, capture_output=True, text=True)
 
     def _curl_head(
-        self, url: str, headers: Optional[dict] = None
+        self, url: str, headers: Optional[dict] = None, follow_redirects: bool = False
     ) -> subprocess.CompletedProcess:
         """Make a HEAD request using curl.
 
         Args:
             url: URL to make request to
             headers: Optional headers to include
+            follow_redirects: Whether to follow redirects (useful for getting final content size)
 
         Returns:
             CompletedProcess result from subprocess
@@ -193,6 +194,9 @@ class GitHubReleaseFetcher:
             "--max-time",
             str(self.timeout),
         ]
+
+        if follow_redirects:
+            cmd.insert(1, "-L")  # Follow redirects
 
         if headers:
             for key, value in headers.items():
@@ -388,10 +392,97 @@ class GitHubReleaseFetcher:
 
             self._raise(f"Asset '{expected_asset_name}' not found in {repo}/{tag}")
 
+    def get_remote_asset_size(self, repo: str, tag: str, asset_name: str) -> int:
+        """Get the size of a remote asset using HEAD request.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+            tag: Release tag
+            asset_name: Asset filename
+
+        Returns:
+            Size of the asset in bytes
+
+        Raises:
+            FetchError: If unable to get asset size
+        """
+        url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
+        logger.info(f"Getting remote asset size from: {url}")
+
+        try:
+            # First try with HEAD request following redirects
+            result = self._curl_head(url, follow_redirects=True)
+            if result.returncode != 0:
+                if "404" in result.stderr or "not found" in result.stderr.lower():
+                    self._raise(f"Remote asset not found: {asset_name}")
+                self._raise(
+                    f"Failed to get remote asset size for {asset_name}: {result.stderr}"
+                )
+
+            # Extract Content-Length from headers - look for it in various formats
+            # Split the response into lines and search each one for content-length
+            for line in result.stdout.splitlines():
+                # Look for content-length in the line, case insensitive
+                if "content-length" in line.lower():
+                    # Extract the numeric value after the colon
+                    length_match = re.search(r":\s*(\d+)", line, re.IGNORECASE)
+                    if length_match:
+                        size = int(length_match.group(1))
+                        if size > 0:  # Only return if size is greater than 0
+                            logger.info(f"Remote asset size: {size} bytes")
+                            return size
+
+            # If not found in individual lines, try regex on full response
+            content_length_match = re.search(
+                r"(?i)content-length:\s*(\d+)", result.stdout
+            )
+            if content_length_match:
+                size = int(content_length_match.group(1))
+                if size > 0:  # Only return if size is greater than 0
+                    logger.info(f"Remote asset size: {size} bytes")
+                    return size
+
+            # If content-length is not available or is 0, we'll try a different approach
+            # by looking for redirect location and getting size from there
+            location_match = re.search(r"(?i)location:\s*(.+)", result.stdout)
+            if location_match:
+                redirect_url = location_match.group(1).strip()
+                if redirect_url and redirect_url != url:
+                    logger.debug(f"Following redirect to: {redirect_url}")
+                    # Make another HEAD request to the redirect URL
+                    result = self._curl_head(redirect_url, follow_redirects=False)
+                    if result.returncode == 0:
+                        for line in result.stdout.splitlines():
+                            if "content-length" in line.lower():
+                                length_match = re.search(
+                                    r":\s*(\d+)", line, re.IGNORECASE
+                                )
+                                if length_match:
+                                    size = int(length_match.group(1))
+                                    if size > 0:
+                                        logger.info(f"Remote asset size: {size} bytes")
+                                        return size
+                        # Try regex on full response as backup
+                        content_length_match = re.search(
+                            r"(?i)content-length:\s*(\d+)", result.stdout
+                        )
+                        if content_length_match:
+                            size = int(content_length_match.group(1))
+                            if size > 0:
+                                logger.info(f"Remote asset size: {size} bytes")
+                                return size
+
+            # If we still can't find the content-length, log the response for debugging
+            logger.debug(f"Response headers received: {result.stdout}")
+            self._raise(f"Could not determine size of remote asset: {asset_name}")
+        except Exception as e:
+            self._raise(f"Failed to get remote asset size for {asset_name}: {e}")
+
     def download_asset(
         self, repo: str, tag: str, asset_name: str, out_path: Path
     ) -> Path:
         """Download a specific asset from a GitHub release with progress bar.
+        If a local file with the same name and size already exists, skip download.
 
         Args:
             repo: Repository in format 'owner/repo'
@@ -406,7 +497,24 @@ class GitHubReleaseFetcher:
             FetchError: If download fails or asset not found
         """
         url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
-        logger.info(f"Downloading asset from: {url}")
+        logger.info(f"Checking if asset needs download from: {url}")
+
+        # Check if local file already exists and has the same size as remote
+        if out_path.exists():
+            local_size = out_path.stat().st_size
+            remote_size = self.get_remote_asset_size(repo, tag, asset_name)
+
+            if local_size == remote_size:
+                logger.info(
+                    f"Local asset {out_path} already exists with matching size ({local_size} bytes), skipping download"
+                )
+                return out_path
+            else:
+                logger.info(
+                    f"Local size ({local_size} bytes) differs from remote size ({remote_size} bytes), downloading new version"
+                )
+        else:
+            logger.info("Local asset does not exist, proceeding with download")
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
 

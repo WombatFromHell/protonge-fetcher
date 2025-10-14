@@ -56,6 +56,36 @@ def fetcher_instance(mocker):
     return fetcher
 
 
+@pytest.fixture
+def fetcher_instance_with_size_check(mocker):
+    """Fixture for GitHubReleaseFetcher with mocked curl methods for size check tests."""
+    fetcher = GitHubReleaseFetcher()
+
+    # Mock the curl methods
+    mock_curl_head = mocker.MagicMock()
+    # Set up a mock response for curl head that includes content-length for size checks
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    # Include content-length header for asset size checking
+    mock_head_result.stdout = f"HTTP/1.1 200 OK\r\nContent-Length: {len(MOCK_TAR_GZ_CONTENT)}\r\nContent-Type: application/gzip\r\n"
+    mock_curl_head.return_value = mock_head_result
+    fetcher._curl_head = mock_curl_head
+
+    mock_curl_get = mocker.MagicMock()
+    mock_get_result = mocker.MagicMock()
+    mock_get_result.returncode = 0
+    mock_get_result.stdout = MOCK_RELEASE_PAGE_HTML
+    mock_curl_get.return_value = mock_get_result
+    fetcher._curl_get = mock_curl_get
+
+    mock_curl_download = mocker.MagicMock()
+    mock_download_result = mocker.MagicMock()
+    mock_curl_download.return_value = mock_download_result
+    fetcher._curl_download = mock_curl_download
+
+    return fetcher
+
+
 def test_get_proton_ge_asset_name():
     """Test the get_proton_ge_asset_name function."""
     assert get_proton_ge_asset_name("GE-Proton10-20") == "GE-Proton10-20.tar.gz"
@@ -121,7 +151,7 @@ def test_find_asset_by_name_request_exception(fetcher_instance, mocker):
         fetcher_instance.find_asset_by_name(MOCK_REPO, MOCK_TAG)
 
 
-def test_download_asset_success(fetcher_instance, tmp_path, mocker):
+def test_download_asset_success(fetcher_instance_with_size_check, tmp_path, mocker):
     """Test successful asset download."""
     output_path = tmp_path / "output.tar.gz"
     output_path.write_bytes(MOCK_TAR_GZ_CONTENT)
@@ -131,9 +161,9 @@ def test_download_asset_success(fetcher_instance, tmp_path, mocker):
     mock_result.returncode = 0
     mock_result.stdout = ""
     mock_result.stderr = ""
-    fetcher_instance._curl_download.return_value = mock_result
+    fetcher_instance_with_size_check._curl_download.return_value = mock_result
 
-    result_path = fetcher_instance.download_asset(
+    result_path = fetcher_instance_with_size_check.download_asset(
         MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
     )
 
@@ -1138,3 +1168,153 @@ def test_manage_ge_proton_links_correct_version(fetcher_instance, tmp_path):
     fallback_link = extract_dir / "GE-Proton-Fallback"
     assert fallback_link.is_symlink()
     assert fallback_link.resolve() == old_version_dir
+
+
+def test_get_remote_asset_size_success(fetcher_instance_with_size_check, mocker):
+    """Test successful retrieval of remote asset size."""
+    # Mock the curl head response to return a content-length
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = "HTTP/1.1 200 OK\r\nContent-Length: 1234567\r\nContent-Type: application/gzip\r\n"
+    fetcher_instance_with_size_check._curl_head.return_value = mock_head_result
+
+    size = fetcher_instance_with_size_check.get_remote_asset_size(
+        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME
+    )
+
+    assert size == 1234567
+
+
+def test_get_remote_asset_size_failure_no_content_length(
+    fetcher_instance_with_size_check, mocker
+):
+    """Test failure when content-length header is not present."""
+    # Mock the curl head response without content-length
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\n"
+    fetcher_instance_with_size_check._curl_head.return_value = mock_head_result
+
+    with pytest.raises(FetchError, match="Could not determine size of remote asset"):
+        fetcher_instance_with_size_check.get_remote_asset_size(
+            MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME
+        )
+
+
+def test_get_remote_asset_size_failure_404(fetcher_instance_with_size_check, mocker):
+    """Test failure when remote asset is not found."""
+    # Mock the curl head response with 404 error
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 22  # curl error code for 404
+    mock_head_result.stderr = "404 Not Found"
+    fetcher_instance_with_size_check._curl_head.return_value = mock_head_result
+
+    with pytest.raises(FetchError, match="Remote asset not found"):
+        fetcher_instance_with_size_check.get_remote_asset_size(
+            MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME
+        )
+
+
+def test_download_asset_skip_if_same_size(
+    fetcher_instance_with_size_check, tmp_path, mocker
+):
+    """Test that download is skipped if local file exists with matching size."""
+    # Create a local file with matching size
+    output_path = tmp_path / "output.tar.gz"
+    matching_size = len(MOCK_TAR_GZ_CONTENT)
+    output_path.write_bytes(MOCK_TAR_GZ_CONTENT)  # Write content of specific size
+
+    # Mock the curl head response to return the same size
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = f"HTTP/1.1 200 OK\r\nContent-Length: {matching_size}\r\nContent-Type: application/gzip\r\n"
+    fetcher_instance_with_size_check._curl_head.return_value = mock_head_result
+
+    # Mock the curl download to verify it's not called
+    mock_download_result = mocker.MagicMock()
+    mock_download_result.returncode = 0
+    mock_download_result.stdout = ""
+    mock_download_result.stderr = ""
+    fetcher_instance_with_size_check._curl_download.return_value = mock_download_result
+
+    result_path = fetcher_instance_with_size_check.download_asset(
+        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
+    )
+
+    # Verify the download method was not called
+    fetcher_instance_with_size_check._curl_download.assert_not_called()
+
+    # Verify the correct path is returned
+    assert result_path == output_path
+
+    # Original file should still exist with original content
+    assert output_path.read_bytes() == MOCK_TAR_GZ_CONTENT
+
+
+def test_download_asset_different_size_downloads(
+    fetcher_instance_with_size_check, tmp_path, mocker
+):
+    """Test that download happens if local file exists with different size."""
+    # Create a local file with different size
+    output_path = tmp_path / "output.tar.gz"
+    different_content = b"smaller content"
+    output_path.write_bytes(different_content)
+    _ = len(different_content)
+    remote_size = len(MOCK_TAR_GZ_CONTENT)
+
+    # Mock the curl head response to return a different size
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = f"HTTP/1.1 200 OK\r\nContent-Length: {remote_size}\r\nContent-Type: application/gzip\r\n"
+    fetcher_instance_with_size_check._curl_head.return_value = mock_head_result
+
+    # Mock the curl download to simulate successful download
+    mock_download_result = mocker.MagicMock()
+    mock_download_result.returncode = 0
+    mock_download_result.stdout = ""
+    mock_download_result.stderr = ""
+    fetcher_instance_with_size_check._curl_download.return_value = mock_download_result
+
+    result_path = fetcher_instance_with_size_check.download_asset(
+        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
+    )
+
+    # Verify the download method was called (since sizes differ)
+    fetcher_instance_with_size_check._curl_download.assert_called_once()
+
+    # Verify the correct path is returned
+    assert result_path == output_path
+
+
+def test_download_asset_local_file_not_exists(
+    fetcher_instance_with_size_check, tmp_path, mocker
+):
+    """Test that download happens if local file doesn't exist."""
+    output_path = tmp_path / "output.tar.gz"
+
+    # Verify file doesn't exist yet
+    assert not output_path.exists()
+
+    # Mock the curl head response to return the expected size
+    remote_size = len(MOCK_TAR_GZ_CONTENT)
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = f"HTTP/1.1 200 OK\r\nContent-Length: {remote_size}\r\nContent-Type: application/gzip\r\n"
+    fetcher_instance_with_size_check._curl_head.return_value = mock_head_result
+
+    # Mock the curl download to simulate successful download
+    mock_download_result = mocker.MagicMock()
+    mock_download_result.returncode = 0
+    mock_download_result.stdout = ""
+    mock_download_result.stderr = ""
+    fetcher_instance_with_size_check._curl_download.return_value = mock_download_result
+
+    result_path = fetcher_instance_with_size_check.download_asset(
+        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
+    )
+
+    # Verify the download method was called (since file doesn't exist)
+    fetcher_instance_with_size_check._curl_download.assert_called_once()
+
+    # Verify the correct path is returned
+    assert result_path == output_path
