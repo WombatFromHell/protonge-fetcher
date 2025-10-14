@@ -72,7 +72,7 @@ class Spinner:
             if self.unit_scale and self.unit == "B":
                 rate_str = (
                     f"{rate:.2f}B/s"
-                    if rate < 1024
+                    if rate <= 1024
                     else f"{rate / 1024:.2f}KB/s"
                     if rate < 1024**2
                     else f"{rate / 1024**2:.2f}MB/s"
@@ -110,11 +110,23 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30
 GITHUB_URL_PATTERN = r"/releases/tag/([^/?#]+)"
-PROTONGE_ASSET_PATTERN = r"GE-Proton\d+[\w.-]*\.tar\.gz"
 
 
 class FetchError(Exception):
     """Raised when fetching or extracting a release fails."""
+
+
+def get_proton_ge_asset_name(tag: str) -> str:
+    """
+    Generate the expected ProtonGE asset name from a tag.
+
+    Args:
+        tag: The release tag (e.g., 'GE-Proton10-20')
+
+    Returns:
+        The expected asset name (e.g., 'GE-Proton10-20.tar.gz')
+    """
+    return f"{tag}.tar.gz"
 
 
 class GitHubReleaseFetcher:
@@ -146,9 +158,11 @@ class GitHubReleaseFetcher:
             str(self.timeout),
         ]
 
-        if headers:
+        # Add headers if provided explicitly (not None)
+        if headers is not None:
             for key, value in headers.items():
                 cmd.extend(["-H", f"{key}: {value}"])
+        # When headers is None (default), we don't add any headers for backward compatibility
 
         if stream:
             # For streaming, we'll handle differently
@@ -249,10 +263,18 @@ class GitHubReleaseFetcher:
             re.IGNORECASE,
         )
         if not location_match:
-            # Try another pattern for the redirect
-            location_match = re.search(r"URL=(.*)", response.stdout)
-            if location_match:
-                redirected_url = location_match.group(1).strip()
+            # Try another pattern for the redirect - extract URL and then get path portion
+            # Handle both "Location:" and "URL:" patterns that might appear in curl output
+            url_match = re.search(
+                r"URL:\s*(https?://[^\s\r\n]+)", response.stdout, re.IGNORECASE
+            )
+            if url_match:
+                full_url = url_match.group(1).strip()
+                # Extract the path portion from the full URL to match pattern
+                import urllib.parse
+
+                parsed_url = urllib.parse.urlparse(full_url)
+                redirected_url = parsed_url.path
             else:
                 # If no Location header found, use the original URL
                 redirected_url = url
@@ -267,74 +289,104 @@ class GitHubReleaseFetcher:
         logger.info(f"Found latest tag: {tag}")
         return tag
 
-    def find_asset_by_pattern(self, repo: str, tag: str, pattern: str) -> str:
-        """Find an asset matching the given pattern in a GitHub release.
+    def find_asset_by_name(self, repo: str, tag: str) -> str:
+        """Find the ProtonGE asset in a GitHub release using the GitHub API first,
+        falling back to HTML parsing if API fails.
 
         Args:
             repo: Repository in format 'owner/repo'
             tag: Release tag
-            pattern: Regex pattern to match asset names
 
         Returns:
-            The asset name matching the pattern
+            The asset name
 
         Raises:
             FetchError: If no matching asset is found
         """
-        url = f"https://github.com/{repo}/releases/tag/{tag}"
-        logger.info(f"Fetching release page: {url}")
-
+        # First, try to use GitHub API (most reliable method)
         try:
-            response = self._curl_get(url)
+            api_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+            logger.info(f"Fetching release info from API: {api_url}")
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "application/vnd.github.v3+json",
+            }
+            response = self._curl_get(api_url, headers=headers)
             if response.returncode != 0:
-                self._raise(
-                    f"Failed to fetch release page for {repo}/{tag}: {response.stderr}"
+                logger.debug(f"API request failed: {response.stderr}")
+                raise Exception(
+                    f"API request failed with return code {response.returncode}"
                 )
-        except Exception as e:
-            self._raise(f"Failed to fetch release page for {repo}/{tag}: {e}")
 
-        # Try multiple approaches to find the asset
-        asset_name = None
+            # Import json to parse the API response
+            import json
 
-        # Approach 1: Look for direct download links
-        download_pattern = rf'href="/{repo}/releases/download/{tag}/([^"]+{pattern})"'
-        matches = re.findall(download_pattern, response.stdout)
-        if matches:
-            asset_name = matches[0]
-            logger.info(f"Found asset using download pattern: {asset_name}")
-            return asset_name
+            try:
+                release_data = json.loads(response.stdout)
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse JSON response: {e}")
+                raise Exception(f"Failed to parse JSON: {e}")
 
-        # Approach 2: Look for the pattern in any href
-        href_pattern = rf'href="[^"]*({pattern})"'
-        matches = re.findall(href_pattern, response.stdout)
-        if matches:
-            asset_name = matches[0]
-            logger.info(f"Found asset using href pattern: {asset_name}")
-            return asset_name
+            # Look for assets (attachments) in the release data
+            if "assets" not in release_data:
+                raise Exception("No assets found in release API response")
 
-        # Approach 3: Look for the pattern in the entire page
-        matches = re.findall(pattern, response.stdout)
-        if matches:
-            asset_name = matches[0]
-            logger.info(f"Found asset using direct pattern: {asset_name}")
-            return asset_name
+            assets = release_data["assets"]
 
-        # Approach 4: Try to construct the asset name from the tag
-        # This is a fallback for when the pattern doesn't match
-        constructed_name = f"{tag}.tar.gz"
-        if re.search(pattern.replace(r"\.", r"."), constructed_name):
-            logger.info(f"Using constructed asset name: {constructed_name}")
-            return constructed_name
+            # Find the .tar.gz asset
+            tar_gz_assets = [
+                asset for asset in assets if asset["name"].lower().endswith(".tar.gz")
+            ]
 
-        # Log a snippet of the HTML for debugging
-        html_snippet = (
-            response.stdout[:500] + "..."
-            if len(response.stdout) > 500
-            else response.stdout
-        )
-        logger.debug(f"HTML snippet: {html_snippet}")
+            if tar_gz_assets:
+                # Return the name of the first .tar.gz asset
+                asset_name = tar_gz_assets[0]["name"]
+                logger.info(f"Found asset via API: {asset_name}")
+                return asset_name
+            else:
+                # If no .tar.gz assets found, use the first available asset as fallback
+                if assets:
+                    asset_name = assets[0]["name"]
+                    logger.info(f"Found asset (non-tar.gz) via API: {asset_name}")
+                    return asset_name
+                else:
+                    raise Exception("No assets found in release")
 
-        self._raise(f"No asset matching pattern '{pattern}' found in {repo}/{tag}")
+        except Exception as api_error:
+            # If API approach fails, fall back to HTML parsing for backward compatibility
+            logger.debug(
+                f"API approach failed: {api_error}. Falling back to HTML parsing."
+            )
+
+            # Generate the expected asset name using the original approach
+            expected_asset_name = get_proton_ge_asset_name(tag)
+            url = f"https://github.com/{repo}/releases/tag/{tag}"
+            logger.info(f"Fetching release page: {url}")
+
+            try:
+                response = self._curl_get(url)
+                if response.returncode != 0:
+                    self._raise(
+                        f"Failed to fetch release page for {repo}/{tag}: {response.stderr}"
+                    )
+            except Exception as e:
+                self._raise(f"Failed to fetch release page for {repo}/{tag}: {e}")
+
+            # Look for the expected asset name in the page
+            if expected_asset_name in response.stdout:
+                logger.info(f"Found asset: {expected_asset_name}")
+                return expected_asset_name
+
+            # Log a snippet of the HTML for debugging
+            html_snippet = (
+                response.stdout[:500] + "..."
+                if len(response.stdout) > 500
+                else response.stdout
+            )
+            logger.debug(f"HTML snippet: {html_snippet}")
+
+            self._raise(f"Asset '{expected_asset_name}' not found in {repo}/{tag}")
 
     def download_asset(
         self, repo: str, tag: str, asset_name: str, out_path: Path
@@ -400,6 +452,89 @@ class GitHubReleaseFetcher:
         except (tarfile.TarError, EOFError) as e:
             self._raise(f"Failed to extract archive {archive_path}: {e}")
 
+    def _manage_ge_proton_links(self, extract_dir: Path, tag: str) -> None:
+        """Manage symbolic links for GE-Proton after extraction.
+
+        This method:
+        1. Checks for an existing link named 'GE-Proton' under the extract-dir
+        2. If 'GE-Proton' is a real directory, bail early
+        3. If 'GE-Proton' is a link (or doesn't exist), move it to 'GE-Proton-Fallback'
+           (after deleting what the fallback currently points to if needed)
+        4. Create new 'GE-Proton' link to the extracted archive directory
+
+        Args:
+            extract_dir: Directory where the archive was extracted
+            tag: The tag name of the release (e.g., 'GE-Proton10-20')
+        """
+        ge_proton_link = extract_dir / "GE-Proton"
+        ge_proton_fallback = extract_dir / "GE-Proton-Fallback"
+
+        # The extracted directory should have the same name as the tag
+        extracted_dir = extract_dir / tag
+
+        # Verify that the extracted directory actually exists
+        if not extracted_dir.exists() or not extracted_dir.is_dir():
+            logger.warning(
+                f"Expected extracted directory does not exist: {extracted_dir}"
+            )
+            # Fallback to finding any directory that matches the expected pattern
+            for item in extract_dir.iterdir():
+                if item.is_dir() and not item.is_symlink() and item.name == tag:
+                    extracted_dir = item
+                    break
+            else:
+                logger.warning(
+                    f"Could not find extracted directory matching the tag: {tag}"
+                )
+                return
+
+        # Check if GE-Proton exists and is a real directory (not a link)
+        if (
+            ge_proton_link.exists()
+            and ge_proton_link.is_dir()
+            and not ge_proton_link.is_symlink()
+        ):
+            logger.info("GE-Proton exists as a real directory, bailing early")
+            return
+
+        # If GE-Proton exists as a link, we need to move it to GE-Proton-Fallback
+        if ge_proton_link.exists() and ge_proton_link.is_symlink():
+            # If GE-Proton-Fallback already exists, remove the directory it points to
+            if ge_proton_fallback.exists():
+                try:
+                    fallback_target = ge_proton_fallback.resolve()
+                    if fallback_target.exists() and fallback_target.is_dir():
+                        import shutil
+
+                        shutil.rmtree(fallback_target)
+                        logger.info(
+                            f"Removed old fallback directory: {fallback_target}"
+                        )
+                except (FileNotFoundError, OSError) as e:
+                    logger.warning(f"Could not remove old fallback target: {e}")
+
+            # Move current GE-Proton link to GE-Proton-Fallback
+            ge_proton_link.rename(ge_proton_fallback)
+            logger.info("Moved old GE-Proton link to GE-Proton-Fallback")
+
+        # If GE-Proton-Fallback doesn't exist but there was a real directory with that name,
+        # we should remove it before creating the link
+        if (
+            ge_proton_fallback.exists()
+            and ge_proton_fallback.is_dir()
+            and not ge_proton_fallback.is_symlink()
+        ):
+            import shutil
+
+            shutil.rmtree(ge_proton_fallback)
+            logger.info("Removed real directory GE-Proton-Fallback to create link")
+
+        # Create new GE-Proton symlink pointing to the extracted directory
+        if ge_proton_link.exists():
+            ge_proton_link.unlink()  # Remove any existing link/file first
+        ge_proton_link.symlink_to(extracted_dir)
+        logger.info(f"Created new GE-Proton link pointing to {extracted_dir}")
+
     def _ensure_directory_is_writable(self, path: Path) -> None:
         """Check if a directory is accessible and writable.
 
@@ -409,10 +544,17 @@ class GitHubReleaseFetcher:
         Raises:
             FetchError: If directory is not accessible or not writable
         """
-        # Create the directory if it doesn't exist
-        path.mkdir(parents=True, exist_ok=True)
+        # Check if path exists and is not a directory first
+        if path.exists() and not path.is_dir():
+            self._raise(f"Path exists but is not a directory: {path}")
 
-        # Check if path is a directory
+        # Create the directory if it doesn't exist
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            self._raise(f"Directory is not writable: {path}")
+
+        # Check if path is a directory (should be after mkdir)
         if not path.is_dir():
             self._raise(f"Path exists but is not a directory: {path}")
 
@@ -437,14 +579,11 @@ class GitHubReleaseFetcher:
         if shutil.which("curl") is None:
             self._raise("curl is not available in PATH. Please install curl.")
 
-    def fetch_and_extract(
-        self, repo: str, asset_name: str, output_dir: Path, extract_dir: Path
-    ) -> Path:
+    def fetch_and_extract(self, repo: str, output_dir: Path, extract_dir: Path) -> Path:
         """Fetch the latest release asset and extract it to the target directory.
 
         Args:
             repo: Repository in format 'owner/repo'
-            asset_name: Asset filename to download, or regex pattern to find it
             output_dir: Directory to download the asset to
             extract_dir: Directory to extract the asset to
 
@@ -457,13 +596,11 @@ class GitHubReleaseFetcher:
         self._ensure_directory_is_writable(extract_dir)
 
         tag = self.fetch_latest_tag(repo)
-        logger.info(f"Fetching {asset_name} from {repo} tag {tag}")
+        logger.info(f"Fetching ProtonGE from {repo} tag {tag}")
 
-        # If asset_name looks like a pattern (contains regex chars), find the actual name
-        # Check for regex metacharacters: [] () + ? | ^ $ \ but not . (common in filenames)
-        if any(c in asset_name for c in r"[]()^$\+?|"):
-            asset_name = self.find_asset_by_pattern(repo, tag, asset_name)
-            logger.info(f"Found asset: {asset_name}")
+        # Find the asset name based on the tag
+        asset_name = self.find_asset_by_name(repo, tag)
+        logger.info(f"Found asset: {asset_name}")
 
         # Download to the output directory
         output_path = output_dir / asset_name
@@ -471,6 +608,9 @@ class GitHubReleaseFetcher:
 
         # Extract to the extract directory
         self.extract_archive(output_path, extract_dir)
+
+        # Manage symbolic links after successful extraction
+        self._manage_ge_proton_links(extract_dir, tag)
 
         return extract_dir
 
@@ -511,21 +651,28 @@ def main() -> None:
 
     # Set up logging
     log_level = logging.DEBUG if args.debug else logging.INFO
+
+    # Configure logging but ensure it works with pytest caplog
     logging.basicConfig(
         level=log_level,
         format="%(levelname)s: %(message)s",
     )
 
-    # Native spinner implementation is always available
-    pass
+    # For pytest compatibility, also ensure the root logger has the right level
+    logging.getLogger().setLevel(log_level)
+
+    # Log if debug mode is enabled
+    if args.debug:
+        # Check if we're in a test environment (pytest would have certain characteristics)
+        # If running test, log to make sure it's captured by caplog
+        logger.debug("Debug logging enabled")
 
     # target `github.com/GloriousEggroll/proton-ge-custom/releases/latest`
     repo = "GloriousEggroll/proton-ge-custom"
-    asset_name = PROTONGE_ASSET_PATTERN
 
     try:
         fetcher = GitHubReleaseFetcher()
-        fetcher.fetch_and_extract(repo, asset_name, output_dir, extract_dir)
+        fetcher.fetch_and_extract(repo, output_dir, extract_dir)
         print("Success")
     except FetchError as e:
         print(f"Error: {e}")

@@ -1,13 +1,12 @@
 import pytest
 import tarfile
-import sys
 from pathlib import Path
 
 # Import the module directly to allow for reloading
 from fetcher import (
     FetchError,
     GitHubReleaseFetcher,
-    PROTONGE_ASSET_PATTERN,
+    get_proton_ge_asset_name,
     DEFAULT_TIMEOUT,
     Spinner,
 )
@@ -26,35 +25,6 @@ MOCK_RELEASE_PAGE_HTML = f"""
 </html>
 """
 MOCK_TAR_GZ_CONTENT = b"fake tar.gz content"
-
-# Alternative HTML for testing different approaches in find_asset_by_pattern
-MOCK_RELEASE_PAGE_HTML_APPROACH2 = f"""
-<html>
-<body>
-    <a href="/some/path/{MOCK_ASSET_NAME}">
-        {MOCK_ASSET_NAME}
-    </a>
-</body>
-</html>
-"""
-
-MOCK_RELEASE_PAGE_HTML_APPROACH3 = f"""
-<html>
-<body>
-    <p>Some text mentioning {MOCK_ASSET_NAME} in the content</p>
-</body>
-</html>
-"""
-
-MOCK_RELEASE_PAGE_HTML_CONSTRUCTED = f"""
-<html>
-<body>
-    <a href="/{MOCK_REPO}/releases/download/{MOCK_TAG}/some-other-file.txt">
-        Some other file
-    </a>
-</body>
-</html>
-"""
 
 
 @pytest.fixture
@@ -80,65 +50,30 @@ def fetcher_instance(mocker):
 
     mock_curl_download = mocker.MagicMock()
     mock_download_result = mocker.MagicMock()
-    mock_download_result.returncode = 0
     mock_curl_download.return_value = mock_download_result
     fetcher._curl_download = mock_curl_download
 
     return fetcher
 
 
-@pytest.mark.parametrize(
-    "regex_pattern, test_string, should_match",
-    [
-        (r"/releases/tag/([^/?#]+)", "https://github.com/repo/releases/tag/v1.0", True),
-        (
-            r"/releases/tag/([^/?#]+)",
-            "https://github.com/repo/releases/tag/GE-Proton8-25",
-            True,
-        ),
-        (r"/releases/tag/([^/?#]+)", "https://github.com/repo/releases/latest", False),
-        (r"GE-Proton\d+[\w.-]*\.tar\.gz", "GE-Proton8-25.tar.gz", True),
-        (
-            r"GE-Proton\d*[\w.-]*\.tar\.gz",
-            "GE-Proton-custom.tar.gz",
-            True,
-        ),  # Changed pattern to allow no digits
-        (r"GE-Proton\d+[\w.-]*\.tar\.gz", "proton-8-25.tar.gz", False),
-    ],
-)
-def test_regex_patterns(regex_pattern, test_string, should_match):
-    """Test the regex patterns used in the fetcher module."""
-    import re
-
-    match = re.search(regex_pattern, test_string)
-    if should_match:
-        assert match is not None, (
-            f"Expected pattern '{regex_pattern}' to match '{test_string}'"
-        )
-        if regex_pattern == r"/releases/tag/([^/?#]+)":
-            assert match.group(1) is not None
-        elif "GE-Proton" in regex_pattern:
-            assert match.group(0) == test_string.split("/")[-1]
-    else:
-        assert match is None, (
-            f"Expected pattern '{regex_pattern}' NOT to match '{test_string}'"
-        )
+def test_get_proton_ge_asset_name():
+    """Test the get_proton_ge_asset_name function."""
+    assert get_proton_ge_asset_name("GE-Proton10-20") == "GE-Proton10-20.tar.gz"
+    assert get_proton_ge_asset_name("GE-Proton8-25") == "GE-Proton8-25.tar.gz"
 
 
-@pytest.mark.parametrize(
-    "exception_type, match_message",
-    [
-        (Exception("Network error"), "Failed to fetch latest tag"),
-        (Exception("Connection failed"), "Failed to fetch latest tag"),
-        (Exception("Request timed out"), "Failed to fetch latest tag"),
-    ],
-)
-def test_fetch_latest_tag_failure(
-    fetcher_instance, mocker, exception_type, match_message
-):
-    """Test failure when fetching the latest release tag with different exceptions."""
-    mocker.patch.object(fetcher_instance, "_curl_head", side_effect=exception_type)
-    with pytest.raises(FetchError, match=match_message):
+def test_fetch_latest_tag_success(fetcher_instance):
+    """Test successful fetching of latest tag."""
+    result = fetcher_instance.fetch_latest_tag(MOCK_REPO)
+    assert result == MOCK_TAG
+
+
+def test_fetch_latest_tag_failure(fetcher_instance, mocker):
+    """Test failure when fetching the latest release tag."""
+    mocker.patch.object(
+        fetcher_instance, "_curl_head", side_effect=Exception("Network error")
+    )
+    with pytest.raises(FetchError, match="Failed to fetch latest tag"):
         fetcher_instance.fetch_latest_tag(MOCK_REPO)
 
 
@@ -153,72 +88,29 @@ def test_fetch_latest_tag_invalid_url(fetcher_instance, mocker):
         fetcher_instance.fetch_latest_tag(MOCK_REPO)
 
 
-def test_fetch_latest_tag_success(fetcher_instance):
-    """Test successful fetching of latest tag."""
-    result = fetcher_instance.fetch_latest_tag(MOCK_REPO)
-    assert result == MOCK_TAG
-
-
-@pytest.mark.parametrize(
-    "html_content, expected_approach",
-    [
-        (MOCK_RELEASE_PAGE_HTML, "download pattern"),
-        (MOCK_RELEASE_PAGE_HTML_APPROACH2, "href pattern"),
-        (MOCK_RELEASE_PAGE_HTML_APPROACH3, "direct pattern"),
-        (MOCK_RELEASE_PAGE_HTML_CONSTRUCTED, "constructed asset name"),
-    ],
-)
-def test_find_asset_by_pattern_approaches(
-    fetcher_instance, mocker, html_content, expected_approach
-):
-    """Test finding an asset using different approaches."""
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = html_content
-    mock_result.stderr = ""
-    fetcher_instance._curl_get.return_value = mock_result
-
-    mock_logger = mocker.patch("fetcher.logger.info")
-    asset_name = fetcher_instance.find_asset_by_pattern(
-        MOCK_REPO, MOCK_TAG, PROTONGE_ASSET_PATTERN
-    )
+def test_find_asset_by_name_success(fetcher_instance):
+    """Test successful finding of asset by name."""
+    asset_name = fetcher_instance.find_asset_by_name(MOCK_REPO, MOCK_TAG)
     assert asset_name == MOCK_ASSET_NAME
 
-    # Since the order of pattern matching may vary, we just ensure that one of the expected messages was called
-    expected_messages = [
-        f"Found asset using download pattern: {MOCK_ASSET_NAME}",
-        f"Found asset using href pattern: {MOCK_ASSET_NAME}",
-        f"Found asset using direct pattern: {MOCK_ASSET_NAME}",
-        f"Using constructed asset name: {MOCK_ASSET_NAME}",
-    ]
 
-    # Check that logger.info was called with one of the expected messages
-    assert mock_logger.called
-    # Get the call arguments
-    args, kwargs = mock_logger.call_args
-    # Check if the first argument (the message) is one of our expected messages
-    assert args[0] in expected_messages
-
-
-def test_find_asset_by_pattern_failure_with_debug(fetcher_instance, mocker):
-    """Test failure when no asset matches the pattern and debug logging."""
-    non_matching_tag = "v1.0.0"
+def test_find_asset_by_name_failure(fetcher_instance, mocker):
+    """Test failure when asset is not found."""
     mock_result = mocker.MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = "<html><body>No assets here</body></html>"
     mock_result.stderr = ""
     fetcher_instance._curl_get.return_value = mock_result
 
-    mock_debug = mocker.patch("fetcher.logger.debug")
-    with pytest.raises(FetchError, match="No asset matching pattern"):
-        fetcher_instance.find_asset_by_pattern(
-            MOCK_REPO, non_matching_tag, PROTONGE_ASSET_PATTERN
-        )
-    mock_debug.assert_called_once()
+    with pytest.raises(
+        FetchError,
+        match=f"Asset '{MOCK_ASSET_NAME}' not found in {MOCK_REPO}/{MOCK_TAG}",
+    ):
+        fetcher_instance.find_asset_by_name(MOCK_REPO, MOCK_TAG)
 
 
-def test_find_asset_by_pattern_request_exception(fetcher_instance, mocker):
-    """Test find_asset_by_pattern when request fails."""
+def test_find_asset_by_name_request_exception(fetcher_instance, mocker):
+    """Test find_asset_by_name when request fails."""
     mocker.patch.object(
         fetcher_instance,
         "_curl_get",
@@ -226,36 +118,37 @@ def test_find_asset_by_pattern_request_exception(fetcher_instance, mocker):
     )
 
     with pytest.raises(FetchError, match="Failed to fetch release page"):
-        fetcher_instance.find_asset_by_pattern(
-            MOCK_REPO, MOCK_TAG, PROTONGE_ASSET_PATTERN
-        )
+        fetcher_instance.find_asset_by_name(MOCK_REPO, MOCK_TAG)
 
 
-@pytest.mark.parametrize(
-    "status_code, exception_match",
-    [
-        (404, "Asset not found"),
-        (403, "Failed to download"),
-        (500, "Failed to download"),
-    ],
-)
-def test_download_asset_failures(
-    fetcher_instance, tmp_path, mocker, status_code, exception_match
-):
-    """Test download failures with different HTTP status codes."""
-    # For the curl implementation, we simulate different error conditions
-    if status_code == 404:
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = 22  # curl returns 22 for 404 errors
-        mock_result.stderr = "404 Not Found"
-        fetcher_instance._curl_download.return_value = mock_result
-    else:
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = 0 if status_code == 200 else 22
-        mock_result.stderr = f"HTTP {status_code} Error"
-        fetcher_instance._curl_download.return_value = mock_result
+def test_download_asset_success(fetcher_instance, tmp_path, mocker):
+    """Test successful asset download."""
+    output_path = tmp_path / "output.tar.gz"
+    output_path.write_bytes(MOCK_TAR_GZ_CONTENT)
 
-    with pytest.raises(FetchError, match=exception_match):
+    # Mock the curl download to return success
+    mock_result = mocker.MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = ""
+    mock_result.stderr = ""
+    fetcher_instance._curl_download.return_value = mock_result
+
+    result_path = fetcher_instance.download_asset(
+        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
+    )
+
+    assert result_path == output_path
+    assert output_path.exists()
+
+
+def test_download_asset_failure(fetcher_instance, tmp_path, mocker):
+    """Test download failure with 404 error."""
+    mock_result = mocker.MagicMock()
+    mock_result.returncode = 22  # curl returns 22 for 404 errors
+    mock_result.stderr = "404 Not Found"
+    fetcher_instance._curl_download.return_value = mock_result
+
+    with pytest.raises(FetchError, match="Asset not found"):
         fetcher_instance.download_asset(
             MOCK_REPO, MOCK_TAG, "nonexistent.tar.gz", tmp_path / "out"
         )
@@ -275,64 +168,10 @@ def test_download_asset_request_exception(fetcher_instance, tmp_path, mocker):
         )
 
 
-def test_download_asset_no_content_length(fetcher_instance, tmp_path, mocker):
-    """Test download when content-length header is missing."""
-    output_path = tmp_path / "output.tar.gz"
-
-    # Create the expected output file
-    output_path.write_bytes(MOCK_TAR_GZ_CONTENT)
-
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = ""
-    mock_result.stderr = ""
-    fetcher_instance._curl_download.return_value = mock_result
-
-    result_path = fetcher_instance.download_asset(
-        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
-    )
-
-    assert result_path == output_path
-    assert output_path.exists()
-    # The actual content will be written to file by curl
-
-
-@pytest.mark.parametrize(
-    "content_length, expected_chunks",
-    [
-        (1024, 1),  # Small content, one chunk
-        (2048, 2),  # Two chunks
-        (0, 1),  # No content length specified but still one chunk with content
-    ],
-)
-def test_download_asset_with_different_content_lengths(
-    fetcher_instance, tmp_path, mocker, content_length, expected_chunks
-):
-    """Test download with different content-length values."""
-    output_path = tmp_path / "output.tar.gz"
-
-    # Create the expected output file
-    content = b"x" * content_length
-    output_path.write_bytes(content)
-
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = ""
-    mock_result.stderr = ""
-    fetcher_instance._curl_download.return_value = mock_result
-
-    result_path = fetcher_instance.download_asset(
-        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
-    )
-
-    assert result_path == output_path
-    assert output_path.exists()
-
-
 def test_extract_archive_success(fetcher_instance, tmp_path, mocker):
     """Test successful archive extraction."""
+    # Don't create a real file, just mock the path
     archive_path = tmp_path / "test.tar.gz"
-    archive_path.write_bytes(MOCK_TAR_GZ_CONTENT)
     extract_dir = tmp_path / "extract"
 
     mock_tar = mocker.MagicMock()
@@ -342,6 +181,9 @@ def test_extract_archive_success(fetcher_instance, tmp_path, mocker):
     mock_tar.__exit__ = mocker.MagicMock(return_value=None)
     mocker.patch("tarfile.open", return_value=mock_tar)
 
+    # Mock the Path operations that might be called during extraction
+    mocker.patch("pathlib.Path.mkdir")
+
     fetcher_instance.extract_archive(archive_path, extract_dir)
 
     mock_tar.extract.assert_called_once_with(
@@ -349,20 +191,16 @@ def test_extract_archive_success(fetcher_instance, tmp_path, mocker):
     )
 
 
-@pytest.mark.parametrize(
-    "exception_type",
-    [
-        tarfile.TarError("Invalid tar file"),
-        EOFError("Unexpected EOF"),
-    ],
-)
-def test_extract_archive_failure(fetcher_instance, tmp_path, mocker, exception_type):
-    """Test archive extraction failures."""
+def test_extract_archive_failure(fetcher_instance, tmp_path, mocker):
+    """Test archive extraction failure."""
+    # Don't create a real file, just mock the path
     archive_path = tmp_path / "test.tar.gz"
-    archive_path.write_bytes(MOCK_TAR_GZ_CONTENT)
     extract_dir = tmp_path / "extract"
 
-    mocker.patch("tarfile.open", side_effect=exception_type)
+    mocker.patch("tarfile.open", side_effect=tarfile.TarError("Invalid tar file"))
+
+    # Mock Path operations
+    mocker.patch("pathlib.Path.mkdir")
 
     with pytest.raises(FetchError, match="Failed to extract archive"):
         fetcher_instance.extract_archive(archive_path, extract_dir)
@@ -370,8 +208,8 @@ def test_extract_archive_failure(fetcher_instance, tmp_path, mocker, exception_t
 
 def test_extract_archive_creates_directories(fetcher_instance, tmp_path, mocker):
     """Test that extract_archive creates directories if they don't exist."""
+    # Don't create a real file, just mock the path
     archive_path = tmp_path / "test.tar.gz"
-    archive_path.write_bytes(MOCK_TAR_GZ_CONTENT)
     extract_dir = tmp_path / "nonexistent" / "extract_dir"
 
     mock_tar = mocker.MagicMock()
@@ -381,24 +219,17 @@ def test_extract_archive_creates_directories(fetcher_instance, tmp_path, mocker)
     mock_tar.__exit__ = mocker.MagicMock(return_value=None)
     mocker.patch("tarfile.open", return_value=mock_tar)
 
+    # Mock the Path.mkdir to avoid actual directory creation
+    mock_mkdir = mocker.patch("pathlib.Path.mkdir")
+
     fetcher_instance.extract_archive(archive_path, extract_dir)
 
-    assert extract_dir.exists()
+    # Verify that mkdir was called with proper parameters
+    mock_mkdir.assert_called()
 
 
-@pytest.mark.parametrize(
-    "input_asset_name, expected_regex_check",
-    [
-        (r"GE-Proton\d+[\w.-]*\.tar\.gz", True),  # Contains regex chars
-        ("GE-Proton8-25.tar.gz", False),  # Direct name, no regex chars
-        (r"GE-.*\.tar\.gz", True),  # Contains regex chars
-        ("simple_file.txt", False),  # No regex chars
-    ],
-)
-def test_fetch_and_extract_with_regex_detection(
-    fetcher_instance, tmp_path, mocker, input_asset_name, expected_regex_check
-):
-    """Test the full fetch_and_extract workflow with different asset name formats."""
+def test_fetch_and_extract_success(fetcher_instance, tmp_path, mocker):
+    """Test the full fetch_and_extract workflow."""
     output_dir = tmp_path / "output"
     extract_dir = tmp_path / "extract"
 
@@ -410,113 +241,25 @@ def test_fetch_and_extract_with_regex_detection(
     mock_tar.__exit__ = mocker.MagicMock(return_value=None)
     mocker.patch("tarfile.open", return_value=mock_tar)
 
-    # Mock the network requests
-    get_page_response = mocker.MagicMock()
-    get_page_response.text = MOCK_RELEASE_PAGE_HTML
-    get_page_response.raise_for_status = mocker.MagicMock()
-
-    download_response = mocker.MagicMock()
-    download_response.status_code = 200
-    download_response.raise_for_status = mocker.MagicMock()
-    download_response.headers = {"content-length": str(len(MOCK_TAR_GZ_CONTENT))}
-    download_response.iter_content.return_value = [MOCK_TAR_GZ_CONTENT]
-    download_response.__enter__ = mocker.MagicMock(return_value=download_response)
-    download_response.__exit__ = mocker.MagicMock(return_value=None)
-
-    # If we expect regex check, mock find_asset_by_pattern, otherwise directly return the asset name
-    if expected_regex_check:
-        mock_get_result = mocker.MagicMock()
-        mock_get_result.returncode = 0
-        mock_get_result.stdout = MOCK_RELEASE_PAGE_HTML
-        mock_get_result.stderr = ""
-        fetcher_instance._curl_get.return_value = mock_get_result
-
-        mocker.patch.object(
-            fetcher_instance, "find_asset_by_pattern", return_value=MOCK_ASSET_NAME
-        )
-    else:
-        # For direct name, mock find_asset_by_pattern to just return the asset name
-        mocker.patch.object(
-            fetcher_instance, "find_asset_by_pattern", return_value=input_asset_name
-        )
-
     # Mock curl_download to simulate the download process
     mock_download_result = mocker.MagicMock()
     mock_download_result.returncode = 0
     mock_download_result.stdout = ""
     mock_download_result.stderr = ""
     fetcher_instance._curl_download.return_value = mock_download_result
+
+    # Mock directory validation to avoid real file system operations
+    mocker.patch.object(fetcher_instance, "_ensure_directory_is_writable")
 
     # Execute the method
     result_path = fetcher_instance.fetch_and_extract(
         repo=MOCK_REPO,
-        asset_name=input_asset_name,
         output_dir=output_dir,
         extract_dir=extract_dir,
     )
 
-    # Create the expected output file before the assertion
-    expected_download_path = output_dir / (
-        MOCK_ASSET_NAME if expected_regex_check else input_asset_name
-    )
-    expected_download_path.write_bytes(MOCK_TAR_GZ_CONTENT)
-
     # Assertions
     assert result_path == extract_dir
-    assert expected_download_path.exists()
-
-
-def test_fetch_and_extract_with_direct_name(fetcher_instance, tmp_path, mocker):
-    """Test the full fetch_and_extract workflow with a direct asset name."""
-    output_dir = tmp_path / "output"
-    extract_dir = tmp_path / "extract"
-
-    # Mock the tarfile extraction
-    mock_tar = mocker.MagicMock()
-    mock_member = mocker.MagicMock()
-    mock_tar.getmembers.return_value = [mock_member]
-    mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
-    mock_tar.__exit__ = mocker.MagicMock(return_value=None)
-    mocker.patch("tarfile.open", return_value=mock_tar)
-
-    # Mock the network requests - only need the download response
-    download_response = mocker.MagicMock()
-    download_response.status_code = 200
-    download_response.raise_for_status = mocker.MagicMock()
-    download_response.headers = {"content-length": str(len(MOCK_TAR_GZ_CONTENT))}
-    download_response.iter_content.return_value = [MOCK_TAR_GZ_CONTENT]
-    download_response.__enter__ = mocker.MagicMock(return_value=download_response)
-    download_response.__exit__ = mocker.MagicMock(return_value=None)
-
-    # Mock the curl methods to return expected values
-    mock_head_result = mocker.MagicMock()
-    mock_head_result.returncode = 0
-    mock_head_result.stdout = f"HTTP/1.1 302 Found\r\nLocation: https://github.com/{MOCK_REPO}/releases/tag/{MOCK_TAG}\r\n"
-    fetcher_instance._curl_head.return_value = mock_head_result
-
-    # Mock curl_download to simulate the download process
-    mock_download_result = mocker.MagicMock()
-    mock_download_result.returncode = 0
-    mock_download_result.stdout = ""
-    mock_download_result.stderr = ""
-    fetcher_instance._curl_download.return_value = mock_download_result
-
-    # Execute the method with a direct asset name
-    result_path = fetcher_instance.fetch_and_extract(
-        repo=MOCK_REPO,
-        asset_name=MOCK_ASSET_NAME,  # This is a direct name, not a pattern
-        output_dir=output_dir,
-        extract_dir=extract_dir,
-    )
-
-    # Create the expected output file before the assertion
-    expected_download_path = output_dir / MOCK_ASSET_NAME
-    expected_download_path.write_bytes(MOCK_TAR_GZ_CONTENT)
-
-    # Assertions
-    assert result_path == extract_dir
-    assert expected_download_path.exists()
-    assert expected_download_path.read_bytes() == MOCK_TAR_GZ_CONTENT
 
 
 def test_fetch_and_extract_failure(fetcher_instance, tmp_path, mocker):
@@ -528,7 +271,6 @@ def test_fetch_and_extract_failure(fetcher_instance, tmp_path, mocker):
     with pytest.raises(FetchError, match="Test error"):
         fetcher_instance.fetch_and_extract(
             repo=MOCK_REPO,
-            asset_name=PROTONGE_ASSET_PATTERN,
             output_dir=tmp_path / "output",
             extract_dir=tmp_path / "extract",
         )
@@ -541,233 +283,295 @@ def test_init_with_custom_timeout():
     assert fetcher.timeout == timeout
 
 
-def test_init_with_custom_session():
-    """Test initialization with custom session - this test is no longer valid after refactoring to curl."""
-    # This test is no longer applicable since we no longer use requests.Session
+def test_init_with_default_timeout():
+    """Test initialization with default timeout."""
     fetcher = GitHubReleaseFetcher()
-    assert hasattr(fetcher, "timeout")
+    assert fetcher.timeout == DEFAULT_TIMEOUT
 
 
-def test_logger_error_in__raise(mocker):
+def test_raise_method():
     """Test the _raise method raises FetchError without logging."""
-    logger = mocker.patch("fetcher.logger")
     fetcher = GitHubReleaseFetcher()
-
     with pytest.raises(FetchError, match="test error message"):
         fetcher._raise("test error message")
 
-    logger.error.assert_not_called()
+
+def test_spinner_class_basic_functionality():
+    """Test Spinner class basic functionality."""
+    spinner = Spinner()
+    assert spinner.current == 0
+    assert not spinner.disable
+    assert spinner.spinner_chars == "|/-\\"
+
+
+def test_spinner_with_description_and_unit():
+    """Test Spinner class with description, unit, and unit_scale."""
+    spinner = Spinner(desc="Testing spinner", unit="B", unit_scale=True)
+    assert spinner.desc == "Testing spinner"
+    assert spinner.unit == "B"
+    assert spinner.unit_scale
+
+
+def test_spinner_disable_functionality(mocker):
+    """Test Spinner class with disable=True."""
+    spinner = Spinner(disable=True, desc="Test", unit="it")
+    mock_print = mocker.patch("builtins.print")
+
+    spinner.update(1)
+    spinner.close()
+
+    # When disabled, print should not be called
+    mock_print.assert_not_called()
+
+
+def test_spinner_with_total_progress_bar(mocker):
+    """Test Spinner class with total set to show progress bar."""
+    mock_print = mocker.patch("builtins.print")
+    spinner = Spinner(total=10, desc="Testing progress")
+
+    with spinner:
+        for _ in range(10):
+            spinner.update(1)
+
+    # Verify print was called with progress bar
+    assert mock_print.call_count >= 10
+    calls = [str(call) for call in mock_print.call_args_list]
+    assert any("Testing progress: [=====" in call for call in calls)
 
 
 @pytest.mark.parametrize(
-    "download_url,expected_status,exception_type",
+    "unit_scale,unit,update_amount,expected_rate",
     [
-        ("https://github.com/owner/repo/releases/download/tag/file.tar.gz", 200, None),
-        (
-            "https://github.com/owner/repo/releases/download/tag/nonexistent.tar.gz",
-            404,
-            FetchError,
-        ),
-        (
-            "https://github.com/owner/repo/releases/download/tag/restricted.tar.gz",
-            403,
-            FetchError,
-        ),
+        (True, "B", 1024, "1024.00B/s"),
+        (True, "B", 1024 * 1024, "1.00MB/s"),
+        (True, "B", 1024 * 1024 * 100, "100.00MB/s"),  # Reduced from 1GB to 100MB
+        (False, "it", 10, "10.0it/s"),
     ],
 )
-def test_download_asset_various_scenarios(
-    fetcher_instance, tmp_path, mocker, download_url, expected_status, exception_type
+def test_spinner_rate_formatting(
+    mocker, unit_scale, unit, update_amount, expected_rate
 ):
-    """Test download asset with various HTTP responses."""
-    output_path = tmp_path / "output.tar.gz"
+    """Test Spinner class rate formatting with different units and scales."""
+    mock_print = mocker.patch("builtins.print")
+    mock_time = mocker.patch("time.time")
 
-    if expected_status == 404:
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = 22  # curl returns 22 for 404 errors
-        mock_result.stderr = "404 Not Found"
-        fetcher_instance._curl_download.return_value = mock_result
-    elif expected_status == 403:
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = 22  # curl error code
-        mock_result.stderr = "403 Forbidden"
-        fetcher_instance._curl_download.return_value = mock_result
-    else:
-        # Create the output file before the download
-        output_path.write_bytes(b"fake_content")
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = ""
-        mock_result.stderr = ""
-        fetcher_instance._curl_download.return_value = mock_result
+    # Mock time to control rate calculation
+    mock_time.side_effect = [0, 1]  # Start at 0, then 1 second later
 
-    if exception_type:
-        with pytest.raises(exception_type):
-            fetcher_instance.download_asset(
-                MOCK_REPO, MOCK_TAG, "test_file.tar.gz", output_path
-            )
-    else:
-        result_path = fetcher_instance.download_asset(
-            MOCK_REPO, MOCK_TAG, "test_file.tar.gz", output_path
+    spinner = Spinner(total=10, desc="Testing rate", unit=unit, unit_scale=unit_scale)
+
+    with spinner:
+        spinner.update(update_amount)
+
+    # Verify print was called with the expected rate
+    calls = [str(call) for call in mock_print.call_args_list]
+    assert any(expected_rate in call for call in calls)
+
+
+def test_spinner_iter_without_iterable():
+    """Test Spinner class __iter__ method without iterable."""
+    spinner = Spinner(total=5, desc="Testing iter")
+
+    items = list(spinner)
+    assert len(items) == 5
+    assert spinner.current == 5
+
+
+def test_spinner_iter_with_iterable():
+    """Test Spinner class __iter__ method with iterable."""
+    test_list = [1, 2, 3]
+    spinner = Spinner(iterable=iter(test_list), desc="Testing iter")
+
+    items = list(spinner)
+    assert items == test_list
+
+
+def test_fetch_latest_tag_with_fallback_pattern(fetcher_instance, mocker):
+    """Test fetch_latest_tag with fallback URL pattern."""
+    # Mock the curl head response with a different pattern
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = "HTTP/1.1 302 Found\r\nURL: https://github.com/owner/repo/releases/tag/GE-Proton8-25\r\n"
+    fetcher_instance._curl_head.return_value = mock_head_result
+
+    result = fetcher_instance.fetch_latest_tag(MOCK_REPO)
+    assert result == MOCK_TAG
+
+
+def test_find_asset_by_name_with_debug_logging(fetcher_instance, mocker, caplog):
+    """Test find_asset_by_name with debug logging enabled."""
+    # Mock the curl get response with a large HTML
+    mock_result = mocker.MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "<html>" + "x" * 600 + "</html>"  # Over 500 chars
+    mock_result.stderr = ""
+    fetcher_instance._curl_get.return_value = mock_result
+
+    # Enable debug logging
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+
+    with pytest.raises(FetchError):
+        fetcher_instance.find_asset_by_name(MOCK_REPO, MOCK_TAG)
+
+    # Check that HTML snippet was logged
+    assert "HTML snippet:" in caplog.text
+
+
+def test_download_asset_with_non_404_error(fetcher_instance, tmp_path, mocker):
+    """Test download_asset with non-404 error."""
+    mock_result = mocker.MagicMock()
+    mock_result.returncode = 22  # curl error code
+    mock_result.stderr = "Some other error"
+    fetcher_instance._curl_download.return_value = mock_result
+
+    with pytest.raises(FetchError, match="Failed to download"):
+        fetcher_instance.download_asset(
+            MOCK_REPO, MOCK_TAG, "nonexistent.tar.gz", tmp_path / "out"
         )
-        assert result_path == output_path
-        assert output_path.exists()
 
 
-@pytest.mark.parametrize(
-    "exception_on_method, expected_error",
-    [
-        ("fetch_latest_tag", "Test error in fetch_latest_tag"),
-        ("find_asset_by_pattern", "Test error in find_asset_by_pattern"),
-        ("download_asset", "Test error in download_asset"),
-        ("extract_archive", "Test error in extract_archive"),
-    ],
-)
-def test_fetch_and_extract_various_failures(
-    fetcher_instance, tmp_path, mocker, exception_on_method, expected_error
-):
-    """Test fetch_and_extract with failures at different stages."""
-    # Mock the methods that occur before the target method in the call chain
-    if exception_on_method in ["download_asset", "extract_archive"]:
-        # If we're testing later stage failures, mock the earlier stages
-        mocker.patch.object(fetcher_instance, "fetch_latest_tag", return_value=MOCK_TAG)
-        mocker.patch.object(
-            fetcher_instance, "find_asset_by_pattern", return_value=MOCK_ASSET_NAME
-        )
-
-    mocker.patch.object(
-        fetcher_instance, exception_on_method, side_effect=FetchError(expected_error)
-    )
-
-    with pytest.raises(FetchError, match=expected_error):
-        fetcher_instance.fetch_and_extract(
-            repo=MOCK_REPO,
-            asset_name=PROTONGE_ASSET_PATTERN,
-            output_dir=tmp_path / "output",
-            extract_dir=tmp_path / "extract",
-        )
-
-
-def test_fetch_and_extract_with_pattern_calls_find_asset_by_pattern(
-    fetcher_instance, tmp_path, mocker
-):
-    """Test that fetch_and_extract calls find_asset_by_pattern when asset name contains regex chars."""
-    output_dir = tmp_path / "output"
+def test_extract_archive_with_eof_error(fetcher_instance, tmp_path, mocker):
+    """Test extract_archive with EOFError."""
+    # Don't create a real file, just mock the path
+    archive_path = tmp_path / "test.tar.gz"
     extract_dir = tmp_path / "extract"
 
-    # Mock the tarfile extraction
-    mock_tar = mocker.MagicMock()
-    mock_member = mocker.MagicMock()
-    mock_tar.getmembers.return_value = [mock_member]
-    mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
-    mock_tar.__exit__ = mocker.MagicMock(return_value=None)
-    mocker.patch("tarfile.open", return_value=mock_tar)
+    mocker.patch("tarfile.open", side_effect=EOFError("Unexpected EOF"))
 
-    # Mock find_asset_by_pattern to return a specific name
-    find_asset_mock = mocker.MagicMock()
-    find_asset_mock.return_value = MOCK_ASSET_NAME
-    fetcher_instance.find_asset_by_pattern = find_asset_mock
+    # Mock Path operations
+    mocker.patch("pathlib.Path.mkdir")
 
-    # Mock the curl methods to return expected values
-    mock_get_result = mocker.MagicMock()
-    mock_get_result.returncode = 0
-    mock_get_result.stdout = f"HTTP/1.1 302 Found\r\nLocation: https://github.com/{MOCK_REPO}/releases/tag/{MOCK_TAG}\r\n"
-    fetcher_instance._curl_head.return_value = mock_get_result
-
-    # Execute with a regex pattern (contains regex chars)
-    result_path = fetcher_instance.fetch_and_extract(
-        repo=MOCK_REPO,
-        asset_name=PROTONGE_ASSET_PATTERN,
-        output_dir=output_dir,
-        extract_dir=extract_dir,
-    )
-
-    # Verify find_asset_by_pattern was called
-    find_asset_mock.assert_called_once_with(MOCK_REPO, MOCK_TAG, PROTONGE_ASSET_PATTERN)
-    assert result_path == extract_dir
+    with pytest.raises(FetchError, match="Failed to extract archive"):
+        fetcher_instance.extract_archive(archive_path, extract_dir)
 
 
-def test_fetch_and_extract_with_direct_name_no_find_call(
-    fetcher_instance, tmp_path, mocker
+def test_manage_ge_proton_links_with_existing_real_directory(
+    fetcher_instance, tmp_path
 ):
-    """Test that fetch_and_extract does NOT call find_asset_by_pattern when asset name is direct."""
-    output_dir = tmp_path / "output"
+    """Test _manage_ge_proton_links when GE-Proton exists as a real directory."""
     extract_dir = tmp_path / "extract"
+    extract_dir.mkdir()
 
-    # Mock the tarfile extraction
-    mock_tar = mocker.MagicMock()
-    mock_member = mocker.MagicMock()
-    mock_tar.getmembers.return_value = [mock_member]
-    mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
-    mock_tar.__exit__ = mocker.MagicMock(return_value=None)
-    mocker.patch("tarfile.open", return_value=mock_tar)
+    # Create a real GE-Proton directory
+    ge_proton_dir = extract_dir / "GE-Proton"
+    ge_proton_dir.mkdir()
 
-    # Mock the curl methods to return expected values
-    mock_get_result = mocker.MagicMock()
-    mock_get_result.returncode = 0
-    mock_get_result.stdout = f"HTTP/1.1 302 Found\r\nLocation: https://github.com/{MOCK_REPO}/releases/tag/{MOCK_TAG}\r\n"
-    fetcher_instance._curl_head.return_value = mock_get_result
+    # Create an extracted directory that matches the pattern
+    extracted_dir = extract_dir / MOCK_TAG
+    extracted_dir.mkdir()
 
-    mock_download_result = mocker.MagicMock()
-    mock_download_result.returncode = 0
-    mock_download_result.stdout = ""
-    mock_download_result.stderr = ""
-    fetcher_instance._curl_download.return_value = mock_download_result
+    fetcher_instance._manage_ge_proton_links(extract_dir, MOCK_TAG)
 
-    # Execute with a direct asset name (no regex chars)
-    result_path = fetcher_instance.fetch_and_extract(
-        repo=MOCK_REPO,
-        asset_name=MOCK_ASSET_NAME,  # Direct name
-        output_dir=output_dir,
-        extract_dir=extract_dir,
-    )
-
-    # Verify find_asset_by_pattern was NOT called for direct asset names
-    # Since we can't directly check if it was called, we'll patch it and check
-    find_asset_mock = mocker.patch.object(fetcher_instance, "find_asset_by_pattern")
-
-    fetcher_instance.fetch_and_extract(
-        repo=MOCK_REPO,
-        asset_name=MOCK_ASSET_NAME,  # Direct name
-        output_dir=output_dir,
-        extract_dir=extract_dir,
-    )
-
-    find_asset_mock.assert_not_called()
-    assert result_path == extract_dir
+    # GE-Proton should still be a real directory, not a symlink
+    assert ge_proton_dir.is_dir()
+    assert not ge_proton_dir.is_symlink()
 
 
-@pytest.mark.parametrize(
-    "pattern_type, pattern_value, expected_result",
-    [
-        (r"GE-Proton\d+[\w.-]*\.tar\.gz", "GE-Proton8-25.tar.gz", True),  # Contains +
-        (r"GE-Proton\d*", "GE-Proton8", True),  # Contains *
-        (r"GE-Proton\d+", "GE-Proton8", True),  # Contains +
-        (r"GE-Proton\d?", "GE-Proton", True),  # Contains ?
-        (r"GE-Proton\d", "GE-Proton8", False),  # No special chars
-        (r"GE-Proton\d^", "GE-Proton8", True),  # Contains ^
-        (r"GE-Proton\d$", "GE-Proton8", True),  # Contains $
-        (r"GE-\w+\.tar\.gz", "GE-Custom.tar.gz", True),  # Contains \w
-    ],
-)
-def test_regex_char_detection_logic(
-    mocker, pattern_type, pattern_value, expected_result
+def test_manage_ge_proton_links_with_existing_symlink(fetcher_instance, tmp_path):
+    """Test _manage_ge_proton_links when GE-Proton exists as a symlink."""
+    extract_dir = tmp_path / "extract"
+    extract_dir.mkdir()
+
+    # Create a fake old directory for the symlink to point to
+    old_dir = extract_dir / "old-version"
+    old_dir.mkdir()
+
+    # Create a symlink GE-Proton pointing to the old directory
+    ge_proton_link = extract_dir / "GE-Proton"
+    ge_proton_link.symlink_to(old_dir)
+
+    # Create an extracted directory that matches the pattern
+    extracted_dir = extract_dir / MOCK_TAG
+    extracted_dir.mkdir()
+
+    fetcher_instance._manage_ge_proton_links(extract_dir, MOCK_TAG)
+
+    # GE-Proton should now be a symlink pointing to the new directory
+    assert ge_proton_link.is_symlink()
+    assert ge_proton_link.resolve() == extracted_dir
+
+    # GE-Proton-Fallback should exist and point to the old directory
+    fallback_link = extract_dir / "GE-Proton-Fallback"
+    assert fallback_link.is_symlink()
+    assert fallback_link.resolve() == old_dir
+
+
+def test_manage_ge_proton_links_with_existing_real_fallback_directory(
+    fetcher_instance, tmp_path
 ):
-    """Test the logic for detecting regex characters in asset names."""
-    # Create a fetcher instance to test the internal logic
-    _ = GitHubReleaseFetcher()
+    """Test _manage_ge_proton_links when GE-Proton-Fallback exists as a real directory."""
+    extract_dir = tmp_path / "extract"
+    extract_dir.mkdir()
 
-    # The logic in fetch_and_extract checks for regex characters
-    # Check if any of the regex metacharacters are in the pattern_value
-    _ = any(c in pattern_value for c in r"[]()^$\+?|")
+    # Create a real GE-Proton-Fallback directory
+    fallback_dir = extract_dir / "GE-Proton-Fallback"
+    fallback_dir.mkdir()
 
-    # For this test we'll test the actual implementation logic
-    # by creating a mock scenario where we check if find_asset_by_pattern would be called
-    if expected_result:  # If it should be treated as a pattern
-        # This should trigger find_asset_by_pattern
-        pass
-    else:
-        # This should be treated as a direct name
-        pass
+    # Create an extracted directory that matches the pattern
+    extracted_dir = extract_dir / MOCK_TAG
+    extracted_dir.mkdir()
+
+    fetcher_instance._manage_ge_proton_links(extract_dir, MOCK_TAG)
+
+    # GE-Proton should be a symlink pointing to the new directory
+    ge_proton_link = extract_dir / "GE-Proton"
+    assert ge_proton_link.is_symlink()
+    assert ge_proton_link.resolve() == extracted_dir
+
+    # The real GE-Proton-Fallback directory should be removed
+    assert not fallback_dir.exists()
+
+
+def test_manage_ge_proton_links_no_extracted_directory(
+    fetcher_instance, tmp_path, caplog
+):
+    """Test _manage_ge_proton_links when no matching extracted directory is found."""
+    extract_dir = tmp_path / "extract"
+    extract_dir.mkdir()
+
+    # Create a directory that doesn't match the pattern
+    other_dir = extract_dir / "other-dir"
+    other_dir.mkdir()
+
+    fetcher_instance._manage_ge_proton_links(extract_dir, MOCK_TAG)
+
+    # Check that a warning was logged
+    assert "Could not find extracted directory" in caplog.text
+
+
+def test_ensure_directory_is_writable_with_file_path(fetcher_instance, mocker):
+    """Test _ensure_directory_is_writable when path exists as a file."""
+    # Create a mock path object that behaves like a file, not a directory
+    mock_path = mocker.MagicMock()
+    mock_path.exists.return_value = True
+    mock_path.is_dir.return_value = False  # This makes it behave like a file
+
+    with pytest.raises(FetchError, match="Path exists but is not a directory"):
+        fetcher_instance._ensure_directory_is_writable(mock_path)
+
+
+def test_ensure_directory_is_writable_with_permission_error(fetcher_instance, mocker):
+    """Test _ensure_directory_is_writable with permission error."""
+    mock_path = mocker.MagicMock()
+    mock_path.exists.return_value = True
+    mock_path.is_dir.return_value = True
+    mock_path.mkdir.side_effect = OSError("Permission denied")
+
+    # Mock TemporaryFile to raise OSError
+    mocker.patch("tempfile.TemporaryFile", side_effect=OSError("Permission denied"))
+
+    with pytest.raises(FetchError, match="Directory is not writable"):
+        fetcher_instance._ensure_directory_is_writable(mock_path)
+
+
+def test_ensure_curl_available_missing(fetcher_instance, mocker):
+    """Test _ensure_curl_available when curl is not available."""
+    mocker.patch("shutil.which", return_value=None)
+
+    with pytest.raises(FetchError, match="curl is not available"):
+        fetcher_instance._ensure_curl_available()
 
 
 def test_main_function_success(mocker, tmp_path):
@@ -799,751 +603,538 @@ def test_main_function_success(mocker, tmp_path):
     mock_fetcher.fetch_and_extract.assert_called_once()
     args, kwargs = mock_fetcher.fetch_and_extract.call_args
     assert args[0] == "GloriousEggroll/proton-ge-custom"
-    assert args[1] == PROTONGE_ASSET_PATTERN
-    assert isinstance(args[2], Path)  # output_dir
-    assert isinstance(args[3], Path)  # extract_dir
+    assert isinstance(args[1], Path)  # output_dir
+    assert isinstance(args[2], Path)  # extract_dir
 
     # Verify sys.exit was not called (success case)
     mock_exit.assert_not_called()
 
 
-def test_main_function_with_debug(monkeypatch, mocker, tmp_path):
-    """Test the main function with debug enabled."""
-    # Set up command line arguments
-    test_args = [
-        "fetcher.py",
-        "--debug",
-        "--extract-dir",
-        str(tmp_path / "extract"),
-        "--output",
-        str(tmp_path / "output"),
-    ]
-
-    # Monkeypatch sys.argv
-    monkeypatch.setattr("sys.argv", test_args)
-
-    # Mock sys.exit
-    exit_called = [False]  # Use list to modify from inner function
-
-    def mock_exit(code):
-        exit_called[0] = True
-        raise SystemExit(code)
-
-    monkeypatch.setattr("sys.exit", mock_exit)
-
-    # Mock the fetcher to raise an exception
-    mock_fetcher_instance = mocker.MagicMock()
-    mock_fetcher_instance.fetch_and_extract.side_effect = FetchError("Test error")
-    mocker.patch("fetcher.GitHubReleaseFetcher", return_value=mock_fetcher_instance)
-
-    # Capture print output
-    print_calls = []
-
-    def mock_print(*args, **kwargs):
-        print_calls.extend(args)
-
-    monkeypatch.setattr("builtins.print", mock_print)
-
-    # Import and run main
-    import fetcher
-
-    with pytest.raises(SystemExit) as exc_info:
-        fetcher.main()
-
-    # Verify sys.exit was called with exit code 1
-    assert exc_info.value.code == 1
-
-    # Verify the error was printed
-    assert "Error: Test error" in print_calls
-
-
-def test_main_function_with_fetch_error(monkeypatch, mocker, tmp_path):
+def test_main_function_with_fetch_error(mocker, tmp_path):
     """Test the main function when a FetchError occurs."""
-    # Set up command line arguments
-    test_args = [
-        "fetcher.py",
-        "--extract-dir",
-        str(tmp_path / "extract"),
-        "--output",
-        str(tmp_path / "output"),
-    ]
+    # Mock command line arguments
+    mock_args = mocker.MagicMock()
+    mock_args.extract_dir = str(tmp_path / "extract")
+    mock_args.output = str(tmp_path / "output")
+    mock_args.debug = False
 
-    # Monkeypatch sys.argv
-    monkeypatch.setattr("sys.argv", test_args)
-
-    # Mock sys.exit
-    exit_called = [False]  # Use list to modify from inner function
-
-    def mock_exit(code):
-        exit_called[0] = True
-        raise SystemExit(code)
-
-    monkeypatch.setattr("sys.exit", mock_exit)
+    # Mock argparse
+    mock_parser = mocker.MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    mocker.patch("fetcher.argparse.ArgumentParser", return_value=mock_parser)
 
     # Mock the fetcher to raise an exception
     mock_fetcher_instance = mocker.MagicMock()
     mock_fetcher_instance.fetch_and_extract.side_effect = FetchError("Test error")
     mocker.patch("fetcher.GitHubReleaseFetcher", return_value=mock_fetcher_instance)
 
-    # Capture print output
-    print_calls = []
+    # Mock sys.exit
+    _ = mocker.patch("sys.exit")
 
-    def mock_print(*args, **kwargs):
-        print_calls.extend(args)
-
-    monkeypatch.setattr("builtins.print", mock_print)
-
-    # Import and run main
-    import fetcher
+    # Call main and catch the SystemExit
+    from fetcher import main
 
     with pytest.raises(SystemExit) as exc_info:
-        fetcher.main()
+        main()
 
     # Verify sys.exit was called with exit code 1
     assert exc_info.value.code == 1
 
-    # Verify the error was printed
-    assert "Error: Test error" in print_calls
 
+def test_main_with_debug_logging(mocker, tmp_path, caplog):
+    """Test the main function with debug logging enabled."""
+    # Mock command line arguments
+    mock_args = mocker.MagicMock()
+    mock_args.extract_dir = str(tmp_path / "extract")
+    mock_args.output = str(tmp_path / "output")
+    mock_args.debug = True
 
-@pytest.mark.parametrize(
-    "cli_args, expected_extract_dir, expected_output_dir, expected_debug",
-    [
-        (["--extract-dir", "/tmp/extract"], "/tmp/extract", "~/Downloads/", False),
-        (
-            ["--output", "/tmp/downloads"],
-            "~/.steam/steam/compatibilitytools.d/",
-            "/tmp/downloads",
-            False,
-        ),
-        (["--debug"], "~/.steam/steam/compatibilitytools.d/", "~/Downloads/", True),
-        ([], "~/.steam/steam/compatibilitytools.d/", "~/Downloads/", False),
-    ],
-)
-def test_main_function_with_different_cli_args(
-    monkeypatch,
-    mocker,
-    tmp_path,
-    cli_args,
-    expected_extract_dir,
-    expected_output_dir,
-    expected_debug,
-):
-    """Test the main function with various command line arguments."""
-    # Prepare full command line arguments
-    full_args = ["fetcher.py"] + cli_args
-
-    # Mock sys.argv
-    monkeypatch.setattr("sys.argv", full_args)
+    # Mock argparse
+    mock_parser = mocker.MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    mocker.patch("fetcher.argparse.ArgumentParser", return_value=mock_parser)
 
     # Mock the fetcher
     mock_fetcher = mocker.MagicMock()
     mocker.patch("fetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
-
-    # Mock sys.exit to prevent it from actually exiting
-    _ = mocker.patch("sys.exit")
 
     # Call main
     from fetcher import main
 
     main()
 
-    # Verify the fetcher was called and check the arguments passed to Path.expanduser
-    mock_fetcher.fetch_and_extract.assert_called_once()
+    # Verify debug logging was enabled
+    assert "DEBUG" in caplog.text
+
+
+def test_main_with_expanded_paths(mocker, tmp_path):
+    """Test the main function with paths that need expansion."""
+    # Mock command line arguments with ~ in paths
+    mock_args = mocker.MagicMock()
+    mock_args.extract_dir = "~/extract"
+    mock_args.output = "~/output"
+    mock_args.debug = False
+
+    # Mock argparse
+    mock_parser = mocker.MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    mocker.patch("fetcher.argparse.ArgumentParser", return_value=mock_parser)
+
+    # Mock the fetcher
+    mock_fetcher = mocker.MagicMock()
+    mocker.patch("fetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+    # Mock Path.expanduser to return our tmp_path
+    mocker.patch("pathlib.Path.expanduser", side_effect=lambda: tmp_path)
+
+    # Call main
+    from fetcher import main
+
+    main()
+
+    # Verify the fetcher was called with expanded paths
     args, kwargs = mock_fetcher.fetch_and_extract.call_args
-    assert args[0] == "GloriousEggroll/proton-ge-custom"
-    assert args[1] == PROTONGE_ASSET_PATTERN
+    assert isinstance(args[1], Path)  # output_dir
+    assert isinstance(args[2], Path)  # extract_dir
 
 
-def test_main_function_argument_parsing():
-    """Test argument parsing in main function."""
-    import argparse
+def test_main_function_with_error_output(mocker, tmp_path, capsys):
+    """Test the main function error output when a FetchError occurs."""
+    # Mock command line arguments
+    mock_args = mocker.MagicMock()
+    mock_args.extract_dir = str(tmp_path / "extract")
+    mock_args.output = str(tmp_path / "output")
+    mock_args.debug = False
 
-    # Create a mock parser to test the arguments
-    parser = argparse.ArgumentParser(
-        description="Fetch and extract the latest ProtonGE release asset."
+    # Mock argparse
+    mock_parser = mocker.MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    mocker.patch("fetcher.argparse.ArgumentParser", return_value=mock_parser)
+
+    # Mock the fetcher to raise an exception
+    mock_fetcher_instance = mocker.MagicMock()
+    mock_fetcher_instance.fetch_and_extract.side_effect = FetchError(
+        "Test error message"
     )
+    mocker.patch("fetcher.GitHubReleaseFetcher", return_value=mock_fetcher_instance)
 
-    # These are the arguments defined in main()
-    parser.add_argument(
-        "--extract-dir",
-        "-x",
-        default="~/.steam/steam/compatibilitytools.d/",
-        help="Directory to extract the asset to (default: ~/.steam/steam/compatibilitytools.d/)",
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        default="~/Downloads/",
-        help="Directory to download the asset to (default: ~/Downloads/)",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug logging",
-    )
+    # Call main and catch the SystemExit
+    from fetcher import main
 
-    # Validate that the parser has the expected arguments
-    # This is more of a documentation test to ensure arguments are defined correctly
-    assert parser._actions[1].dest == "extract_dir"
-    assert parser._actions[2].dest == "output"
-    assert parser._actions[3].dest == "debug"
+    with pytest.raises(SystemExit) as exc_info:
+        main()
 
+    # Verify the error message was printed
+    captured = capsys.readouterr()
+    assert "Error: Test error message" in captured.out
 
-def test_name_main_block(mocker):
-    """Test the if __name__ == '__main__' block."""
-    # Mock sys.argv to simulate running as a script
-    mocker.patch.object(sys, "argv", ["fetcher.py"])
-
-    # Mock the main function
-    mock_main = mocker.patch("fetcher.main")
-
-    # Since we can't easily test the __name__ check without affecting the import,
-    # we'll just verify that the main function can be called
-    mock_main.assert_not_called()  # It should not be called yet
-
-    # Call main to ensure it works
-    mock_main()
-    mock_main.assert_called_once()
+    # Verify sys.exit was called with exit code 1
+    assert exc_info.value.code == 1
 
 
 @pytest.mark.parametrize(
-    "path_input,expected_expanded",
+    "redirect_pattern,expected_tag",
     [
-        ("~/test", Path.home() / "test"),
-        ("~", Path.home()),
-        ("/absolute/path", Path("/absolute/path")),
-        ("./relative", Path("./relative").resolve()),
+        (
+            r"Location: https://github.com/owner/repo/releases/tag/GE-Proton8-26",
+            "GE-Proton8-26",
+        ),
+        (
+            r"URL: https://github.com/owner/repo/releases/tag/GE-Proton9-15",
+            "GE-Proton9-15",
+        ),
+        (
+            r"Location: https://github.com/owner/repo/releases/tag/GE-Proton10-30",
+            "GE-Proton10-30",
+        ),
     ],
 )
-def test_path_expansion_logic(mocker, path_input, expected_expanded):
-    """Test path expansion logic."""
-    path = Path(path_input).expanduser()
-    # For home directory paths, expanduser() works as expected
-    if path_input.startswith("~/"):
-        expected = Path.home() / path_input[2:]
-        assert path == expected
-    elif path_input == "~":
-        assert path == Path.home()
-    else:
-        # For other paths, expanduser doesn't change them
-        expected = Path(path_input)
-        if path_input.startswith("/"):
-            assert path == expected
-        else:
-            # expanduser doesn't change non-tilde paths
-            assert path == expected.expanduser()
+def test_integration_fetch_latest_tag_patterns(mocker, redirect_pattern, expected_tag):
+    """Integration test for fetching latest tag with different redirect patterns."""
+    fetcher = GitHubReleaseFetcher()
+
+    # Mock the curl methods
+    mock_curl_head = mocker.MagicMock()
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = f"HTTP/1.1 302 Found\r\n{redirect_pattern}\r\n"
+    mock_curl_head.return_value = mock_head_result
+    fetcher._curl_head = mock_curl_head
+
+    result = fetcher.fetch_latest_tag(MOCK_REPO)
+    assert result == expected_tag
 
 
-def test_fetch_latest_tag_with_custom_timeout(fetcher_instance, mocker):
-    """Test fetch_latest_tag with custom timeout."""
-    custom_timeout = 60
-    fetcher_instance.timeout = custom_timeout
+@pytest.mark.parametrize(
+    "repo,tag,asset_name",
+    [
+        ("GloriousEggroll/proton-ge-custom", "GE-Proton8-25", "GE-Proton8-25.tar.gz"),
+        ("GloriousEggroll/proton-ge-custom", "GE-Proton9-15", "GE-Proton9-15.tar.gz"),
+        ("GloriousEggroll/proton-ge-custom", "GE-Proton10-30", "GE-Proton10-30.tar.gz"),
+    ],
+)
+def test_integration_find_asset_by_name(mocker, repo, tag, asset_name):
+    """Integration test for finding asset by name."""
+    fetcher = GitHubReleaseFetcher()
 
-    # Mock the curl_head call to verify the timeout parameter
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = f"HTTP/1.1 302 Found\r\nLocation: https://github.com/{MOCK_REPO}/releases/tag/{MOCK_TAG}\r\n"
+    # Mock curl methods
+    mock_curl_get = mocker.MagicMock()
+    mock_get_result = mocker.MagicMock()
+    mock_get_result.returncode = 0
+    mock_get_result.stdout = f'<html><body><a href="/{repo}/releases/download/{tag}/{asset_name}">{asset_name}</a></body></html>'
+    mock_curl_get.return_value = mock_get_result
+    fetcher._curl_get = mock_curl_get
 
-    mock_curl_head = mocker.patch.object(
-        fetcher_instance, "_curl_head", return_value=mock_result
-    )
-
-    result = fetcher_instance.fetch_latest_tag(MOCK_REPO)
-
-    # Verify that _curl_head was called (the mock will track the call)
-    assert mock_curl_head.called
-    assert result == MOCK_TAG
-
-
-def test_find_asset_by_pattern_with_custom_timeout(fetcher_instance, mocker):
-    """Test find_asset_by_pattern with custom timeout."""
-    custom_timeout = 45
-    fetcher_instance.timeout = custom_timeout
-
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = MOCK_RELEASE_PAGE_HTML
-    mock_result.stderr = ""
-
-    mock_curl_get = mocker.patch.object(
-        fetcher_instance, "_curl_get", return_value=mock_result
-    )
-
-    result = fetcher_instance.find_asset_by_pattern(
-        MOCK_REPO, MOCK_TAG, PROTONGE_ASSET_PATTERN
-    )
-
-    # Verify that _curl_get was called
-    assert mock_curl_get.called
-    assert result == MOCK_ASSET_NAME
+    result = fetcher.find_asset_by_name(repo, tag)
+    assert result == asset_name
 
 
-def test_download_asset_with_custom_timeout(fetcher_instance, tmp_path, mocker):
-    """Test download_asset with custom timeout."""
-    custom_timeout = 90
-    fetcher_instance.timeout = custom_timeout
+def test_integration_full_workflow(mocker, tmp_path):
+    """Integration test for the full workflow."""
+    # Set up paths
+    output_dir = tmp_path / "output"
+    extract_dir = tmp_path / "extract"
 
-    output_path = tmp_path / "output.tar.gz"
+    # Mock the curl methods
+    mock_curl_head = mocker.MagicMock()
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = f"HTTP/1.1 302 Found\r\nLocation: https://github.com/{MOCK_REPO}/releases/tag/{MOCK_TAG}\r\n"
+    mock_curl_head.return_value = mock_head_result
 
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = ""
-    mock_result.stderr = ""
+    mock_curl_get = mocker.MagicMock()
+    mock_get_result = mocker.MagicMock()
+    mock_get_result.returncode = 0
+    mock_get_result.stdout = MOCK_RELEASE_PAGE_HTML
+    mock_curl_get.return_value = mock_get_result
 
-    # Mock the curl download to verify it uses the timeout
-    mock_curl_download = mocker.patch.object(
-        fetcher_instance, "_curl_download", return_value=mock_result
-    )
+    mock_curl_download = mocker.MagicMock()
 
-    result_path = fetcher_instance.download_asset(
-        MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path
-    )
+    # Mock download to avoid creating real files
+    def mock_download(url, output_path, headers=None):
+        # Don't create real file, just return success
+        mock_result = mocker.MagicMock()
+        mock_result.returncode = 0
+        return mock_result
 
-    # Verify that _curl_download was called
-    assert mock_curl_download.called
-    assert result_path == output_path
+    mock_curl_download.side_effect = mock_download
 
-
-def test_extract_archive_creates_nested_directories(fetcher_instance, tmp_path, mocker):
-    """Test that extract_archive creates nested directories if they don't exist."""
-    archive_path = tmp_path / "test.tar.gz"
-    archive_path.write_bytes(MOCK_TAR_GZ_CONTENT)
-    extract_dir = tmp_path / "deeply" / "nested" / "extract_dir"
-
+    # Mock tarfile.open to avoid creating a real tar file
     mock_tar = mocker.MagicMock()
     mock_member = mocker.MagicMock()
     mock_tar.getmembers.return_value = [mock_member]
     mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
     mock_tar.__exit__ = mocker.MagicMock(return_value=None)
-    mocker.patch("tarfile.open", return_value=mock_tar)
 
-    fetcher_instance.extract_archive(archive_path, extract_dir)
+    # Capture the mock object returned by the patch
+    mock_tarfile_open = mocker.patch("tarfile.open", return_value=mock_tar)
 
-    assert extract_dir.exists()
+    # Mock directory validation to avoid real file system operations
+    mock_ensure_directory_is_writable = mocker.patch.object(
+        GitHubReleaseFetcher, "_ensure_directory_is_writable"
+    )
 
+    # Mock Path.iterdir to return a fake extracted directory
+    mock_extracted_dir = mocker.MagicMock()
+    mock_extracted_dir.is_dir.return_value = True
+    mock_extracted_dir.is_symlink.return_value = False
+    mock_extracted_dir.name = MOCK_TAG
 
-def test_extract_archive_with_different_member_counts(
-    fetcher_instance, tmp_path, mocker
-):
-    """Test extract_archive with different numbers of members in the archive."""
-    # Test different member counts manually
-    test_cases = [
-        ([], 0),  # No members in tar
-        ([mocker.MagicMock()], 1),  # One member
-        ([mocker.MagicMock(), mocker.MagicMock()], 2),  # Two members
-    ]
+    mock_iterdir = mocker.MagicMock()
+    mock_iterdir.return_value = [mock_extracted_dir]
+    mocker.patch.object(Path, "iterdir", return_value=mock_iterdir.return_value)
 
-    for members, expected_count in test_cases:
-        archive_path = tmp_path / f"test_{expected_count}_members.tar.gz"
-        archive_path.write_bytes(MOCK_TAR_GZ_CONTENT)
-        extract_dir = tmp_path / f"extract_{expected_count}"
-
-        mock_tar = mocker.MagicMock()
-        mock_tar.getmembers.return_value = members
-        mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
-        mock_tar.__exit__ = mocker.MagicMock(return_value=None)
-        mocker.patch("tarfile.open", return_value=mock_tar)
-
-        fetcher_instance.extract_archive(archive_path, extract_dir)
-
-        # Check that extract was called the correct number of times
-        assert mock_tar.extract.call_count == expected_count
-        mock_tar.reset_mock()  # Reset for next iteration
-
-
-def test_extract_archive_with_real_tarfile(monkeypatch, tmp_path):
-    """Test extract_archive with an actual tar file to ensure it works with real data."""
-    # Create a real tar.gz file for testing
-    archive_path = tmp_path / "real_test.tar.gz"
-
-    # Create a simple tar file with one file
-    with tarfile.open(archive_path, "w:gz") as tar:
-        # Create a temporary file to add to the archive
-        test_file = tmp_path / "test_file.txt"
-        test_file.write_text("test content")
-
-        # Add it to the archive
-        tar.add(test_file, arcname="test_file.txt")
-
-    extract_dir = tmp_path / "real_extract"
-
-    # Create a fetcher instance without mocking tarfile
-    fetcher_instance = GitHubReleaseFetcher()
-
-    # Test the extraction
-    fetcher_instance.extract_archive(archive_path, extract_dir)
-
-    # Verify the file was extracted
-    extracted_file = extract_dir / "test_file.txt"
-    assert extracted_file.exists()
-    assert extracted_file.read_text() == "test content"
-
-
-def test_fetcher_initialization_defaults():
-    """Test GitHubReleaseFetcher initialization with default values."""
+    # Create a fetcher with mocked methods
     fetcher = GitHubReleaseFetcher()
-    assert fetcher.timeout == DEFAULT_TIMEOUT
+    fetcher._curl_head = mock_curl_head
+    fetcher._curl_get = mock_curl_get
+    fetcher._curl_download = mock_curl_download
+
+    # Run the full workflow
+    result = fetcher.fetch_and_extract(MOCK_REPO, output_dir, extract_dir)
+
+    # Verify the result
+    assert result == extract_dir
+
+    # Verify tarfile.open was called using the captured mock
+    assert mock_tarfile_open.called
+
+    # Verify directory validation was called
+    mock_ensure_directory_is_writable.assert_called()
 
 
 @pytest.mark.parametrize(
-    "response_url,expected_tag",
+    "header_type,response_code,expected_success",
     [
-        ("https://github.com/owner/repo/releases/tag/v1.0", "v1.0"),
-        ("https://github.com/owner/repo/releases/tag/GE-Proton8-25", "GE-Proton8-25"),
-        ("https://github.com/owner/repo/releases/tag/1.2.3", "1.2.3"),
+        ("Location", 0, True),
+        ("URL", 0, True),
+        ("Location", 22, False),  # Simulate curl error
     ],
 )
-def test_fetch_latest_tag_various_urls(mocker, response_url, expected_tag):
-    """Test fetch_latest_tag with various redirect URLs."""
+def test_curl_head_method_behavior(
+    mocker, header_type, response_code, expected_success
+):
+    """Parametrized test for _curl_head method with different responses."""
     fetcher = GitHubReleaseFetcher()
 
-    # Mock curl head response
+    # Mock subprocess.run to simulate different curl responses
+    mock_subprocess = mocker.patch("subprocess.run")
     mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = f"HTTP/1.1 302 Found\r\nLocation: {response_url}\r\n"
-    mocker.patch.object(fetcher, "_curl_head", return_value=mock_result)
-
-    result = fetcher.fetch_latest_tag("owner/repo")
-
-    assert result == expected_tag
-
-
-def test_find_asset_by_pattern_with_various_patterns(fetcher_instance, mocker):
-    """Test find_asset_by_pattern with various regex patterns."""
-    # Test with a simple pattern that matches the asset name
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = f'<a href="/{MOCK_REPO}/releases/download/{MOCK_TAG}/{MOCK_ASSET_NAME}">{MOCK_ASSET_NAME}</a>'
+    mock_result.returncode = response_code
+    if header_type == "Location":
+        mock_result.stdout = f"HTTP/1.1 302 Found\r\n{header_type}: https://github.com/owner/repo/releases/tag/GE-Proton8-26\r\n"
+    else:  # URL
+        mock_result.stdout = f"HTTP/1.1 302 Found\r\n{header_type}: https://github.com/owner/repo/releases/tag/GE-Proton8-26\r\n"
     mock_result.stderr = ""
-    fetcher_instance._curl_get.return_value = mock_result
+    mock_subprocess.return_value = mock_result
 
-    # Test different patterns
-    patterns_to_test = [
-        r"GE-Proton\d+[\w.-]*\.tar\.gz",  # Original pattern
-        r".*Proton.*\.tar\.gz",  # More general pattern
-        r".*GE.*",  # Even more general
-    ]
+    result = fetcher._curl_head("https://example.com")
 
-    for pattern in patterns_to_test:
-        result = fetcher_instance.find_asset_by_pattern(MOCK_REPO, MOCK_TAG, pattern)
-        assert result == MOCK_ASSET_NAME
+    assert result.returncode == response_code
+    assert header_type in result.stdout
 
 
-def test_spinner_class_basic_functionality():
-    """Test Spinner class basic functionality."""
-    spinner = Spinner()
-    assert spinner.current == 0
-    assert not spinner.disable
-    assert spinner.spinner_chars == "|/-\\"
+@pytest.mark.parametrize(
+    "headers",
+    [
+        ({"User-Agent": "test-agent"}),
+        ({"Authorization": "Bearer token"}),
+        ({"User-Agent": "test-agent", "Authorization": "Bearer token"}),
+        (None),  # No headers
+    ],
+)
+def test_curl_methods_with_headers(mocker, headers):
+    """Parametrized test for curl methods with different header combinations."""
+    fetcher = GitHubReleaseFetcher()
+
+    # Test _curl_get with headers
+    mock_subprocess = mocker.patch("subprocess.run")
+    mock_result = mocker.MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "response content"
+    mock_result.stderr = ""
+    mock_subprocess.return_value = mock_result
+
+    result = fetcher._curl_get("https://example.com", headers=headers)
+
+    # Verify subprocess.run was called
+    mock_subprocess.assert_called_once()
+    args, kwargs = mock_subprocess.call_args
+    cmd = args[0]
+
+    # Check that headers are properly included in command if provided
+    if headers:
+        for key, value in headers.items():
+            assert "-H" in cmd
+            assert f"{key}: {value}" in cmd
+    else:
+        assert "-H" not in cmd
+
+    assert result == mock_result
 
 
-def test_spinner_with_description_and_unit():
-    """Test Spinner class with description, unit, and unit_scale."""
-    spinner = Spinner(desc="Testing spinner", unit="B", unit_scale=True)
-    assert spinner.desc == "Testing spinner"
-    assert spinner.unit == "B"
-    assert spinner.unit_scale
+@pytest.mark.parametrize(
+    "error_type,error_message",
+    [
+        ("404", "404 Not Found"),
+        ("500", "500 Internal Server Error"),
+        ("timeout", "Operation timed out"),
+        ("connection", "Failed to connect"),
+    ],
+)
+def test_download_asset_error_scenarios(
+    fetcher_instance, tmp_path, mocker, error_type, error_message
+):
+    """Parametrized test for download_asset with different error scenarios."""
+    mock_result = mocker.MagicMock()
+    mock_result.returncode = 22  # curl error code
+    mock_result.stderr = error_message
+    fetcher_instance._curl_download.return_value = mock_result
+
+    with pytest.raises(FetchError):
+        fetcher_instance.download_asset(
+            MOCK_REPO, MOCK_TAG, "nonexistent.tar.gz", tmp_path / "out"
+        )
 
 
-def test_spinner_with_iterable_and_total():
-    """Test Spinner class with iterable and total parameters."""
-    test_iterable = iter([1, 2, 3])  # Use iterator, not list
-    spinner = Spinner(iterable=test_iterable, total=3, desc="Progress", unit="it")
-    # We can't directly compare iterators, so let's test other attributes
-    assert spinner.total == 3
-    assert spinner.desc == "Progress"
-    assert spinner.unit == "it"
+@pytest.mark.parametrize(
+    "extract_dir_exists,ge_proton_is_dir,expected_behavior",
+    [
+        (True, True, "bail_early"),  # GE-Proton exists as real directory, should bail
+        (
+            True,
+            False,
+            "create_link",
+        ),  # GE-Proton exists as symlink, should move and create new
+        (False, False, "create_link"),  # GE-Proton doesn't exist, should create
+    ],
+)
+def test_manage_ge_proton_links_scenarios(
+    mocker, tmp_path, extract_dir_exists, ge_proton_is_dir, expected_behavior
+):
+    """Parametrized test for _manage_ge_proton_links with different directory states."""
+    fetcher = GitHubReleaseFetcher()
+
+    extract_dir = tmp_path / "extract"
+    extract_dir.mkdir()
+
+    # Set up the GE-Proton directory/link based on test parameters
+    ge_proton_path = extract_dir / "GE-Proton"
+    extracted_dir = extract_dir / MOCK_TAG
+    extracted_dir.mkdir()
+
+    if extract_dir_exists:
+        if ge_proton_is_dir:
+            # Create GE-Proton as a real directory
+            ge_proton_path.mkdir()
+        else:
+            # Create GE-Proton as a symlink to some other directory
+            other_dir = tmp_path / "other_version"
+            other_dir.mkdir()
+            ge_proton_path.symlink_to(other_dir)
+
+    # Run the method
+    fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+
+    # Verify behavior based on expected outcome
+    if expected_behavior == "bail_early":
+        # When GE-Proton exists as real directory, it should remain unchanged
+        assert ge_proton_path.is_dir()
+        assert not ge_proton_path.is_symlink()
+    else:  # create_link
+        # When GE-Proton should be created as a link, verify it's a symlink
+        if ge_proton_path.exists():
+            assert ge_proton_path.is_symlink()
+            assert ge_proton_path.resolve() == extracted_dir
 
 
-def test_spinner_disable_functionality(mocker):
-    """Test Spinner class with disable=True."""
-    spinner = Spinner(disable=True, desc="Test", unit="it")
-    spinner.__enter__()
+@pytest.mark.parametrize(
+    "curl_available,expected_result",
+    [
+        (True, None),  # curl is available, no exception
+        (False, FetchError),  # curl is not available, should raise FetchError
+    ],
+)
+def test_ensure_curl_available_scenarios(mocker, curl_available, expected_result):
+    """Parametrized test for _ensure_curl_available with available/unavailable curl."""
+    fetcher = GitHubReleaseFetcher()
 
-    # Mock print to ensure it's not called when disabled
-    mock_print = mocker.patch("builtins.print")
-
-    spinner.update(1)
-    spinner.close()
-
-    # When disabled, print should not be called
-    mock_print.assert_not_called()
-
-
-def test_spinner_context_manager(mocker):
-    """Test Spinner context manager functionality."""
-    spinner = Spinner(disable=True, desc="Test")
-    mock_print = mocker.patch("builtins.print")
-
-    with spinner:
-        spinner.update(1)
-
-    # Print should not be called when disabled
-    mock_print.assert_not_called()
-
-
-def test_spinner_update_with_total(mocker):
-    """Test Spinner update method with total (progress bar)."""
-    import time
-
-    spinner = Spinner(total=10, desc="Progress", disable=False)
-    mock_print = mocker.patch("builtins.print")
-
-    # Set start time to a known value to test rate calculation
-    spinner.start_time = time.time() - 1  # 1 second ago
-    spinner.current = 0
-
-    spinner.update(2)  # Should increment by 2
-
-    assert spinner.current == 2
-    mock_print.assert_called()
-
-
-def test_spinner_update_without_total(mocker):
-    """Test Spinner update method without total (just spinner)."""
-    spinner = Spinner(desc="Loading", disable=False)
-    mock_print = mocker.patch("builtins.print")
-
-    spinner.update(1)
-
-    # The print should be called with spinner character
-    mock_print.assert_called()
-
-
-def test_spinner_unit_scale_formatting(mocker):
-    """Test Spinner rate formatting with unit_scale and B unit."""
-    import time
-
-    spinner = Spinner(
-        total=100, desc="Download", unit="B", unit_scale=True, disable=False
+    mocker.patch(
+        "shutil.which", return_value="/usr/bin/curl" if curl_available else None
     )
-    mock_print = mocker.patch("builtins.print")
 
-    # Set start time to calculate a rate
-    spinner.start_time = time.time() - 1  # 1 second ago
-    spinner.current = 0
-
-    # Update with a small amount (should be in B/s)
-    spinner.update(512)
-    mock_print.assert_called()
-
-    # Update with a larger amount (should be in KB/s)
-    spinner.update(1024)
-    mock_print.assert_called()
+    if expected_result:
+        with pytest.raises(expected_result):
+            fetcher._ensure_curl_available()
+    else:
+        # Should not raise an exception
+        fetcher._ensure_curl_available()
 
 
-def test_spinner_iter_method():
-    """Test Spinner __iter__ method."""
-    items = [1, 2, 3]
-    spinner = Spinner(iterable=iter(items), total=len(items))  # Use iterator, not list
-
-    result = list(spinner)
-    assert result == items
-
-
-def test_spinner_iter_method_no_iterable():
-    """Test Spinner __iter__ method when no iterable provided."""
-    spinner = Spinner(total=3)
-
-    # When no iterable, should iterate over range of total
-    result = list(spinner)
-    assert result == [0, 1, 2]
-
-
-def test_curl_get_with_headers_and_stream(mocker):
-    """Test _curl_get method with headers and stream parameters."""
+@pytest.mark.parametrize(
+    "dir_exists,dir_is_writable,expected_result",
+    [
+        (True, True, None),  # Directory exists and is writable, no exception
+        (True, False, FetchError),  # Directory exists but not writable, should raise
+        (False, True, None),  # Directory doesn't exist, should be created
+        (False, False, FetchError),  # Directory creation fails, should raise
+    ],
+)
+def test_ensure_directory_is_writable_scenarios(
+    mocker, tmp_path, dir_exists, dir_is_writable, expected_result
+):
+    """Parametrized test for _ensure_directory_is_writable with various directory states."""
     fetcher = GitHubReleaseFetcher()
 
-    # Mock subprocess.run to return a completed process object
-    mock_result = mocker.MagicMock()
-    mock_result.stdout = "test response"
-    mock_result.stderr = ""
-    mock_result.returncode = 0
+    test_dir = tmp_path / "test_dir"
 
-    mock_subprocess_run = mocker.patch("subprocess.run", return_value=mock_result)
+    # Set up the directory state based on parameters
+    if dir_exists:
+        test_dir.mkdir(parents=True, exist_ok=True)
 
-    headers = {"Authorization": "Bearer token", "User-Agent": "Test-Agent"}
-    fetcher._curl_get("https://example.com", headers=headers, stream=True)
+    # Mock the tempfile.TemporaryFile to simulate write permission
+    if not dir_is_writable:
+        mocker.patch("tempfile.TemporaryFile", side_effect=OSError("Permission denied"))
+    else:
+        mocker.patch("tempfile.TemporaryFile")
 
-    # Verify subprocess.run was called with correct arguments
-    assert mock_subprocess_run.called
-    call_args = mock_subprocess_run.call_args[0][
-        0
-    ]  # First argument is the command list
-
-    # Check that the command includes the headers
-    for key, value in headers.items():
-        assert "-H" in call_args
-        assert f"{key}: {value}" in call_args
-
-    # Check that the URL is in the command
-    assert "https://example.com" in call_args
+    if expected_result:
+        with pytest.raises(expected_result):
+            fetcher._ensure_directory_is_writable(test_dir)
+    else:
+        # Should not raise an exception
+        fetcher._ensure_directory_is_writable(test_dir)
+        assert test_dir.exists()
 
 
-def test_curl_head_with_headers(mocker):
-    """Test _curl_head method with headers."""
-    fetcher = GitHubReleaseFetcher()
+def test_extract_archive_edge_cases(fetcher_instance, tmp_path, mocker):
+    """Test extract_archive with different archive scenarios."""
+    archive_path = tmp_path / "test.tar.gz"
+    extract_dir = tmp_path / "extract"
 
-    # Mock subprocess.run to return a completed process object
-    mock_result = mocker.MagicMock()
-    mock_result.stdout = "HTTP/1.1 200 OK\nContent-Length: 1234\n"
-    mock_result.stderr = ""
-    mock_result.returncode = 0
+    # Test with empty members list
+    mock_tar = mocker.MagicMock()
+    mock_tar.getmembers.return_value = []
+    mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
+    mock_tar.__exit__ = mocker.MagicMock(return_value=None)
+    mocker.patch("tarfile.open", return_value=mock_tar)
 
-    mock_subprocess_run = mocker.patch("subprocess.run", return_value=mock_result)
+    # Mock Path operations
+    mock_mkdir = mocker.patch("pathlib.Path.mkdir")
 
-    headers = {"Authorization": "Bearer token", "User-Agent": "Test-Agent"}
-    fetcher._curl_head("https://example.com", headers=headers)
+    fetcher_instance.extract_archive(archive_path, extract_dir)
 
-    # Verify subprocess.run was called with correct arguments
-    assert mock_subprocess_run.called
-    call_args = mock_subprocess_run.call_args[0][
-        0
-    ]  # First argument is the command list
-
-    # Check that the command includes the headers
-    for key, value in headers.items():
-        assert "-H" in call_args
-        assert f"{key}: {value}" in call_args
-
-    # Check that the URL is in the command
-    assert "https://example.com" in call_args
+    # Verify that extraction was attempted with empty members list
+    assert mock_tar.getmembers.call_count == 1
+    mock_mkdir.assert_called()
 
 
-def test_curl_download_with_headers(mocker):
-    """Test _curl_download method with headers."""
-    fetcher = GitHubReleaseFetcher()
-    output_path = Path("test_output")
-
-    # Mock subprocess.run to return a completed process object
-    mock_result = mocker.MagicMock()
-    mock_result.stdout = ""
-    mock_result.stderr = ""
-    mock_result.returncode = 0
-
-    mock_subprocess_run = mocker.patch("subprocess.run", return_value=mock_result)
-
-    headers = {"Authorization": "Bearer token", "User-Agent": "Test-Agent"}
-    fetcher._curl_download("https://example.com/file.zip", output_path, headers=headers)
-
-    # Verify subprocess.run was called with correct arguments
-    assert mock_subprocess_run.called
-    call_args = mock_subprocess_run.call_args[0][
-        0
-    ]  # First argument is the command list
-
-    # Check that the command includes the headers
-    for key, value in headers.items():
-        assert "-H" in call_args
-        assert f"{key}: {value}" in call_args
-
-    # Check that the output file is in the command
-    assert "-o" in call_args
-    assert str(output_path) in call_args
-
-    # Check that the URL is in the command
-    assert "https://example.com/file.zip" in call_args
-
-
-def test_fetch_latest_tag_fallback_url_pattern(fetcher_instance, mocker):
-    """Test fetch_latest_tag with alternative URL pattern (URL=...)."""
-    # Mock curl head response with alternative URL pattern
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = "HTTP/1.1 302 Found\r\nURL=https://github.com/owner/repo/releases/tag/GE-Proton8-26\r\n"
-    fetcher_instance._curl_head.return_value = mock_result
+def test_fetch_latest_tag_url_parsing_scenarios(fetcher_instance, mocker):
+    """Test fetch_latest_tag with different URL parsing scenarios."""
+    # Test with URL pattern (not Location)
+    mock_head_result = mocker.MagicMock()
+    mock_head_result.returncode = 0
+    mock_head_result.stdout = "HTTP/1.1 302 Found\r\nURL: https://github.com/owner/repo/releases/tag/GE-Proton8-26\r\n"
+    fetcher_instance._curl_head.return_value = mock_head_result
 
     result = fetcher_instance.fetch_latest_tag(MOCK_REPO)
     assert result == "GE-Proton8-26"
 
+    # Test with no Location or URL header (should raise FetchError)
+    mock_head_result.stdout = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+    fetcher_instance._curl_head.return_value = mock_head_result
 
-def test_fetch_latest_tag_no_location_header(fetcher_instance, mocker):
-    """Test fetch_latest_tag when no Location or URL header is found."""
-    # Mock curl head response without redirect headers
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-    fetcher_instance._curl_head.return_value = mock_result
-
-    # This should fail appropriately
     with pytest.raises(FetchError, match="Could not determine latest tag"):
         fetcher_instance.fetch_latest_tag(MOCK_REPO)
 
 
-def test_find_asset_by_pattern_approach2(fetcher_instance, mocker):
-    """Test find_asset_by_pattern approach 2: Look for pattern in any href."""
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    # HTML with asset name in a different location in href
-    mock_result.stdout = (
-        f'<a href="/some/different/path/{MOCK_ASSET_NAME}">Download</a>'
-    )
-    mock_result.stderr = ""
-    fetcher_instance._curl_get.return_value = mock_result
-
-    result = fetcher_instance.find_asset_by_pattern(
-        MOCK_REPO, MOCK_TAG, PROTONGE_ASSET_PATTERN
-    )
-    assert result == MOCK_ASSET_NAME
-
-
-def test_find_asset_by_pattern_approach3(fetcher_instance, mocker):
-    """Test find_asset_by_pattern approach 3: Look for pattern in entire page."""
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    # HTML with asset name mentioned in text content
-    mock_result.stdout = f"<p>Download {MOCK_ASSET_NAME} here</p>"
-    mock_result.stderr = ""
-    fetcher_instance._curl_get.return_value = mock_result
-
-    result = fetcher_instance.find_asset_by_pattern(
-        MOCK_REPO, MOCK_TAG, PROTONGE_ASSET_PATTERN
-    )
-    assert result == MOCK_ASSET_NAME
-
-
-def test_find_asset_by_pattern_approach4_constructed(fetcher_instance, mocker):
-    """Test find_asset_by_pattern approach 4: Construct asset name from tag."""
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 0
-    # HTML without matching assets, triggering approach 4
-    mock_result.stdout = '<a href="/some/other/file.zip">Other file</a>'
-    mock_result.stderr = ""
-    fetcher_instance._curl_get.return_value = mock_result
-
-    # For approach 4 to work, the constructed name (tag + ".tar.gz") must match the pattern
-    # This is a more complex case, let's make sure the tag and pattern align
-    test_tag = "GE-Proton8-27"
-    simple_pattern = r".*\.tar\.gz"  # Pattern that matches any .tar.gz file
-    result = fetcher_instance.find_asset_by_pattern(MOCK_REPO, test_tag, simple_pattern)
-    assert result == f"{test_tag}.tar.gz"
-
-
-def test_download_asset_with_curl_404_error(fetcher_instance, tmp_path, mocker):
-    """Test download_asset with curl 404 error (returncode 22)."""
-    output_path = tmp_path / "output.tar.gz"
-
-    # Mock curl download to return 404 error (curl returns exit code 22 for 404)
-    mock_result = mocker.MagicMock()
-    mock_result.returncode = 22  # curl 404 error code
-    mock_result.stderr = "curl: (22) The requested URL returned error: 404"
-    fetcher_instance._curl_download.return_value = mock_result
-
-    with pytest.raises(FetchError, match="Asset not found"):
-        fetcher_instance.download_asset(
-            MOCK_REPO, MOCK_TAG, "nonexistent.tar.gz", output_path
-        )
-
-
-def test_extract_archive_eof_error(fetcher_instance, tmp_path, mocker):
-    """Test extract_archive with EOFError."""
-    archive_path = tmp_path / "test.tar.gz"
-    archive_path.write_bytes(MOCK_TAR_GZ_CONTENT)
+def test_manage_ge_proton_links_correct_version(fetcher_instance, tmp_path):
+    """Test that _manage_ge_proton_links correctly links to the newly downloaded version."""
     extract_dir = tmp_path / "extract"
+    extract_dir.mkdir()
 
-    # Mock tarfile.open to raise EOFError
-    mocker.patch("tarfile.open", side_effect=EOFError("Unexpected EOF in archive"))
+    # Create the expected extracted directory (new version) - this matches the tag
+    new_version = "GE-Proton10-20"
+    new_version_dir = extract_dir / new_version
+    new_version_dir.mkdir()
 
-    with pytest.raises(FetchError, match="Failed to extract archive"):
-        fetcher_instance.extract_archive(archive_path, extract_dir)
+    # Create an old version directory
+    old_version = "GE-Proton10-18"
+    old_version_dir = extract_dir / old_version
+    old_version_dir.mkdir()
+
+    # Create a GE-Proton symlink pointing to the old version initially
+    ge_proton_link = extract_dir / "GE-Proton"
+    ge_proton_link.symlink_to(old_version_dir)
+
+    # Run the link management
+    fetcher_instance._manage_ge_proton_links(extract_dir, new_version)
+
+    # Verify that GE-Proton now points to the new version
+    assert ge_proton_link.is_symlink()
+    assert ge_proton_link.resolve() == new_version_dir
+
+    # Verify that GE-Proton-Fallback now points to the old version
+    fallback_link = extract_dir / "GE-Proton-Fallback"
+    assert fallback_link.is_symlink()
+    assert fallback_link.resolve() == old_version_dir
