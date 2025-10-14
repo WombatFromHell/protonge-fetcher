@@ -564,11 +564,9 @@ class GitHubReleaseFetcher:
         """Manage symbolic links for GE-Proton after extraction.
 
         This method:
-        1. Checks for an existing link named 'GE-Proton' under the extract-dir
-        2. If 'GE-Proton' is a real directory, bail early
-        3. If 'GE-Proton' is a link (or doesn't exist), move it to 'GE-Proton-Fallback'
-           (after deleting what the fallback currently points to if needed)
-        4. Create new 'GE-Proton' link to the extracted archive directory
+        1. Manages 3 prior versions: GE-Proton (latest), GE-Proton-Fallback, and GE-Proton-Fallback2
+        2. Shifts links down the chain (GE-Proton -> GE-Proton-Fallback -> GE-Proton-Fallback2)
+        3. Creates new GE-Proton link to the latest extracted version
 
         Args:
             extract_dir: Directory where the archive was extracted
@@ -576,6 +574,7 @@ class GitHubReleaseFetcher:
         """
         ge_proton_link = extract_dir / "GE-Proton"
         ge_proton_fallback = extract_dir / "GE-Proton-Fallback"
+        ge_proton_fallback2 = extract_dir / "GE-Proton-Fallback2"
 
         # The extracted directory should have the same name as the tag
         extracted_dir = extract_dir / tag
@@ -605,28 +604,68 @@ class GitHubReleaseFetcher:
             logger.info("GE-Proton exists as a real directory, bailing early")
             return
 
-        # If GE-Proton exists as a link, we need to move it to GE-Proton-Fallback
+        # Shift the fallback links down the chain:
+        # Current GE-Proton-Fallback2 target should be removed
+        # Current GE-Proton-Fallback becomes GE-Proton-Fallback2
+        # Current GE-Proton becomes GE-Proton-Fallback
+        # New version becomes GE-Proton
+
+        # First, handle GE-Proton-Fallback2 (remove its target directory)
+        if ge_proton_fallback2.exists() and ge_proton_fallback2.is_symlink():
+            try:
+                fallback2_target = ge_proton_fallback2.resolve()
+                if fallback2_target.exists() and fallback2_target.is_dir():
+                    import shutil
+
+                    shutil.rmtree(fallback2_target)
+                    logger.info(f"Removed old fallback2 directory: {fallback2_target}")
+            except (FileNotFoundError, OSError) as e:
+                logger.warning(f"Could not remove old fallback2 target: {e}")
+
+        # Then move GE-Proton-Fallback to GE-Proton-Fallback2
+        if ge_proton_fallback.exists():
+            try:
+                ge_proton_fallback.rename(ge_proton_fallback2)
+                logger.info("Moved GE-Proton-Fallback to GE-Proton-Fallback2")
+            except OSError as e:
+                logger.warning(
+                    f"Could not move GE-Proton-Fallback to GE-Proton-Fallback2: {e}"
+                )
+                # If we can't rename, try removing the old fallback2 and continuing
+                if ge_proton_fallback2.exists():
+                    try:
+                        ge_proton_fallback2.unlink()
+                    except OSError:
+                        pass
+
+        # Then move GE-Proton to GE-Proton-Fallback
         if ge_proton_link.exists() and ge_proton_link.is_symlink():
-            # If GE-Proton-Fallback already exists, remove the directory it points to
-            if ge_proton_fallback.exists():
-                try:
-                    fallback_target = ge_proton_fallback.resolve()
-                    if fallback_target.exists() and fallback_target.is_dir():
-                        import shutil
+            try:
+                current_target = ge_proton_link.resolve()
+                if current_target.exists():
+                    # Move current GE-Proton link to GE-Proton-Fallback
+                    ge_proton_link.rename(ge_proton_fallback)
+                    logger.info("Moved old GE-Proton link to GE-Proton-Fallback")
+                else:
+                    logger.warning(
+                        "GE-Proton link points to non-existent target, removing it"
+                    )
+                    ge_proton_link.unlink()
+            except (OSError, RuntimeError) as e:
+                logger.warning(
+                    f"Error resolving GE-Proton link: {e}. Removing and recreating."
+                )
+                ge_proton_link.unlink()
+        elif ge_proton_link.exists():
+            # If it's not a symlink, it's a real directory, just remove it
+            try:
+                ge_proton_link.unlink()
+            except OSError:
+                import shutil
 
-                        shutil.rmtree(fallback_target)
-                        logger.info(
-                            f"Removed old fallback directory: {fallback_target}"
-                        )
-                except (FileNotFoundError, OSError) as e:
-                    logger.warning(f"Could not remove old fallback target: {e}")
+                shutil.rmtree(ge_proton_link)
 
-            # Move current GE-Proton link to GE-Proton-Fallback
-            ge_proton_link.rename(ge_proton_fallback)
-            logger.info("Moved old GE-Proton link to GE-Proton-Fallback")
-
-        # If GE-Proton-Fallback doesn't exist but there was a real directory with that name,
-        # we should remove it before creating the link
+        # Handle cases where fallback directories exist as real directories rather than links
         if (
             ge_proton_fallback.exists()
             and ge_proton_fallback.is_dir()
@@ -637,11 +676,36 @@ class GitHubReleaseFetcher:
             shutil.rmtree(ge_proton_fallback)
             logger.info("Removed real directory GE-Proton-Fallback to create link")
 
-        # Create new GE-Proton symlink pointing to the extracted directory
-        if ge_proton_link.exists():
-            ge_proton_link.unlink()  # Remove any existing link/file first
-        ge_proton_link.symlink_to(extracted_dir)
-        logger.info(f"Created new GE-Proton link pointing to {extracted_dir}")
+        if (
+            ge_proton_fallback2.exists()
+            and ge_proton_fallback2.is_dir()
+            and not ge_proton_fallback2.is_symlink()
+        ):
+            import shutil
+
+            shutil.rmtree(ge_proton_fallback2)
+            logger.info("Removed real directory GE-Proton-Fallback2 to create link")
+
+        # Validate that the target directory exists before creating the symlink
+        if not extracted_dir.exists() or not extracted_dir.is_dir():
+            logger.error(
+                f"Target directory does not exist or is not a directory: {extracted_dir}"
+            )
+            return
+
+        # Create new GE-Proton symlink pointing to the extracted directory using relative path
+        relative_target = None
+        try:
+            if ge_proton_link.exists():
+                ge_proton_link.unlink()  # Remove any existing link/file first
+            # Use relative path instead of absolute path for the symlink target
+            relative_target = extracted_dir.relative_to(extract_dir)
+            ge_proton_link.symlink_to(relative_target)
+            logger.info(f"Created new GE-Proton link pointing to {relative_target}")
+        except (OSError, RuntimeError) as e:
+            logger.error(
+                f"Failed to create symlink {ge_proton_link} -> {relative_target}: {e}"
+            )
 
     def _ensure_directory_is_writable(self, path: Path) -> None:
         """Check if a directory is accessible and writable.
@@ -713,6 +777,14 @@ class GitHubReleaseFetcher:
         # Download to the output directory
         output_path = output_dir / asset_name
         self.download_asset(repo, tag, asset_name, output_path)
+
+        # Check if the unpacked proton version directory already exists for this release
+        unpacked_dir = extract_dir / tag
+        if unpacked_dir.exists() and unpacked_dir.is_dir():
+            logger.info(
+                f"Unpacked proton version directory already exists: {unpacked_dir}, bailing early"
+            )
+            return extract_dir
 
         # Extract to the extract directory
         self.extract_archive(output_path, extract_dir)
