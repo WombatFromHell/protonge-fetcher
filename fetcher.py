@@ -11,7 +11,6 @@ import argparse
 import logging
 import re
 import tarfile
-import tempfile
 from pathlib import Path
 from typing import NoReturn
 
@@ -145,16 +144,19 @@ class GitHubReleaseFetcher:
         except (tarfile.TarError, EOFError) as e:
             self._raise(f"Failed to extract archive {archive_path}: {e}")
 
-    def fetch_and_extract(self, repo: str, asset_name: str, target_dir: Path) -> Path:
+    def fetch_and_extract(
+        self, repo: str, asset_name: str, output_dir: Path, extract_dir: Path
+    ) -> Path:
         """Fetch the latest release asset and extract it to the target directory.
 
         Args:
             repo: Repository in format 'owner/repo'
             asset_name: Asset filename to download, or regex pattern to find it
-            target_dir: Directory to extract into
+            output_dir: Directory to download the asset to
+            extract_dir: Directory to extract the asset to
 
         Returns:
-            Path to the target directory
+            Path to the extracted directory
         """
         tag = self.fetch_latest_tag(repo)
         logger.info(f"Fetching {asset_name} from {repo} tag {tag}")
@@ -165,12 +167,14 @@ class GitHubReleaseFetcher:
             asset_name = self.find_asset_by_pattern(repo, tag, asset_name)
             logger.info(f"Found asset: {asset_name}")
 
-        with tempfile.TemporaryDirectory(prefix="ghrel-") as temp_dir:
-            temp_path = Path(temp_dir) / asset_name
-            self.download_asset(repo, tag, asset_name, temp_path)
-            self.extract_archive(temp_path, target_dir)
+        # Download to the output directory
+        output_path = output_dir / asset_name
+        self.download_asset(repo, tag, asset_name, output_path)
 
-        return target_dir
+        # Extract to the extract directory
+        self.extract_archive(output_path, extract_dir)
+
+        return extract_dir
 
     @staticmethod
     def _raise(message: str) -> NoReturn:
@@ -184,34 +188,38 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Fetch and extract the latest ProtonGE release asset."
     )
-    # The 'repo' argument has been removed as it is now hardcoded.
     parser.add_argument(
-        "--asset-name",
-        default=PROTONGE_ASSET_PATTERN,
-        help=f"Asset filename to download, or regex pattern to match asset name (default: '{PROTONGE_ASSET_PATTERN}')",
+        "--extract-dir",
+        "-x",
+        default="~/.steam/steam/compatibilitytools.d/",
+        help="Directory to extract the asset to (default: ~/.steam/steam/compatibilitytools.d/)",
     )
     parser.add_argument(
-        "--target-dir",
-        default=".",
-        help="Directory to extract the asset to (default: current directory)",
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable verbose logging"
+        "--output",
+        "-o",
+        default="~/Downloads/",
+        help="Directory to download the asset to (default: ~/Downloads/)",
     )
 
     args = parser.parse_args()
 
+    # Expand user home directory (~) in paths
+    extract_dir = Path(args.extract_dir).expanduser()
+    output_dir = Path(args.output).expanduser()
+
+    # Set up logging
     logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
+        level=logging.INFO,
         format="%(levelname)s: %(message)s",
     )
 
-    # The repository is now hardcoded.
+    # target `github.com/GloriousEggroll/proton-ge-custom/releases/latest`
     repo = "GloriousEggroll/proton-ge-custom"
+    asset_name = PROTONGE_ASSET_PATTERN
 
     try:
         fetcher = GitHubReleaseFetcher()
-        fetcher.fetch_and_extract(repo, args.asset_name, Path(args.target_dir))
+        fetcher.fetch_and_extract(repo, asset_name, output_dir, extract_dir)
         print("Success")
     except FetchError as e:
         print(f"Error: {e}")
