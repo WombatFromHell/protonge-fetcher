@@ -73,11 +73,7 @@ class TestFetchAndExtractWorkflow:
         output_dir.mkdir(parents=True)
         extract_dir.mkdir(parents=True)
 
-        # Create the extracted directory structure
-        extracted_dir = extract_dir / MOCK_TAG
-        extracted_dir.mkdir()
-
-        # Setup mocks for the full workflow
+        # Setup mocks for the full workflow - do NOT create conflicting directory
         mocker.patch.object(fetcher, "_ensure_directory_is_writable")
         mocker.patch.object(fetcher, "_ensure_curl_available")
 

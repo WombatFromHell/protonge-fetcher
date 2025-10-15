@@ -1197,6 +1197,23 @@ class GitHubReleaseFetcher:
                 )
             raise e
 
+        # Check if the unpacked proton version directory already exists for this release
+        # Determine the actual directory name that will be extracted from the archive
+        # Use the actual asset name found from GitHub to determine extracted directory name
+        if asset_name.endswith(".tar.xz"):
+            unpacked_dir = extract_dir / asset_name[:-7]  # Remove '.tar.xz'
+        elif asset_name.endswith(".tar.gz"):
+            unpacked_dir = extract_dir / asset_name[:-7]  # Remove '.tar.gz'
+        else:
+            # Fallback to tag name if the extension pattern doesn't match
+            unpacked_dir = extract_dir / tag
+
+        if unpacked_dir.exists() and unpacked_dir.is_dir():
+            logger.info(
+                f"Unpacked proton version directory already exists: {unpacked_dir}, bailing early"
+            )
+            return extract_dir
+
         # Download to the output directory
         output_path = output_dir / asset_name
         try:
@@ -1208,8 +1225,6 @@ class GitHubReleaseFetcher:
                 )
             raise e
 
-        # Check if the unpacked proton version directory already exists for this release
-        unpacked_dir = extract_dir / tag
         if unpacked_dir.exists() and unpacked_dir.is_dir():
             logger.info(
                 f"Unpacked proton version directory already exists: {unpacked_dir}, bailing early"
