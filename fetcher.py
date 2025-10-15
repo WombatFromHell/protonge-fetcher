@@ -815,7 +815,16 @@ class GitHubReleaseFetcher:
         self.extract_archive(output_path, extract_dir)
 
         # Manage symbolic links after successful extraction
-        self._manage_ge_proton_links(extract_dir, tag)
+        # Skip link management when manually specifying a release to prevent any link changes
+        # This ensures that potentially older releases won't change an existing './GE-Proton' link
+        if release_tag is None:
+            # When fetching latest, manage links as normal
+            self._manage_ge_proton_links(extract_dir, tag)
+        else:
+            # When manually specifying a release, always skip link management
+            logger.info(
+                f"Manual release specified ({release_tag}). Disengaging link management behavior to prevent changes to existing links."
+            )
 
         return extract_dir
 

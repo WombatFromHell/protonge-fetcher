@@ -1267,6 +1267,123 @@ class TestMainFunction:
         args, kwargs = mock_fetcher_instance.fetch_and_extract.call_args
         assert kwargs.get("release_tag") == "GE-Proton10-11"
 
+    def test_fetch_extract_with_manual_release_disengages_link_management(
+        self, mocker, tmp_path, mock_curl_responses
+    ):
+        """Test that when --release flag is used, link management is disengaged."""
+        fetcher = GitHubReleaseFetcher()
+        output_dir = tmp_path / "output"
+        extract_dir = tmp_path / "extract"
+        output_dir.mkdir(parents=True)
+        extract_dir.mkdir(parents=True)
+
+        manual_tag = "GE-Proton9-25"
+        extracted_dir = extract_dir / manual_tag
+        extracted_dir.mkdir()
+
+        # Setup mock responses for manual tag - API fails, falls back to HTML parsing
+        api_response = mock_curl_responses(returncode=22, stderr="API error")
+        html_response = mock_curl_responses(
+            stdout=f'<a href="/{MOCK_REPO}/releases/download/{manual_tag}/{manual_tag}.tar.gz">{manual_tag}.tar.gz</a>'
+        )
+
+        mock_curl_get: MagicMock = mocker.MagicMock(
+            side_effect=[api_response, html_response]
+        )
+        mock_curl_head: MagicMock = mocker.MagicMock()
+        fetcher._curl_get = mock_curl_get
+        fetcher._curl_head = mock_curl_head
+        fetcher._curl_download = mocker.MagicMock(return_value=mock_curl_responses())
+
+        mocker.patch.object(fetcher, "_ensure_directory_is_writable")
+        mocker.patch.object(fetcher, "_ensure_curl_available")
+
+        # Mock tarfile to create the tag directory during extraction
+        mock_tar_instance = mocker.MagicMock()
+        mock_tar_instance.getmembers.return_value = []
+
+        def mock_extract_side_effect(*args, **kwargs):
+            # Create the tag directory during extraction to avoid early return in future calls
+            (extract_dir / manual_tag).mkdir(exist_ok=True)
+
+        mock_tar_instance.extract.side_effect = mock_extract_side_effect
+        mocker.patch(
+            "tarfile.open"
+        ).return_value.__enter__.return_value = mock_tar_instance
+
+        # Track if link management was called
+        link_mgmt_called = []
+
+        def track_link_mgmt(extract_dir, tag):
+            link_mgmt_called.append((extract_dir, tag))
+
+        fetcher._manage_ge_proton_links = track_link_mgmt
+
+        result = fetcher.fetch_and_extract(
+            MOCK_REPO, output_dir, extract_dir, release_tag=manual_tag
+        )
+
+        assert result == extract_dir
+        # Verify that link management was NOT called when using --release flag
+        assert not link_mgmt_called, (
+            "Link management should not be called when using --release flag"
+        )
+
+    def test_fetch_extract_latest_still_manages_links(
+        self, mocker, tmp_path, fetcher, mock_curl_responses
+    ):
+        """Test that when no --release flag is used (latest), link management still occurs."""
+        output_dir = tmp_path / "output"
+        extract_dir = tmp_path / "extract"
+        output_dir.mkdir()
+        extract_dir.mkdir()
+
+        latest_tag = "GE-Proton9-26"
+
+        # Mock responses for latest tag - HEAD for fetch_latest_tag, then API fails, falls back to HTML
+        head_response = mock_curl_responses(
+            stdout=f"HTTP/1.1 302 Found\r\nLocation: /releases/tag/{latest_tag}\r\n"
+        )
+        api_response = mock_curl_responses(returncode=22, stderr="API error")
+        html_response = mock_curl_responses(
+            stdout=f'<a href="/{MOCK_REPO}/releases/download/{latest_tag}/{latest_tag}.tar.gz">{latest_tag}.tar.gz</a>'
+        )
+
+        fetcher._curl_head = mocker.MagicMock(return_value=head_response)
+        fetcher._curl_get = mocker.MagicMock(side_effect=[api_response, html_response])
+        fetcher._curl_download = mocker.MagicMock(return_value=mock_curl_responses())
+
+        # Mock tarfile to create the tag directory during extraction
+        mock_tar_instance = mocker.MagicMock()
+        mock_tar_instance.getmembers.return_value = []
+
+        def mock_extract_side_effect(*args, **kwargs):
+            # Create the tag directory during extraction to avoid early return in future calls
+            (extract_dir / latest_tag).mkdir(exist_ok=True)
+
+        mock_tar_instance.extract.side_effect = mock_extract_side_effect
+        mocker.patch(
+            "tarfile.open"
+        ).return_value.__enter__.return_value = mock_tar_instance
+
+        # Track if link management was called
+        link_mgmt_called = []
+
+        def track_link_mgmt(extract_dir, tag):
+            link_mgmt_called.append((extract_dir, tag))
+
+        fetcher._manage_ge_proton_links = track_link_mgmt
+
+        result = fetcher.fetch_and_extract(
+            MOCK_REPO, output_dir, extract_dir, release_tag=None
+        )
+
+        assert result == extract_dir
+        # Verify that link management WAS called when not using --release flag
+        assert link_mgmt_called, (
+            "Link management should be called when fetching latest release"
+        )
+
     def test_main_function_fetch_error_handling(self, mocker):
         """Test main function handles FetchError and exits with status 1."""
         mocker.patch("sys.argv", ["fetcher.py"])
