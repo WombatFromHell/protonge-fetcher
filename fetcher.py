@@ -751,13 +751,20 @@ class GitHubReleaseFetcher:
         if shutil.which("curl") is None:
             self._raise("curl is not available in PATH. Please install curl.")
 
-    def fetch_and_extract(self, repo: str, output_dir: Path, extract_dir: Path) -> Path:
+    def fetch_and_extract(
+        self,
+        repo: str,
+        output_dir: Path,
+        extract_dir: Path,
+        release_tag: Optional[str] = None,
+    ) -> Path:
         """Fetch the latest release asset and extract it to the target directory.
 
         Args:
             repo: Repository in format 'owner/repo'
             output_dir: Directory to download the asset to
             extract_dir: Directory to extract the asset to
+            release_tag: Optional specific release tag to use instead of the latest
 
         Returns:
             Path to the extracted directory
@@ -767,16 +774,34 @@ class GitHubReleaseFetcher:
         self._ensure_directory_is_writable(output_dir)
         self._ensure_directory_is_writable(extract_dir)
 
-        tag = self.fetch_latest_tag(repo)
-        logger.info(f"Fetching ProtonGE from {repo} tag {tag}")
+        if release_tag:
+            tag = release_tag
+            logger.info(f"Using manually specified release tag: {tag}")
+        else:
+            tag = self.fetch_latest_tag(repo)
+            logger.info(f"Fetching ProtonGE from {repo} tag {tag}")
 
         # Find the asset name based on the tag
-        asset_name = self.find_asset_by_name(repo, tag)
-        logger.info(f"Found asset: {asset_name}")
+        try:
+            asset_name = self.find_asset_by_name(repo, tag)
+            logger.info(f"Found asset: {asset_name}")
+        except FetchError as e:
+            if release_tag is not None:  # Explicit None check to satisfy type checker
+                logger.error(
+                    f"Failed to find asset for manually specified release tag '{release_tag}'. Please verify the tag exists and is correct."
+                )
+            raise e
 
         # Download to the output directory
         output_path = output_dir / asset_name
-        self.download_asset(repo, tag, asset_name, output_path)
+        try:
+            self.download_asset(repo, tag, asset_name, output_path)
+        except FetchError as e:
+            if release_tag is not None:  # Explicit None check to satisfy type checker
+                logger.error(
+                    f"Failed to download asset for manually specified release tag '{release_tag}'. Please verify the tag exists and is correct."
+                )
+            raise e
 
         # Check if the unpacked proton version directory already exists for this release
         unpacked_dir = extract_dir / tag
@@ -818,6 +843,11 @@ def main() -> None:
         help="Directory to download the asset to (default: ~/Downloads/)",
     )
     parser.add_argument(
+        "--release",
+        "-r",
+        help="Manually specify a release tag (e.g., GE-Proton10-11) to download instead of the latest",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging",
@@ -852,7 +882,9 @@ def main() -> None:
 
     try:
         fetcher = GitHubReleaseFetcher()
-        fetcher.fetch_and_extract(repo, output_dir, extract_dir)
+        fetcher.fetch_and_extract(
+            repo, output_dir, extract_dir, release_tag=args.release
+        )
         print("Success")
     except FetchError as e:
         print(f"Error: {e}")
