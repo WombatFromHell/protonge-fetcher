@@ -111,22 +111,40 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 30
 GITHUB_URL_PATTERN = r"/releases/tag/([^/?#]+)"
 
+# Constants for ProtonGE forks
+FORKS = {
+    "GE-Proton": {
+        "repo": "GloriousEggroll/proton-ge-custom",
+        "archive_format": ".tar.gz",
+    },
+    "Proton-EM": {"repo": "Etaash-mathamsetty/Proton", "archive_format": ".tar.xz"},
+}
+DEFAULT_FORK = "GE-Proton"
+
 
 class FetchError(Exception):
     """Raised when fetching or extracting a release fails."""
 
 
-def get_proton_ge_asset_name(tag: str) -> str:
+def get_proton_asset_name(tag: str, fork: str = "GE-Proton") -> str:
     """
-    Generate the expected ProtonGE asset name from a tag.
+    Generate the expected Proton asset name from a tag and fork.
 
     Args:
-        tag: The release tag (e.g., 'GE-Proton10-20')
+        tag: The release tag (e.g., 'GE-Proton10-20' for GE-Proton, 'EM-10.0-30' for Proton-EM)
+        fork: The fork name (default: 'GE-Proton')
 
     Returns:
-        The expected asset name (e.g., 'GE-Proton10-20.tar.gz')
+        The expected asset name (e.g., 'GE-Proton10-20.tar.gz' or 'proton-EM-10.0-30.tar.xz')
     """
-    return f"{tag}.tar.gz"
+    if fork == "Proton-EM":
+        # For Proton-EM, the asset name follows pattern: proton-<tag>.tar.xz
+        # e.g., tag 'EM-10.0-30' becomes 'proton-EM-10.0-30.tar.xz'
+        return f"proton-{tag}.tar.xz"
+    else:
+        # For GE-Proton, the asset name follows pattern: <tag>.tar.gz
+        # e.g., tag 'GE-Proton10-20' becomes 'GE-Proton10-20.tar.gz'
+        return f"{tag}.tar.gz"
 
 
 class GitHubReleaseFetcher:
@@ -293,13 +311,14 @@ class GitHubReleaseFetcher:
         logger.info(f"Found latest tag: {tag}")
         return tag
 
-    def find_asset_by_name(self, repo: str, tag: str) -> str:
-        """Find the ProtonGE asset in a GitHub release using the GitHub API first,
+    def find_asset_by_name(self, repo: str, tag: str, fork: str = "GE-Proton") -> str:
+        """Find the Proton asset in a GitHub release using the GitHub API first,
         falling back to HTML parsing if API fails.
 
         Args:
             repo: Repository in format 'owner/repo'
             tag: Release tag
+            fork: The fork name to determine asset naming convention
 
         Returns:
             The asset name
@@ -338,21 +357,30 @@ class GitHubReleaseFetcher:
 
             assets = release_data["assets"]
 
-            # Find the .tar.gz asset
-            tar_gz_assets = [
-                asset for asset in assets if asset["name"].lower().endswith(".tar.gz")
+            # Determine the expected extension based on fork
+            expected_extension = (
+                FORKS[fork]["archive_format"] if fork in FORKS else ".tar.gz"
+            )
+
+            # Find assets with the expected extension
+            matching_assets = [
+                asset
+                for asset in assets
+                if asset["name"].lower().endswith(expected_extension)
             ]
 
-            if tar_gz_assets:
-                # Return the name of the first .tar.gz asset
-                asset_name = tar_gz_assets[0]["name"]
+            if matching_assets:
+                # Return the name of the first matching asset
+                asset_name = matching_assets[0]["name"]
                 logger.info(f"Found asset via API: {asset_name}")
                 return asset_name
             else:
-                # If no .tar.gz assets found, use the first available asset as fallback
+                # If no matching extension assets found, use the first available asset as fallback
                 if assets:
                     asset_name = assets[0]["name"]
-                    logger.info(f"Found asset (non-tar.gz) via API: {asset_name}")
+                    logger.info(
+                        f"Found asset (non-matching extension) via API: {asset_name}"
+                    )
                     return asset_name
                 else:
                     raise Exception("No assets found in release")
@@ -363,8 +391,8 @@ class GitHubReleaseFetcher:
                 f"API approach failed: {api_error}. Falling back to HTML parsing."
             )
 
-            # Generate the expected asset name using the original approach
-            expected_asset_name = get_proton_ge_asset_name(tag)
+            # Generate the expected asset name using the appropriate naming convention
+            expected_asset_name = get_proton_asset_name(tag, fork)
             url = f"https://github.com/{repo}/releases/tag/{tag}"
             logger.info(f"Fetching release page: {url}")
 
@@ -530,11 +558,24 @@ class GitHubReleaseFetcher:
         logger.info(f"Downloaded asset to: {out_path}")
         return out_path
 
-    def extract_archive(self, archive_path: Path, target_dir: Path) -> None:
-        """Extract tar.gz archive to the target directory with progress bar.
+    def _ensure_xz_available(self) -> None:
+        """Check if xz is available in the environment for .tar.xz extraction.
+
+        Raises:
+            FetchError: If xz is not found in PATH
+        """
+        import shutil
+
+        if shutil.which("xz") is None:
+            self._raise(
+                "xz is not available in PATH. Please install xz-utils or equivalent for .tar.xz archive support."
+            )
+
+    def extract_xz_archive(self, archive_path: Path, target_dir: Path) -> None:
+        """Extract tar.xz archive to the target directory using system tar command.
 
         Args:
-            archive_path: Path to the tar.gz archive
+            archive_path: Path to the tar.xz archive
             target_dir: Directory to extract into
 
         Raises:
@@ -542,42 +583,100 @@ class GitHubReleaseFetcher:
         """
         target_dir.mkdir(parents=True, exist_ok=True)
 
+        # Check that xz is available before attempting extraction
+        self._ensure_xz_available()
+
         try:
-            with tarfile.open(archive_path) as tar:
-                members = tar.getmembers()
-                # Wrap the list of members directly with spinner
-                spinner = Spinner(
-                    iterable=iter(members),  # Convert list to iterator
-                    desc=f"Extracting {archive_path.name}",
-                    unit="file",
-                    disable=False,  # Always show spinner since we implemented it natively
-                    total=len(members),
+            cmd = [
+                "tar",
+                "-xJf",  # Extract .tar.xz
+                str(archive_path),  # Archive file
+                "-C",  # Extract to directory
+                str(target_dir),
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                self._raise(
+                    f"Failed to extract .tar.xz archive {archive_path}: {result.stderr}"
                 )
-                for member in spinner:
-                    tar.extract(member, path=target_dir, filter=tarfile.data_filter)
 
             logger.info(f"Extracted {archive_path} to {target_dir}")
-        except (tarfile.TarError, EOFError) as e:
-            self._raise(f"Failed to extract archive {archive_path}: {e}")
+        except subprocess.CalledProcessError as e:
+            self._raise(f"Failed to extract .tar.xz archive {archive_path}: {e}")
 
-    def _manage_ge_proton_links(self, extract_dir: Path, tag: str) -> None:
-        """Manage symbolic links for GE-Proton after extraction.
+    def extract_archive(self, archive_path: Path, target_dir: Path) -> None:
+        """Extract archive to the target directory with progress bar.
+        Supports both .tar.gz and .tar.xz formats.
+
+        Args:
+            archive_path: Path to the archive
+            target_dir: Directory to extract into
+
+        Raises:
+            FetchError: If extraction fails
+        """
+        if archive_path.suffix == ".xz":
+            self.extract_xz_archive(archive_path, target_dir)
+        else:
+            # Original .tar.gz extraction
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                with tarfile.open(archive_path) as tar:
+                    members = tar.getmembers()
+                    # Wrap the list of members directly with spinner
+                    spinner = Spinner(
+                        iterable=iter(members),  # Convert list to iterator
+                        desc=f"Extracting {archive_path.name}",
+                        unit="file",
+                        disable=False,  # Always show spinner since we implemented it natively
+                        total=len(members),
+                    )
+                    for member in spinner:
+                        tar.extract(member, path=target_dir, filter=tarfile.data_filter)
+
+                logger.info(f"Extracted {archive_path} to {target_dir}")
+            except (tarfile.TarError, EOFError) as e:
+                self._raise(f"Failed to extract archive {archive_path}: {e}")
+
+    def _manage_proton_links(
+        self, extract_dir: Path, tag: str, fork: str = "GE-Proton"
+    ) -> None:
+        """Manage symbolic links for Proton forks after extraction.
 
         This method:
-        1. Manages 3 prior versions: GE-Proton (latest), GE-Proton-Fallback, and GE-Proton-Fallback2
-        2. Shifts links down the chain (GE-Proton -> GE-Proton-Fallback -> GE-Proton-Fallback2)
-        3. Creates new GE-Proton link to the latest extracted version
+        1. For GE-Proton: Manages GE-Proton (latest), GE-Proton-Fallback, and GE-Proton-Fallback2
+        2. For Proton-EM: Manages Proton-EM (latest), Proton-EM-Fallback, and Proton-EM-Fallback2
+        3. Shifts links down the chain appropriately
+        4. Creates new main link to the latest extracted version
 
         Args:
             extract_dir: Directory where the archive was extracted
-            tag: The tag name of the release (e.g., 'GE-Proton10-20')
+            tag: The tag name of the release (e.g., 'GE-Proton10-20' or 'EM-10.0-30')
+            fork: The ProtonGE fork name for appropriate link naming
         """
-        ge_proton_link = extract_dir / "GE-Proton"
-        ge_proton_fallback = extract_dir / "GE-Proton-Fallback"
-        ge_proton_fallback2 = extract_dir / "GE-Proton-Fallback2"
+        # Define link names based on the fork
+        if fork == "Proton-EM":
+            main_link = extract_dir / "Proton-EM"
+            fallback_link = extract_dir / "Proton-EM-Fallback"
+            fallback2_link = extract_dir / "Proton-EM-Fallback2"
+        else:  # Default to GE-Proton links
+            main_link = extract_dir / "GE-Proton"
+            fallback_link = extract_dir / "GE-Proton-Fallback"
+            fallback2_link = extract_dir / "GE-Proton-Fallback2"
 
-        # The extracted directory should have the same name as the tag
-        extracted_dir = extract_dir / tag
+        # The extracted directory name is typically based on the archive name without extension
+        # For example: proton-EM-10.0-30.tar.xz extracts to proton-EM-10.0-30/
+        asset_name = get_proton_asset_name(tag, fork)
+        # Remove the extension to get the directory name
+        if asset_name.endswith(".tar.xz"):
+            extracted_dir = extract_dir / asset_name[:-7]  # Remove '.tar.xz'
+        elif asset_name.endswith(".tar.gz"):
+            extracted_dir = extract_dir / asset_name[:-7]  # Remove '.tar.gz'
+        else:
+            # Fallback to tag name if the extension pattern doesn't match
+            extracted_dir = extract_dir / tag
 
         # Verify that the extracted directory actually exists
         if not extracted_dir.exists() or not extracted_dir.is_dir():
@@ -586,34 +685,32 @@ class GitHubReleaseFetcher:
             )
             # Fallback to finding any directory that matches the expected pattern
             for item in extract_dir.iterdir():
-                if item.is_dir() and not item.is_symlink() and item.name == tag:
-                    extracted_dir = item
-                    break
+                if item.is_dir() and not item.is_symlink():
+                    # Check if it matches either the tag or the archive-based directory name
+                    if item.name == tag or item.name == extracted_dir.name:
+                        extracted_dir = item
+                        break
             else:
                 logger.warning(
-                    f"Could not find extracted directory matching the tag: {tag}"
+                    f"Could not find extracted directory matching the tag: {tag} or expected name: {extracted_dir.name}"
                 )
                 return
 
-        # Check if GE-Proton exists and is a real directory (not a link)
-        if (
-            ge_proton_link.exists()
-            and ge_proton_link.is_dir()
-            and not ge_proton_link.is_symlink()
-        ):
-            logger.info("GE-Proton exists as a real directory, bailing early")
+        # Check if main link exists and is a real directory (not a link)
+        if main_link.exists() and main_link.is_dir() and not main_link.is_symlink():
+            logger.info(f"{main_link.name} exists as a real directory, bailing early")
             return
 
         # Shift the fallback links down the chain:
-        # Current GE-Proton-Fallback2 target should be removed
-        # Current GE-Proton-Fallback becomes GE-Proton-Fallback2
-        # Current GE-Proton becomes GE-Proton-Fallback
-        # New version becomes GE-Proton
+        # Current fallback2 target should be removed
+        # Current fallback becomes fallback2
+        # Current main becomes fallback
+        # New version becomes main
 
-        # First, handle GE-Proton-Fallback2 (remove its target directory)
-        if ge_proton_fallback2.exists() and ge_proton_fallback2.is_symlink():
+        # First, handle fallback2 (remove its target directory)
+        if fallback2_link.exists() and fallback2_link.is_symlink():
             try:
-                fallback2_target = ge_proton_fallback2.resolve()
+                fallback2_target = fallback2_link.resolve()
                 if fallback2_target.exists() and fallback2_target.is_dir():
                     import shutil
 
@@ -622,69 +719,71 @@ class GitHubReleaseFetcher:
             except (FileNotFoundError, OSError) as e:
                 logger.warning(f"Could not remove old fallback2 target: {e}")
 
-        # Then move GE-Proton-Fallback to GE-Proton-Fallback2
-        if ge_proton_fallback.exists():
+        # Then move fallback to fallback2
+        if fallback_link.exists():
             try:
-                ge_proton_fallback.rename(ge_proton_fallback2)
-                logger.info("Moved GE-Proton-Fallback to GE-Proton-Fallback2")
+                fallback_link.rename(fallback2_link)
+                logger.info(f"Moved {fallback_link.name} to {fallback2_link.name}")
             except OSError as e:
                 logger.warning(
-                    f"Could not move GE-Proton-Fallback to GE-Proton-Fallback2: {e}"
+                    f"Could not move {fallback_link.name} to {fallback2_link.name}: {e}"
                 )
                 # If we can't rename, try removing the old fallback2 and continuing
-                if ge_proton_fallback2.exists():
+                if fallback2_link.exists():
                     try:
-                        ge_proton_fallback2.unlink()
+                        fallback2_link.unlink()
                     except OSError:
                         pass
 
-        # Then move GE-Proton to GE-Proton-Fallback
-        if ge_proton_link.exists() and ge_proton_link.is_symlink():
+        # Then move main to fallback
+        if main_link.exists() and main_link.is_symlink():
             try:
-                current_target = ge_proton_link.resolve()
+                current_target = main_link.resolve()
                 if current_target.exists():
-                    # Move current GE-Proton link to GE-Proton-Fallback
-                    ge_proton_link.rename(ge_proton_fallback)
-                    logger.info("Moved old GE-Proton link to GE-Proton-Fallback")
+                    # Move current main link to fallback
+                    main_link.rename(fallback_link)
+                    logger.info(
+                        f"Moved old {main_link.name} link to {fallback_link.name}"
+                    )
                 else:
                     logger.warning(
-                        "GE-Proton link points to non-existent target, removing it"
+                        f"{main_link.name} link points to non-existent target, removing it"
                     )
-                    ge_proton_link.unlink()
+                    main_link.unlink()
             except (OSError, RuntimeError) as e:
                 logger.warning(
-                    f"Error resolving GE-Proton link: {e}. Removing and recreating."
+                    f"Error resolving {main_link.name} link: {e}. Removing and recreating."
                 )
-                ge_proton_link.unlink()
-        elif ge_proton_link.exists():
+                main_link.unlink()
+        elif main_link.exists():
             # If it's not a symlink, it's a real directory, just remove it
             try:
-                ge_proton_link.unlink()
+                main_link.unlink()
             except OSError:
                 import shutil
 
-                shutil.rmtree(ge_proton_link)
+                shutil.rmtree(main_link)
 
         # Handle cases where fallback directories exist as real directories rather than links
         if (
-            ge_proton_fallback.exists()
-            and ge_proton_fallback.is_dir()
-            and not ge_proton_fallback.is_symlink()
+            fallback_link.exists()
+            and fallback_link.is_dir()
+            and not fallback_link.is_symlink()
         ):
             import shutil
 
-            shutil.rmtree(ge_proton_fallback)
-            logger.info("Removed real directory GE-Proton-Fallback to create link")
+            shutil.rmtree(fallback_link)
+            logger.info(f"Removed real directory {fallback_link.name} to create link")
 
         if (
-            ge_proton_fallback2.exists()
-            and ge_proton_fallback2.is_dir()
-            and not ge_proton_fallback2.is_symlink()
+            fallback2_link.exists()
+            and fallback2_link.is_dir()
+            and not fallback2_link.is_symlink()
         ):
             import shutil
 
-            shutil.rmtree(ge_proton_fallback2)
-            logger.info("Removed real directory GE-Proton-Fallback2 to create link")
+            shutil.rmtree(fallback2_link)
+            logger.info(f"Removed real directory {fallback2_link.name} to create link")
 
         # Validate that the target directory exists before creating the symlink
         if not extracted_dir.exists() or not extracted_dir.is_dir():
@@ -693,18 +792,20 @@ class GitHubReleaseFetcher:
             )
             return
 
-        # Create new GE-Proton symlink pointing to the extracted directory using relative path
+        # Create new main link pointing to the extracted directory using relative path
         relative_target = None
         try:
-            if ge_proton_link.exists():
-                ge_proton_link.unlink()  # Remove any existing link/file first
+            if main_link.exists():
+                main_link.unlink()  # Remove any existing link/file first
             # Use relative path instead of absolute path for the symlink target
             relative_target = extracted_dir.relative_to(extract_dir)
-            ge_proton_link.symlink_to(relative_target)
-            logger.info(f"Created new GE-Proton link pointing to {relative_target}")
+            main_link.symlink_to(relative_target)
+            logger.info(
+                f"Created new {main_link.name} link pointing to {relative_target}"
+            )
         except (OSError, RuntimeError) as e:
             logger.error(
-                f"Failed to create symlink {ge_proton_link} -> {relative_target}: {e}"
+                f"Failed to create symlink {main_link} -> {relative_target}: {e}"
             )
 
     def _ensure_directory_is_writable(self, path: Path) -> None:
@@ -757,6 +858,7 @@ class GitHubReleaseFetcher:
         output_dir: Path,
         extract_dir: Path,
         release_tag: Optional[str] = None,
+        fork: str = "GE-Proton",
     ) -> Path:
         """Fetch the latest release asset and extract it to the target directory.
 
@@ -765,6 +867,7 @@ class GitHubReleaseFetcher:
             output_dir: Directory to download the asset to
             extract_dir: Directory to extract the asset to
             release_tag: Optional specific release tag to use instead of the latest
+            fork: The ProtonGE fork name to determine asset naming
 
         Returns:
             Path to the extracted directory
@@ -779,11 +882,11 @@ class GitHubReleaseFetcher:
             logger.info(f"Using manually specified release tag: {tag}")
         else:
             tag = self.fetch_latest_tag(repo)
-            logger.info(f"Fetching ProtonGE from {repo} tag {tag}")
+            logger.info(f"Fetching from {fork} ({repo}) tag {tag}")
 
-        # Find the asset name based on the tag
+        # Find the asset name based on the tag and fork
         try:
-            asset_name = self.find_asset_by_name(repo, tag)
+            asset_name = self.find_asset_by_name(repo, tag, fork)
             logger.info(f"Found asset: {asset_name}")
         except FetchError as e:
             if release_tag is not None:  # Explicit None check to satisfy type checker
@@ -816,10 +919,10 @@ class GitHubReleaseFetcher:
 
         # Manage symbolic links after successful extraction
         # Skip link management when manually specifying a release to prevent any link changes
-        # This ensures that potentially older releases won't change an existing './GE-Proton' link
+        # This ensures that potentially older releases won't change an existing links
         if release_tag is None:
             # When fetching latest, manage links as normal
-            self._manage_ge_proton_links(extract_dir, tag)
+            self._manage_proton_links(extract_dir, tag, fork)
         else:
             # When manually specifying a release, always skip link management
             logger.info(
@@ -857,6 +960,13 @@ def main() -> None:
         help="Manually specify a release tag (e.g., GE-Proton10-11) to download instead of the latest",
     )
     parser.add_argument(
+        "--fork",
+        "-f",
+        default=DEFAULT_FORK,
+        choices=list(FORKS.keys()),
+        help=f"ProtonGE fork to download (default: {DEFAULT_FORK}, available: {', '.join(FORKS.keys())})",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging",
@@ -886,13 +996,14 @@ def main() -> None:
         # If running test, log to make sure it's captured by caplog
         logger.debug("Debug logging enabled")
 
-    # target `github.com/GloriousEggroll/proton-ge-custom/releases/latest`
-    repo = "GloriousEggroll/proton-ge-custom"
+    # Get the repo based on selected fork
+    repo = FORKS[args.fork]["repo"]
+    logger.info(f"Using fork: {args.fork} ({repo})")
 
     try:
         fetcher = GitHubReleaseFetcher()
         fetcher.fetch_and_extract(
-            repo, output_dir, extract_dir, release_tag=args.release
+            repo, output_dir, extract_dir, release_tag=args.release, fork=args.fork
         )
         print("Success")
     except FetchError as e:

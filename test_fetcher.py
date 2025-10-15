@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from fetcher import (
     FetchError,
     GitHubReleaseFetcher,
-    get_proton_ge_asset_name,
+    get_proton_asset_name,
     DEFAULT_TIMEOUT,
     Spinner,
 )
@@ -89,7 +89,7 @@ class TestFetchAndExtractWorkflow:
         mocker.patch("tarfile.open", return_value=mock_tar)
 
         # Mock the symlink management to avoid actual filesystem ops
-        mocker.patch.object(fetcher, "_manage_ge_proton_links")
+        mocker.patch.object(fetcher, "_manage_proton_links")
 
         # Run the workflow
         result = fetcher.fetch_and_extract(MOCK_REPO, output_dir, extract_dir)
@@ -130,7 +130,7 @@ class TestFetchAndExtractWorkflow:
         mocker.patch.object(fetcher, "_ensure_directory_is_writable")
         mocker.patch.object(fetcher, "_ensure_curl_available")
         mocker.patch("tarfile.open")
-        mocker.patch.object(fetcher, "_manage_ge_proton_links")
+        mocker.patch.object(fetcher, "_manage_proton_links")
 
         result = fetcher.fetch_and_extract(
             MOCK_REPO, output_dir, extract_dir, release_tag=manual_tag
@@ -200,9 +200,37 @@ class TestAssetFetching:
             ("GE-Proton9-15", "GE-Proton9-15.tar.gz"),
         ],
     )
-    def test_get_proton_ge_asset_name(self, tag, expected):
-        """Test asset name generation for various tags."""
-        assert get_proton_ge_asset_name(tag) == expected
+    def test_get_proton_ge_asset_name_default_fork(self, tag, expected):
+        """Test asset name generation for GE-Proton fork (default)."""
+        assert get_proton_asset_name(tag) == expected
+
+    @pytest.mark.parametrize(
+        "tag,expected",
+        [
+            ("EM-10.0-30", "proton-EM-10.0-30.tar.xz"),
+            ("EM-9.0-20", "proton-EM-9.0-20.tar.xz"),
+            ("EM-8.0-10", "proton-EM-8.0-10.tar.xz"),
+        ],
+    )
+    def test_get_proton_em_asset_name(self, tag, expected):
+        """Test asset name generation for Proton-EM fork."""
+        assert get_proton_asset_name(tag, "Proton-EM") == expected
+
+    @pytest.mark.parametrize(
+        "tag,fork,expected",
+        [
+            ("GE-Proton10-20", "GE-Proton", "GE-Proton10-20.tar.gz"),
+            ("EM-10.0-30", "Proton-EM", "proton-EM-10.0-30.tar.xz"),
+            (
+                "test-tag",
+                "Unknown-Fork",
+                "test-tag.tar.gz",
+            ),  # Default to .tar.gz for unknown forks
+        ],
+    )
+    def test_get_proton_asset_name_with_fork_parameter(self, tag, fork, expected):
+        """Test asset name generation with explicit fork parameter."""
+        assert get_proton_asset_name(tag, fork) == expected
 
     @pytest.mark.parametrize(
         "redirect_url,expected_tag",
@@ -562,7 +590,7 @@ class TestSymlinkManagement:
         extracted = extract_dir / MOCK_TAG
         extracted.mkdir()
 
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # GE-Proton should still be a real directory
         assert ge_proton.is_dir() and not ge_proton.is_symlink()
@@ -584,7 +612,7 @@ class TestSymlinkManagement:
         extracted = extract_dir / MOCK_TAG
         extracted.mkdir()
 
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # Verify link structure
         assert ge_proton.is_symlink()
@@ -920,7 +948,7 @@ class TestSymlinkManagementAdvanced:
         extracted.mkdir()
 
         # Should unlink the broken symlink and create new one
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # Verify the link exists - it may still point to the nonexistent path
         # because symlink_to fails if symlink already exists
@@ -946,7 +974,7 @@ class TestSymlinkManagementAdvanced:
         v3 = extract_dir / MOCK_TAG
         v3.mkdir()
 
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # Verify chain: GE-Proton -> v3, Fallback -> v2, Fallback2 doesn't exist
         assert ge_proton.resolve() == v3
@@ -981,7 +1009,7 @@ class TestSymlinkManagementAdvanced:
         new_version = extract_dir / MOCK_TAG
         new_version.mkdir()
 
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # Verify old_v2 was deleted
         assert not old_v2.exists()
@@ -1011,7 +1039,7 @@ class TestSymlinkManagementAdvanced:
         new_version = extract_dir / MOCK_TAG
         new_version.mkdir()
 
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # Verify old fallback2 target (v1) was deleted
         assert not v1.exists()
@@ -1048,7 +1076,7 @@ class TestSymlinkManagementAdvanced:
         new_version = extract_dir / MOCK_TAG
         new_version.mkdir()
 
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # Should handle the nonexistent target gracefully
         assert (extract_dir / "GE-Proton").resolve() == new_version
@@ -1085,7 +1113,7 @@ class TestSymlinkManagementAdvanced:
         new_version.mkdir()
 
         # This should handle the rename failure gracefully
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
     def test_manage_links_with_nonexistent_ge_proton_target(
         self, mocker, fetcher, tmp_path
@@ -1107,7 +1135,7 @@ class TestSymlinkManagementAdvanced:
         mocker.patch("fetcher.logger.warning")
         # Capture any errors in the logger as well
         mocker.patch("fetcher.logger.error")
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # The implementation should still result in a link being created, even if there was a warning/error
         # The test is about the control flow, not about the final state being perfect
@@ -1135,7 +1163,7 @@ class TestSymlinkManagementAdvanced:
         mocker.patch.object(Path, "resolve", side_effect=mock_resolve)
 
         # This should handle the resolve error gracefully
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)
+        fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
     def test_manage_links_with_extracted_dir_not_found(self, fetcher, tmp_path):
         """Test link management when extracted directory matching tag is not found."""
@@ -1147,7 +1175,9 @@ class TestSymlinkManagementAdvanced:
         different_version.mkdir()
 
         # Call with tag that doesn't match the existing directory
-        fetcher._manage_ge_proton_links(extract_dir, MOCK_TAG)  # MOCK_TAG doesn't exist
+        fetcher._manage_proton_links(
+            extract_dir, MOCK_TAG, "GE-Proton"
+        )  # MOCK_TAG doesn't exist
 
         # Should handle gracefully when extracted directory is not found
         # (no links should be created since the extracted directory doesn't match the tag)
@@ -1314,10 +1344,10 @@ class TestMainFunction:
         # Track if link management was called
         link_mgmt_called = []
 
-        def track_link_mgmt(extract_dir, tag):
-            link_mgmt_called.append((extract_dir, tag))
+        def track_link_mgmt(extract_dir, tag, fork="GE-Proton"):
+            link_mgmt_called.append((extract_dir, tag, fork))
 
-        fetcher._manage_ge_proton_links = track_link_mgmt
+        fetcher._manage_proton_links = track_link_mgmt
 
         result = fetcher.fetch_and_extract(
             MOCK_REPO, output_dir, extract_dir, release_tag=manual_tag
@@ -1369,10 +1399,10 @@ class TestMainFunction:
         # Track if link management was called
         link_mgmt_called = []
 
-        def track_link_mgmt(extract_dir, tag):
-            link_mgmt_called.append((extract_dir, tag))
+        def track_link_mgmt(extract_dir, tag, fork="GE-Proton"):
+            link_mgmt_called.append((extract_dir, tag, fork))
 
-        fetcher._manage_ge_proton_links = track_link_mgmt
+        fetcher._manage_proton_links = track_link_mgmt
 
         result = fetcher.fetch_and_extract(
             MOCK_REPO, output_dir, extract_dir, release_tag=None
