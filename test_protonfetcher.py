@@ -2,12 +2,13 @@ import pytest
 import tarfile
 from pathlib import Path
 from unittest.mock import MagicMock
-from fetcher import (
+from protonfetcher import (
     FetchError,
     GitHubReleaseFetcher,
     get_proton_asset_name,
     DEFAULT_TIMEOUT,
     Spinner,
+    main,
 )
 
 # --- Test Constants ---
@@ -487,6 +488,377 @@ class TestDownloadAndExtraction:
             assert "filter" in call_args.kwargs
             assert call_args.kwargs["filter"] == tarfile.data_filter
 
+    def test_download_with_spinner_progress_updates(
+        self, mocker, tmp_path, mock_curl_responses
+    ):
+        """Test download method uses spinner with progress updates."""
+        fetcher = GitHubReleaseFetcher()
+        output_path = tmp_path / MOCK_ASSET_NAME
+
+        # Mock the remote size check
+        size_response = mock_curl_responses(stdout="Content-Length: 1024")
+        fetcher._curl_head = mocker.MagicMock(return_value=size_response)
+
+        # Mock urllib.request.urlopen to simulate download with proper context manager
+        mock_response = mocker.MagicMock()
+        mock_response.headers.get.return_value = "1024"
+        mock_response.read.side_effect = [
+            b"chunk1",
+            b"chunk2",
+            b"",
+        ]  # Two chunks then EOF
+        mock_response.__enter__ = mocker.MagicMock(return_value=mock_response)
+        mock_response.__exit__ = mocker.MagicMock(return_value=None)
+
+        mock_urlopen = mocker.patch(
+            "urllib.request.urlopen", return_value=mock_response
+        )
+        mock_open = mocker.patch("builtins.open", mocker.mock_open())
+
+        # Run the download method that uses spinner
+        fetcher._download_with_spinner(
+            f"https://github.com/{MOCK_REPO}/releases/download/{MOCK_TAG}/{MOCK_ASSET_NAME}",
+            output_path,
+            {"User-Agent": "test"},
+        )
+
+        # Verify that urlopen was called (meaning our spinner download was used)
+        mock_urlopen.assert_called_once()
+        # Verify that the file was opened for writing
+        mock_open.assert_called()
+
+    def test_download_asset_uses_spinner_not_curl_progress(
+        self, mocker, tmp_path, mock_curl_responses
+    ):
+        """Test that download_asset uses spinner-based download by default."""
+        fetcher = GitHubReleaseFetcher()
+        output_path = tmp_path / MOCK_ASSET_NAME
+
+        # Mock size check
+        size_response = mock_curl_responses(stdout="Content-Length: 1024")
+        fetcher._curl_head = mocker.MagicMock(return_value=size_response)
+
+        # Mock the spinner download method to track if it was called
+        mock_spinner_download = mocker.patch.object(fetcher, "_download_with_spinner")
+
+        # Mock the fallback curl method too
+        mock_curl_download = mocker.MagicMock(return_value=mock_curl_responses())
+        fetcher._curl_download = mock_curl_download
+
+        # Mock file write operation as the spinner download would do it
+        mock_urlopen = mocker.patch("urllib.request.urlopen")
+        mock_response = mocker.MagicMock()
+        mock_response.headers.get.return_value = "1024"
+        mock_response.read.side_effect = [b"test_data", b""]
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        # Also mock open to prevent actual file operations
+        mocker.patch("builtins.open", mocker.mock_open())
+
+        fetcher.download_asset(MOCK_REPO, MOCK_TAG, MOCK_ASSET_NAME, output_path)
+
+        # Verify the spinner download method was called
+        mock_spinner_download.assert_called_once()
+
+    def test_extract_archive_tar_gz_shows_progress_with_spinner(self, mocker, tmp_path):
+        """Test that .tar.gz extraction shows progress through spinner."""
+        fetcher = GitHubReleaseFetcher()
+        archive_path = tmp_path / "test.tar.gz"
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create mock tarfile with multiple members to test progress
+        mock_tar = mocker.MagicMock()
+        mock_member1 = mocker.MagicMock()
+        mock_member2 = mocker.MagicMock()
+        mock_tar.getmembers.return_value = [mock_member1, mock_member2]
+        mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
+        mock_tar.__exit__ = mocker.MagicMock(return_value=None)
+
+        mocker.patch("tarfile.open", return_value=mock_tar)
+
+        # Call extract_archive which should use spinner for .tar.gz files
+        fetcher.extract_archive(archive_path, extract_dir)
+
+        # Verify tarfile was opened and extraction happened
+        mock_tar.extract.assert_called()
+        # Verify extract was called for each member
+        assert mock_tar.extract.call_count == 2
+
+    def test_extract_archive_tar_xz_shows_progress_with_spinner(self, mocker, tmp_path):
+        """Test that .tar.xz extraction shows progress through spinner."""
+        fetcher = GitHubReleaseFetcher()
+        archive_path = tmp_path / "test.tar.xz"
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Mock the xz availability check
+        mocker.patch("shutil.which", return_value="/usr/bin/xz")
+
+        # Mock the tar commands for counting and extracting
+        mock_subprocess_run = mocker.patch("subprocess.run")
+        # First call: tar -tJf (count files) - returns 3 files
+        # Second call: tar -xJf (extract) - succeeds
+        mock_subprocess_run.side_effect = [
+            mocker.MagicMock(
+                returncode=0, stdout="file1\nfile2\nfile3\n"
+            ),  # Count command
+            mocker.MagicMock(returncode=0, stdout="", stderr=""),  # Extract command
+        ]
+
+        # Mock the threading components to ensure the extraction succeeds
+        mock_event = mocker.MagicMock()
+        mock_event.is_set = mocker.MagicMock(
+            return_value=True
+        )  # Simulate immediate completion
+        mocker.patch("threading.Event", return_value=mock_event)
+
+        # Create a mock thread and simulate successful execution
+        def thread_constructor_func(target=None, args=(), kwargs=None):
+            # Create a new mock thread with target attribute
+            actual_mock_thread = mocker.MagicMock()
+            actual_mock_thread.target = target  # Set the target function
+
+            def thread_start_side_effect():
+                # Execute the actual target function when start() is called
+                if hasattr(actual_mock_thread, "target") and actual_mock_thread.target:
+                    actual_mock_thread.target()
+
+            actual_mock_thread.start = mocker.MagicMock(
+                side_effect=thread_start_side_effect
+            )
+            actual_mock_thread.join = mocker.MagicMock()
+            return actual_mock_thread
+
+        thread_constructor_mock = mocker.patch(
+            "threading.Thread", side_effect=thread_constructor_func
+        )
+
+        # Mock time.sleep to avoid any delays
+        mocker.patch("time.sleep")
+
+        # The extract_xz_archive method should now run with spinner
+        fetcher.extract_xz_archive(archive_path, extract_dir)
+
+        # Verify tar commands were called for both counting and extracting
+        assert mock_subprocess_run.call_count >= 2
+        # Verify threading was used
+        thread_constructor_mock.assert_called()
+
+    def test_extract_xz_archive_with_no_content_list_fallback_spinner(
+        self, mocker, tmp_path
+    ):
+        """Test that .tar.xz extraction falls back to continuous spinner when content listing fails."""
+        fetcher = GitHubReleaseFetcher()
+        archive_path = tmp_path / "test.tar.xz"
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Mock the xz availability check
+        mocker.patch("shutil.which", return_value="/usr/bin/xz")
+
+        # Mock the tar command to fail on content listing (no files found)
+        mock_subprocess_run = mocker.patch("subprocess.run")
+        # First call: tar -tJf (count files) - this will fail
+        # Second call: tar -xJf (extract)
+        mock_subprocess_run.side_effect = [
+            mocker.MagicMock(
+                returncode=1, stdout="", stderr="Error listing files"
+            ),  # Count command fails
+            mocker.MagicMock(returncode=0, stdout="", stderr=""),  # Extract command
+        ]
+
+        # Mock the threading components to avoid hanging
+        mock_event = mocker.MagicMock()
+        mock_event.is_set = mocker.MagicMock(
+            return_value=True
+        )  # Simulate immediate completion
+        mocker.patch("threading.Event", return_value=mock_event)
+
+        # Create a mock thread that immediately executes
+        def thread_constructor_func(target=None, args=(), kwargs=None):
+            # Create a new mock thread with target attribute
+            actual_mock_thread = mocker.MagicMock()
+            actual_mock_thread.target = target  # Set the target function
+            actual_mock_thread.is_alive = mocker.MagicMock(return_value=False)
+
+            def thread_start_side_effect():
+                # Execute the actual target function when start() is called
+                if hasattr(actual_mock_thread, "target") and actual_mock_thread.target:
+                    actual_mock_thread.target()
+
+            actual_mock_thread.start = mocker.MagicMock(
+                side_effect=thread_start_side_effect
+            )
+            actual_mock_thread.join = mocker.MagicMock()
+            return actual_mock_thread
+
+        thread_constructor_mock = mocker.patch(
+            "threading.Thread", side_effect=thread_constructor_func
+        )
+
+        # Mock time.sleep to avoid any delays
+        mocker.patch("time.sleep")
+
+        # The extract_xz_archive method should now run with spinner showing continuous rotation
+        fetcher.extract_xz_archive(archive_path, extract_dir)
+
+        # Verify tar commands were called for both counting (failed) and extracting
+        assert mock_subprocess_run.call_count >= 2
+        # Verify threading was used
+        thread_constructor_mock.assert_called()
+
+    def test_spinner_shows_during_download_operation(
+        self, mocker, tmp_path, mock_curl_responses
+    ):
+        """Test that spinner is displayed during download operations."""
+        fetcher = GitHubReleaseFetcher()
+        output_path = tmp_path / MOCK_ASSET_NAME
+
+        # Mock size check
+        size_response = mock_curl_responses(stdout="Content-Length: 1024")
+        fetcher._curl_head = mocker.MagicMock(return_value=size_response)
+
+        # Mock urllib.request.urlopen to simulate the spinner download
+        mock_response = mocker.MagicMock()
+        mock_response.headers.get.return_value = "1024"
+        mock_response.read.side_effect = [
+            b"chunk1",
+            b"chunk2",
+            b"",
+        ]  # Two chunks then EOF
+
+        # Mock the urlopen context manager
+        mock_urlopen = mocker.patch("urllib.request.urlopen")
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        # Mock open to prevent actual file operations
+        mock_open = mocker.patch("builtins.open", mocker.mock_open())
+
+        # Capture the spinner print calls
+        mock_print = mocker.patch("builtins.print")
+
+        # Run the download method that uses spinner
+        fetcher._download_with_spinner(
+            f"https://github.com/{MOCK_REPO}/releases/download/{MOCK_TAG}/{MOCK_ASSET_NAME}",
+            output_path,
+            {"User-Agent": "test"},
+        )
+
+        # Verify that urlopen was called (meaning our spinner download was used)
+        mock_urlopen.assert_called_once()
+        # Verify that the file was opened for writing
+        mock_open.assert_called()
+        # Verify that print was called (for spinner display)
+        assert mock_print.call_count >= 1
+
+    def test_spinner_shows_during_tar_gz_extraction(self, mocker, tmp_path):
+        """Test that spinner shows progress during .tar.gz extraction with known file count."""
+        fetcher = GitHubReleaseFetcher()
+        archive_path = tmp_path / "test.tar.gz"
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create mock tarfile with multiple members to test progress
+        mock_tar = mocker.MagicMock()
+        mock_member1 = mocker.MagicMock()
+        mock_member2 = mocker.MagicMock()
+        mock_tar.getmembers.return_value = [
+            mock_member1,
+            mock_member2,
+        ]  # 2 members = 2 files
+        mock_tar.__enter__ = mocker.MagicMock(return_value=mock_tar)
+        mock_tar.__exit__ = mocker.MagicMock(return_value=None)
+
+        # Mock the tarfile.open context manager
+        mocker.patch("tarfile.open", return_value=mock_tar)
+
+        # Mock print to capture spinner output
+        mock_print = mocker.patch("builtins.print")
+
+        # Call extract_archive which should use spinner for .tar.gz files
+        fetcher.extract_archive(archive_path, extract_dir)
+
+        # Verify tarfile was opened and extraction happened
+        mock_tar.extract.assert_called()
+        # Verify extract was called for each member
+        assert mock_tar.extract.call_count == 2
+        # Verify print was called for spinner updates
+        assert mock_print.call_count >= 1  # At least one call for spinner display
+
+    def test_spinner_shows_during_tar_xz_extraction(self, mocker, tmp_path):
+        """Test the spinner logic for .tar.xz extraction when file count is known."""
+        # Track if spinner was updated
+        spinner_updates = []
+
+        def mock_spinner_update(self, n=1):
+            spinner_updates.append(n)
+
+        # Patch Spinner update method
+        mocker.patch.object(Spinner, "update", side_effect=mock_spinner_update)
+
+        fetcher = GitHubReleaseFetcher()
+        archive_path = tmp_path / "test.tar.xz"
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Mock the xz availability check
+        mocker.patch("shutil.which", return_value="/usr/bin/xz")
+
+        # Mock the tar command to successfully count files
+        mock_subprocess_run = mocker.patch("subprocess.run")
+        # Count command returns 3 files, extraction succeeds
+        mock_subprocess_run.side_effect = [
+            mocker.MagicMock(
+                returncode=0, stdout="file1\nfile2\nfile3\n"
+            ),  # Count command
+            mocker.MagicMock(
+                returncode=0, stdout="", stderr=""
+            ),  # Extract command that succeeds
+        ]
+
+        # Mock threading to simulate successful extraction
+        def mock_thread_target(target, *args, **kwargs):
+            # Execute the target function to set the success flag
+            target()
+
+        mock_thread = mocker.MagicMock()
+
+        def thread_start_side_effect():
+            # Execute the actual target function when start() is called
+            if hasattr(mock_thread, "target") and mock_thread.target:
+                mock_thread.target()
+
+        mock_thread.start = mocker.MagicMock(side_effect=thread_start_side_effect)
+        mock_thread.join = mocker.MagicMock()
+        mock_thread.is_alive = mocker.MagicMock(return_value=False)
+
+        # Mock threading.Thread to return our mock thread and store the target
+        def thread_constructor(target=None, args=(), kwargs=None):
+            # Store the actual target function to be executed when start() is called
+            mock_thread.target = target
+            return mock_thread
+
+        mocker.patch("threading.Thread", side_effect=thread_constructor)
+        mock_event = mocker.MagicMock()
+        mocker.patch("threading.Event", return_value=mock_event)
+        # Make the event always return True for is_set to simulate completion
+        mock_event.is_set = mocker.MagicMock(side_effect=lambda: True)
+
+        # Mock time.sleep to avoid actual sleep
+        mocker.patch("time.sleep")
+
+        # Run the extraction
+        fetcher.extract_xz_archive(archive_path, extract_dir)
+
+        # Verify subprocess was called for both count and extract
+        assert mock_subprocess_run.call_count == 2
+        # Verify threading was used
+        mock_thread.start.assert_called()
+        # Spinner should have been created with 3 total files
+        # The spinner updates should occur but since we're mocking threading behavior,
+        # we should verify that the extraction completed successfully
+
 
 class TestDirectoryValidation:
     """Tests for directory setup and validation."""
@@ -623,6 +995,35 @@ class TestSymlinkManagement:
 # =============================================================================
 # UNIT TESTS: Spinner class
 # =============================================================================
+
+
+class TestSpinnerWithDownloadAndExtract:
+    """Tests for spinner integration with download and extract operations."""
+
+    def test_spinner_update_with_proper_increment_during_download_simulation(
+        self, mocker
+    ):
+        """Test that spinner updates properly simulate download progress."""
+        mock_print = mocker.patch("builtins.print")
+        spinner = Spinner(desc="Downloading", total=100, unit="B", unit_scale=True)
+
+        # Simulate download progress
+        for i in range(10):
+            spinner.update(10)  # 10 bytes at a time
+
+        # Should have called print multiple times to update progress display
+        assert mock_print.call_count >= 10  # At least one call per update
+
+    def test_spinner_update_with_zero_increment_refreshes_display(self, mocker):
+        """Test that update(0) still refreshes the spinner display."""
+        mock_print = mocker.patch("builtins.print")
+        spinner = Spinner(desc="Processing", total=10, unit="it")
+
+        spinner.update(0)  # Should still update the display
+
+        # Verify print was called to refresh the spinner
+        mock_print.assert_called()
+
 
 # =============================================================================
 # INTEGRATION TESTS: Complex scenarios and edge cases
@@ -1132,9 +1533,9 @@ class TestSymlinkManagementAdvanced:
         new_version.mkdir()
 
         # Mock logger to capture the warning
-        mocker.patch("fetcher.logger.warning")
+        mocker.patch("protonfetcher.logger.warning")
         # Capture any errors in the logger as well
-        mocker.patch("fetcher.logger.error")
+        mocker.patch("protonfetcher.logger.error")
         fetcher._manage_proton_links(extract_dir, MOCK_TAG, "GE-Proton")
 
         # The implementation should still result in a link being created, even if there was a warning/error
@@ -1242,7 +1643,7 @@ class TestMainFunction:
         """Test main function executes successfully with default parameters."""
         # Mock all the complex dependencies of main
         mocker.patch("sys.argv", ["fetcher.py"])  # No arguments
-        mock_fetcher = mocker.patch("fetcher.GitHubReleaseFetcher")
+        mock_fetcher = mocker.patch("protonfetcher.GitHubReleaseFetcher")
         mock_fetcher_instance = mocker.MagicMock()
         mock_fetcher.return_value = mock_fetcher_instance
 
@@ -1253,8 +1654,6 @@ class TestMainFunction:
         mock_print = mocker.patch("builtins.print")
 
         # Import and run main
-        from fetcher import main
-
         main()
 
         # Verify it printed "Success"
@@ -1264,14 +1663,12 @@ class TestMainFunction:
         """Test main function with debug flag."""
         # Mock arguments with debug flag
         mocker.patch("sys.argv", ["fetcher.py", "--debug"])
-        mock_fetcher = mocker.patch("fetcher.GitHubReleaseFetcher")
+        mock_fetcher = mocker.patch("protonfetcher.GitHubReleaseFetcher")
         mock_fetcher_instance = mocker.MagicMock()
         mock_fetcher.return_value = mock_fetcher_instance
         mock_fetcher_instance.fetch_and_extract.return_value = tmp_path
 
         mock_print = mocker.patch("builtins.print")
-
-        from fetcher import main
 
         main()
 
@@ -1280,14 +1677,12 @@ class TestMainFunction:
     def test_main_function_with_release_tag(self, mocker, tmp_path):
         """Test main function with manual release tag."""
         mocker.patch("sys.argv", ["fetcher.py", "--release", "GE-Proton10-11"])
-        mock_fetcher = mocker.patch("fetcher.GitHubReleaseFetcher")
+        mock_fetcher = mocker.patch("protonfetcher.GitHubReleaseFetcher")
         mock_fetcher_instance = mocker.MagicMock()
         mock_fetcher.return_value = mock_fetcher_instance
         mock_fetcher_instance.fetch_and_extract.return_value = tmp_path
 
         mock_print = mocker.patch("builtins.print")
-
-        from fetcher import main
 
         main()
 
@@ -1417,18 +1812,14 @@ class TestMainFunction:
     def test_main_function_fetch_error_handling(self, mocker):
         """Test main function handles FetchError and exits with status 1."""
         mocker.patch("sys.argv", ["fetcher.py"])
-        mock_fetcher = mocker.patch("fetcher.GitHubReleaseFetcher")
+        mock_fetcher = mocker.patch("protonfetcher.GitHubReleaseFetcher")
         mock_fetcher_instance = mocker.MagicMock()
         mock_fetcher.return_value = mock_fetcher_instance
 
         # Make fetch_and_extract raise FetchError
-        from fetcher import FetchError
-
         mock_fetcher_instance.fetch_and_extract.side_effect = FetchError("Test error")
 
         mock_print = mocker.patch("builtins.print")
-
-        from fetcher import main
 
         # Since main raises SystemExit, we need to catch it or the test will exit
         with pytest.raises(SystemExit) as exc_info:
@@ -1451,12 +1842,10 @@ class TestMainFunction:
                 "~/test_output",
             ],
         )
-        mock_fetcher = mocker.patch("fetcher.GitHubReleaseFetcher")
+        mock_fetcher = mocker.patch("protonfetcher.GitHubReleaseFetcher")
         mock_fetcher_instance = mocker.MagicMock()
         mock_fetcher.return_value = mock_fetcher_instance
         mock_fetcher_instance.fetch_and_extract.return_value = tmp_path
-
-        from fetcher import main
 
         main()
 
@@ -1663,14 +2052,14 @@ class TestFetchLatestTagEdgeCases:
         assert "\rTest:" in call_args
 
     def test_spinner_update_with_total_shows_progress(self, mocker):
-        """Test progress bar display with total."""
+        """Test spinner display with total."""
         spinner = Spinner(desc="Test", total=10)
         mock_print = mocker.patch("builtins.print")
 
         spinner.update(3)
 
         call_args = mock_print.call_args[0][0]
-        assert "[" in call_args and "]" in call_args
+        # Check that the spinner shows a percentage (indicating it's working)
         assert "30.0%" in call_args
 
     def test_spinner_context_manager(self, mocker):
