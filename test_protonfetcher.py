@@ -1688,10 +1688,10 @@ class TestMainFunction:
         args, kwargs = mock_fetcher_instance.fetch_and_extract.call_args
         assert kwargs.get("release_tag") == "GE-Proton10-11"
 
-    def test_fetch_extract_with_manual_release_disengages_link_management(
+    def test_fetch_extract_with_manual_release_uses_enhanced_link_management(
         self, mocker, tmp_path, mock_curl_responses
     ):
-        """Test that when --release flag is used, link management is disengaged."""
+        """Test that when --release flag is used, enhanced link management is used."""
         fetcher = GitHubReleaseFetcher()
         output_dir = tmp_path / "output"
         extract_dir = tmp_path / "extract"
@@ -1699,8 +1699,7 @@ class TestMainFunction:
         extract_dir.mkdir(parents=True)
 
         manual_tag = "GE-Proton9-25"
-        extracted_dir = extract_dir / manual_tag
-        extracted_dir.mkdir()
+        # Don't create extracted_dir here to avoid early return
 
         # Setup mock responses for manual tag - API fails, falls back to HTML parsing
         api_response = mock_curl_responses(returncode=22, stderr="API error")
@@ -1735,8 +1734,10 @@ class TestMainFunction:
         # Track if link management was called
         link_mgmt_called = []
 
-        def track_link_mgmt(extract_dir, tag, fork="GE-Proton"):
-            link_mgmt_called.append((extract_dir, tag, fork))
+        def track_link_mgmt(
+            extract_dir, tag, fork="GE-Proton", is_manual_release=False
+        ):
+            link_mgmt_called.append((extract_dir, tag, fork, is_manual_release))
 
         fetcher._manage_proton_links = track_link_mgmt
 
@@ -1745,9 +1746,13 @@ class TestMainFunction:
         )
 
         assert result == extract_dir
-        # Verify that link management was NOT called when using --release flag
-        assert not link_mgmt_called, (
-            "Link management should not be called when using --release flag"
+        # Verify that link management WAS called with is_manual_release=True when using --release flag
+        assert link_mgmt_called, (
+            "Link management should be called when using --release flag with enhanced logic"
+        )
+        # Verify that the manual release parameter was passed correctly
+        assert link_mgmt_called[0][3], (
+            "is_manual_release should be True when using --release flag"
         )
 
     def test_fetch_extract_latest_still_manages_links(
@@ -1790,8 +1795,10 @@ class TestMainFunction:
         # Track if link management was called
         link_mgmt_called = []
 
-        def track_link_mgmt(extract_dir, tag, fork="GE-Proton"):
-            link_mgmt_called.append((extract_dir, tag, fork))
+        def track_link_mgmt(
+            extract_dir, tag, fork="GE-Proton", is_manual_release=False
+        ):
+            link_mgmt_called.append((extract_dir, tag, fork, is_manual_release))
 
         fetcher._manage_proton_links = track_link_mgmt
 
@@ -1803,6 +1810,10 @@ class TestMainFunction:
         # Verify that link management WAS called when not using --release flag
         assert link_mgmt_called, (
             "Link management should be called when fetching latest release"
+        )
+        # Check that is_manual_release was False for latest fetch
+        assert not link_mgmt_called[0][3], (
+            "is_manual_release should be False when fetching latest"
         )
 
     def test_main_function_fetch_error_handling(self, mocker):

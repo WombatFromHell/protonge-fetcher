@@ -10,9 +10,15 @@ from __future__ import annotations
 import argparse
 import logging
 import re
-import time
-import tarfile
+import shutil
 import subprocess
+import tarfile
+import tempfile
+import time
+import threading
+import json
+import urllib.request
+import urllib.parse
 from pathlib import Path
 from typing import Iterator, List, NoReturn, Optional
 
@@ -146,6 +152,65 @@ FORKS = {
 DEFAULT_FORK = "GE-Proton"
 
 
+def parse_version(tag: str, fork: str = "GE-Proton") -> tuple:
+    """
+    Parse a version tag to extract the numeric components for comparison.
+
+    Args:
+        tag: The release tag (e.g., 'GE-Proton10-20' or 'EM-10.0-30')
+        fork: The fork name to determine parsing logic
+
+    Returns:
+        A tuple of (prefix, major, minor, patch) for comparison purposes, or None if parsing fails
+    """
+    if fork == "Proton-EM":
+        # Proton-EM format: EM-10.0-30 -> prefix="EM", major=10, minor=0, patch=30
+        pattern = r"EM-(\d+)\.(\d+)-(\d+)"
+        match = re.match(pattern, tag)
+        if match:
+            major, minor, patch = map(int, match.groups())
+            return ("EM", major, minor, patch)
+    else:  # Default to GE-Proton
+        # GE-Proton format: GE-Proton10-20 -> prefix="GE-Proton", major=10, minor=20
+        pattern = r"GE-Proton(\d+)-(\d+)"
+        match = re.match(pattern, tag)
+        if match:
+            major, minor = map(int, match.groups())
+            # For GE-Proton, we treat the minor as a patch-like value for comparison
+            return ("GE-Proton", major, 0, minor)
+
+    # If no match, return a tuple that will put this tag at the end for comparison
+    return (tag, 0, 0, 0)
+
+
+def compare_versions(tag1: str, tag2: str, fork: str = "GE-Proton") -> int:
+    """
+    Compare two version tags to determine which is newer.
+
+    Args:
+        tag1: First tag to compare
+        tag2: Second tag to compare
+        fork: The fork name to determine parsing logic
+
+    Returns:
+        -1 if tag1 is older than tag2, 0 if equal, 1 if tag1 is newer than tag2
+    """
+    parsed1 = parse_version(tag1, fork)
+    parsed2 = parse_version(tag2, fork)
+
+    if parsed1 == parsed2:
+        return 0
+
+    # Compare component by component
+    for comp1, comp2 in zip(parsed1, parsed2):
+        if comp1 < comp2:
+            return -1
+        elif comp1 > comp2:
+            return 1
+
+    return 0  # If all components are equal
+
+
 class FetchError(Exception):
     """Raised when fetching or extracting a release fails."""
 
@@ -252,7 +317,6 @@ class GitHubReleaseFetcher:
         self, url: str, output_path: Path, headers: Optional[dict] = None
     ) -> None:
         """Download a file with progress spinner using urllib."""
-        import urllib.request
 
         # Create a request with headers
         req = urllib.request.Request(url, headers=headers or {})
@@ -357,8 +421,6 @@ class GitHubReleaseFetcher:
             if url_match:
                 full_url = url_match.group(1).strip()
                 # Extract the path portion from the full URL to match pattern
-                import urllib.parse
-
                 parsed_url = urllib.parse.urlparse(full_url)
                 redirected_url = parsed_url.path
             else:
@@ -405,9 +467,6 @@ class GitHubReleaseFetcher:
                 raise Exception(
                     f"API request failed with return code {response.returncode}"
                 )
-
-            # Import json to parse the API response
-            import json
 
             try:
                 release_data = json.loads(response.stdout)
@@ -639,8 +698,6 @@ class GitHubReleaseFetcher:
         Raises:
             FetchError: If xz is not found in PATH
         """
-        import shutil
-
         if shutil.which("xz") is None:
             self._raise(
                 "xz is not available in PATH. Please install xz-utils or equivalent for .tar.xz archive support."
@@ -753,8 +810,6 @@ class GitHubReleaseFetcher:
 
             if total_files > 0:
                 # Show a spinner with progress percentage for known file count
-                import threading
-
                 extraction_complete = threading.Event()
                 extraction_success: List[bool] = [
                     False
@@ -764,8 +819,6 @@ class GitHubReleaseFetcher:
                 ]  # Store any error from background thread
 
                 def extract_in_background():
-                    import subprocess  # Import here to avoid scope issues
-
                     cmd = [
                         "tar",
                         "-xJf",  # Extract .tar.xz
@@ -805,10 +858,7 @@ class GitHubReleaseFetcher:
                     while not extraction_complete.is_set():
                         # Update spinner without incrementing to show it's active
                         spinner.update(0)
-                        # Use import time to avoid potential mock issues in tests
-                        __import__("time").sleep(
-                            0.1
-                        )  # Small delay to prevent excessive CPU usage
+                        time.sleep(0.1)  # Small delay to prevent excessive CPU usage
 
                     # Wait for extraction thread to complete
                     extraction_thread.join()
@@ -824,16 +874,12 @@ class GitHubReleaseFetcher:
                     spinner.update(0)  # This will show 100% completion
             else:
                 # If we don't know the file count, show continuous spinner
-                import threading
-
                 extraction_complete = threading.Event()
                 extraction_error: List[Optional[str]] = [
                     None
                 ]  # Store any error from background thread
 
                 def extract_in_background():
-                    import subprocess  # Import here to avoid scope issues
-
                     cmd = [
                         "tar",
                         "-xJf",  # Extract .tar.xz (without verbose to avoid stdout flooding)
@@ -869,8 +915,6 @@ class GitHubReleaseFetcher:
                     # Keep updating the spinner while extraction is running
                     while extraction_thread.is_alive():
                         spinner.update(0)  # Update display without incrementing
-                        import time
-
                         time.sleep(0.1)  # Small delay to prevent excessive CPU usage
 
                 # Wait for extraction to complete
@@ -902,7 +946,11 @@ class GitHubReleaseFetcher:
             self.extract_gz_archive(archive_path, target_dir)
 
     def _manage_proton_links(
-        self, extract_dir: Path, tag: str, fork: str = "GE-Proton"
+        self,
+        extract_dir: Path,
+        tag: str,
+        fork: str = "GE-Proton",
+        is_manual_release: bool = False,
     ) -> None:
         """Manage symbolic links for Proton forks after extraction.
 
@@ -916,6 +964,7 @@ class GitHubReleaseFetcher:
             extract_dir: Directory where the archive was extracted
             tag: The tag name of the release (e.g., 'GE-Proton10-20' or 'EM-10.0-30')
             fork: The ProtonGE fork name for appropriate link naming
+            is_manual_release: Whether this is a manual release being downloaded separately
         """
         # Define link names based on the fork
         if fork == "Proton-EM":
@@ -990,7 +1039,209 @@ class GitHubReleaseFetcher:
         # Before starting link rotation, get the target of the new version to avoid duplicates
         new_version_target = extracted_dir
 
-        # Create sets of targets that are already used to prevent duplication
+        # If this is a manual release, we need to check where it fits in the version hierarchy
+        # If manual release fits between main and fallback, or between fallback and fallback2,
+        # we need to shift links appropriately
+        if is_manual_release and (
+            current_main_target or current_fallback_target or current_fallback2_target
+        ):
+            # Get the version tags of current links to compare with the new tag
+            main_version_tag = None
+            fallback_version_tag = None
+            fallback2_version_tag = None
+
+            # Try to extract version tags from the current targets
+            if current_main_target:
+                main_version_tag = current_main_target.name
+            if current_fallback_target:
+                fallback_version_tag = current_fallback_target.name
+            if current_fallback2_target:
+                fallback2_version_tag = current_fallback2_target.name
+
+            # Compare the new tag with existing ones to determine where it fits
+            is_newer_than_main = True
+            is_newer_than_fallback = True
+            is_newer_than_fallback2 = True
+
+            if main_version_tag:
+                comparison_result = compare_versions(tag, main_version_tag, fork)
+                is_newer_than_main = (
+                    comparison_result >= 0
+                )  # Tag is newer or equal to main
+
+            if fallback_version_tag:
+                comparison_result = compare_versions(tag, fallback_version_tag, fork)
+                is_newer_than_fallback = (
+                    comparison_result >= 0
+                )  # Tag is newer or equal to fallback
+
+            if fallback2_version_tag:
+                comparison_result = compare_versions(tag, fallback2_version_tag, fork)
+                is_newer_than_fallback2 = (
+                    comparison_result >= 0
+                )  # Tag is newer or equal to fallback2
+
+            # If the manual release is older than main but newer than fallback,
+            # or falls between other existing versions, we need to handle the shifting appropriately
+            if not is_newer_than_main:
+                # Manual release is older than main, so it will become a fallback of some sort
+                if not current_fallback_target:
+                    # No current fallback, link the manual release to fallback position
+                    relative_target = extracted_dir.relative_to(extract_dir)
+                    try:
+                        if fallback_link.exists():
+                            fallback_link.unlink()
+                        fallback_link.symlink_to(relative_target)
+                        logger.info(
+                            f"Created {fallback_link.name} link for manual release pointing to {relative_target}"
+                        )
+                    except (OSError, RuntimeError) as e:
+                        logger.error(
+                            f"Failed to create fallback symlink {fallback_link} -> {relative_target}: {e}"
+                        )
+                    return  # Exit early since we've handled the manual release
+                else:
+                    # There's already a fallback, need to determine where the new version fits
+                    if is_newer_than_fallback:
+                        # New version is newer than current fallback but older than main
+                        # So we need to shift current fallback to fallback2 and make new one fallback
+                        if current_fallback2_target and not is_newer_than_fallback2:
+                            # If fallback2 exists and new version is older than fallback2,
+                            # link new version to fallback2 (replacing the old fallback2)
+                            relative_target = extracted_dir.relative_to(extract_dir)
+                            try:
+                                if fallback2_link.exists():
+                                    fallback2_link.unlink()
+                                fallback2_link.symlink_to(relative_target)
+                                logger.info(
+                                    f"Created {fallback2_link.name} link for manual release pointing to {relative_target}"
+                                )
+                            except (OSError, RuntimeError) as e:
+                                logger.error(
+                                    f"Failed to create fallback2 symlink {fallback2_link} -> {relative_target}: {e}"
+                                )
+                            return  # Exit early
+                        else:
+                            # Move current fallback to fallback2 position, new version to fallback
+                            # The current fallback (e.g., GE-Proton10-11) needs to be moved to fallback2
+                            # The new version (e.g., GE-Proton10-12) becomes the new fallback
+
+                            # First, create the fallback2 link for the current fallback target
+                            if current_fallback_target:
+                                try:
+                                    if fallback2_link.exists():
+                                        fallback2_link.unlink()
+                                    # Create fallback2 pointing to the current fallback's target
+                                    fallback2_link.symlink_to(
+                                        current_fallback_target.relative_to(extract_dir)
+                                    )
+                                    logger.info(
+                                        f"Moved current fallback to {fallback2_link.name} pointing to {current_fallback_target.name}"
+                                    )
+                                except (OSError, RuntimeError) as e:
+                                    logger.error(
+                                        f"Failed to create fallback2 symlink: {e}"
+                                    )
+                            else:
+                                # If there's no current fallback target, just ensure fallback2 doesn't exist
+                                if fallback2_link.exists():
+                                    fallback2_link.unlink()
+
+                            # Now make the new version the fallback
+                            relative_target = extracted_dir.relative_to(extract_dir)
+                            try:
+                                if fallback_link.exists():
+                                    fallback_link.unlink()
+                                fallback_link.symlink_to(relative_target)
+                                logger.info(
+                                    f"Created {fallback_link.name} link for manual release pointing to {relative_target}"
+                                )
+                            except (OSError, RuntimeError) as e:
+                                logger.error(
+                                    f"Failed to create fallback symlink {fallback_link} -> {relative_target}: {e}"
+                                )
+                            return  # Exit early
+                    else:
+                        # New version is older than both main and current fallback
+                        # If fallback2 exists, check where the new version fits
+                        relative_target = None
+
+                        if current_fallback2_target:
+                            if is_newer_than_fallback2:
+                                # New version is older than main and current fallback but newer than fallback2
+                                # Move current fallback to fallback2, new version to fallback
+                                # Move current fallback to fallback2
+                                try:
+                                    if fallback2_link.exists():
+                                        fallback2_link.unlink()
+                                    fallback2_link.symlink_to(
+                                        current_fallback_target.relative_to(extract_dir)
+                                    )
+                                    logger.info(
+                                        f"Moved fallback to {fallback2_link.name} pointing to {current_fallback_target.name}"
+                                    )
+                                except (OSError, RuntimeError) as e:
+                                    logger.error(
+                                        f"Failed to create fallback2 symlink: {e}"
+                                    )
+
+                                # Make the new version the fallback
+                                try:
+                                    if fallback_link.exists():
+                                        fallback_link.unlink()
+                                    relative_target = extracted_dir.relative_to(
+                                        extract_dir
+                                    )
+                                    fallback_link.symlink_to(relative_target)
+                                    logger.info(
+                                        f"Created {fallback_link.name} link for manual release pointing to {relative_target}"
+                                    )
+                                except (OSError, RuntimeError) as e:
+                                    logger.error(
+                                        f"Failed to create fallback symlink {fallback_link} -> {relative_target}: {e}"
+                                    )
+                                return  # Exit early
+                            else:
+                                # New version is older than main, fallback, and fallback2
+                                # Link it to fallback2 (replacing the older one)
+                                try:
+                                    if fallback2_link.exists():
+                                        fallback2_link.unlink()
+                                    relative_target = extracted_dir.relative_to(
+                                        extract_dir
+                                    )
+                                    fallback2_link.symlink_to(relative_target)
+                                    logger.info(
+                                        f"Created {fallback2_link.name} link for manual release pointing to {relative_target}"
+                                    )
+                                except (OSError, RuntimeError) as e:
+                                    logger.error(
+                                        f"Failed to create fallback2 symlink {fallback2_link} -> {relative_target}: {e}"
+                                    )
+                                return  # Exit early
+                        else:
+                            # New version is older than main and current fallback but no fallback2 exists yet
+                            # Link it to fallback2
+                            relative_target = extracted_dir.relative_to(extract_dir)
+                            try:
+                                if fallback2_link.exists():
+                                    fallback2_link.unlink()
+                                fallback2_link.symlink_to(relative_target)
+                                logger.info(
+                                    f"Created {fallback2_link.name} link for manual release pointing to {relative_target}"
+                                )
+                            except (OSError, RuntimeError) as e:
+                                logger.error(
+                                    f"Failed to create fallback2 symlink {fallback2_link} -> {relative_target}: {e}"
+                                )
+                            return  # Exit early
+            # If the manual release is newer than main, proceed with normal rotation logic
+            elif is_newer_than_main:
+                logger.info(
+                    f"Manual release {tag} is newer than main version, proceeding with normal link rotation"
+                )
+
+        # Create sets of targets that are already used to prevent duplication (for non-manual or newer manual releases)
         used_targets = set()
         if current_main_target:
             used_targets.add(current_main_target)
@@ -1011,8 +1262,6 @@ class GitHubReleaseFetcher:
                 and current_fallback2_target
                 not in {current_main_target, current_fallback_target}
             ):
-                import shutil
-
                 # But we also need to check if the new version is different from this target
                 if current_fallback2_target != new_version_target:
                     shutil.rmtree(current_fallback2_target)
@@ -1072,8 +1321,6 @@ class GitHubReleaseFetcher:
             and fallback_link.is_dir()
             and not fallback_link.is_symlink()
         ):
-            import shutil
-
             shutil.rmtree(fallback_link)
             logger.info(f"Removed real directory {fallback_link.name} to create link")
 
@@ -1082,8 +1329,6 @@ class GitHubReleaseFetcher:
             and fallback2_link.is_dir()
             and not fallback2_link.is_symlink()
         ):
-            import shutil
-
             shutil.rmtree(fallback2_link)
             logger.info(f"Removed real directory {fallback2_link.name} to create link")
 
@@ -1136,8 +1381,6 @@ class GitHubReleaseFetcher:
         # Check if directory is writable
         try:
             # Try to create a temporary file to check write permissions
-            import tempfile
-
             with tempfile.TemporaryFile(dir=path) as _:
                 pass  # Just test that we can create a file
         except OSError:
@@ -1149,8 +1392,6 @@ class GitHubReleaseFetcher:
         Raises:
             FetchError: If curl is not found in PATH
         """
-        import shutil
-
         if shutil.which("curl") is None:
             self._raise("curl is not available in PATH. Please install curl.")
 
@@ -1235,16 +1476,18 @@ class GitHubReleaseFetcher:
         self.extract_archive(output_path, extract_dir)
 
         # Manage symbolic links after successful extraction
-        # Skip link management when manually specifying a release to prevent any link changes
-        # This ensures that potentially older releases won't change an existing links
+        # Previously, we skipped link management when manually specifying a release
+        # Now we'll handle manual releases by using fallback logic if they're older
         if release_tag is None:
             # When fetching latest, manage links as normal
-            self._manage_proton_links(extract_dir, tag, fork)
+            self._manage_proton_links(extract_dir, tag, fork, is_manual_release=False)
         else:
-            # When manually specifying a release, always skip link management
+            # When manually specifying a release, use the new link management logic
+            # that handles both newer and older releases appropriately
             logger.info(
-                f"Manual release specified ({release_tag}). Disengaging link management behavior to prevent changes to existing links."
+                f"Manual release specified ({release_tag}). Using enhanced link management with fallback logic."
             )
+            self._manage_proton_links(extract_dir, tag, fork, is_manual_release=True)
 
         return extract_dir
 
