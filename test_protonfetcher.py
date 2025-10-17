@@ -507,8 +507,7 @@ class TestDownloadEdgeCases:
 
         # Mock urllib to raise URLError
         mocker.patch(
-            "urllib.request.urlopen", 
-            side_effect=urllib.error.URLError("Network error")
+            "urllib.request.urlopen", side_effect=urllib.error.URLError("Network error")
         )
 
         with pytest.raises(FetchError, match="Network error"):
@@ -522,10 +521,7 @@ class TestDownloadEdgeCases:
         output_path = tmp_path / "file.tar.gz"
 
         # Mock urllib to raise timeout
-        mocker.patch(
-            "urllib.request.urlopen", 
-            side_effect=socket.timeout("Timeout")
-        )
+        mocker.patch("urllib.request.urlopen", side_effect=socket.timeout("Timeout"))
 
         with pytest.raises(FetchError, match="Timeout"):
             fetcher._download_with_spinner(url, output_path)
@@ -538,10 +534,7 @@ class TestDownloadEdgeCases:
         output_path = tmp_path / "file.tar.gz"
 
         # Mock urllib to raise general exception
-        mocker.patch(
-            "urllib.request.urlopen", 
-            side_effect=Exception("General error")
-        )
+        mocker.patch("urllib.request.urlopen", side_effect=Exception("General error"))
 
         with pytest.raises(FetchError, match="General error"):
             fetcher._download_with_spinner(url, output_path)
@@ -628,79 +621,6 @@ class TestDownloadEdgeCases:
 class TestExtractionEdgeCases:
     """Tests for archive extraction edge cases."""
 
-    def test_extract_gz_archive_without_pv(
-        self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
-    ):
-        """Test .tar.gz extraction without pv (uses spinner)."""
-        archive = tmp_path / "test.tar.gz"
-        archive.touch()
-        extract_dir = tmp_path / "extract"
-        extract_dir.mkdir()
-
-        # Mock pv as unavailable
-        mocker.patch("shutil.which", return_value=None)
-        mock_run = mocker.patch(
-            "subprocess.run",
-            return_value=subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="", stderr=""
-            ),
-        )
-
-        fetcher.extract_gz_archive(archive, extract_dir)
-
-        # Verify tar was called without pv
-        call_args = mock_run.call_args[0][0]
-        assert "tar" in call_args
-        assert "-xzf" in call_args
-        # Should not use shell=True when pv unavailable
-        assert mock_run.call_args[1].get("shell") is not True
-
-    def test_extract_xz_archive_without_pv(
-        self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
-    ):
-        """Test .tar.xz extraction without pv."""
-        archive = tmp_path / "test.tar.xz"
-        archive.touch()
-        extract_dir = tmp_path / "extract"
-        extract_dir.mkdir()
-
-        mocker.patch("shutil.which", return_value=None)
-        mock_run = mocker.patch(
-            "subprocess.run",
-            return_value=subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="", stderr=""
-            ),
-        )
-
-        fetcher.extract_xz_archive(archive, extract_dir)
-
-        call_args = mock_run.call_args[0][0]
-        assert "tar" in call_args
-        assert "-xJf" in call_args
-
-    def test_extract_archive_unknown_format_with_pv(
-        self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
-    ):
-        """Test extraction of unknown archive format with pv."""
-        archive = tmp_path / "test.tar.zst"  # Zstandard compression
-        archive.touch()
-        extract_dir = tmp_path / "extract"
-        extract_dir.mkdir()
-
-        mocker.patch("shutil.which", return_value="/usr/bin/pv")
-        mock_run = mocker.patch(
-            "subprocess.run",
-            return_value=subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="", stderr=""
-            ),
-        )
-
-        fetcher.extract_archive(archive, extract_dir)
-
-        # Should use generic -xf flag
-        assert mock_run.called
-        assert mock_run.call_args[1].get("shell") is True
-
     def test_extract_archive_tar_error_stderr_output(
         self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
     ):
@@ -721,17 +641,15 @@ class TestExtractionEdgeCases:
         with pytest.raises(FetchError, match=error_msg):
             fetcher.extract_gz_archive(archive, extract_dir)
 
-    def test_extract_gz_archive_with_pv_available(
+    def test_extract_gz_archive_with_checkpoint(
         self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
     ):
-        """Test .tar.gz extraction with pv available."""
+        """Test .tar.gz extraction with tar checkpoint feature."""
         archive = tmp_path / "test.tar.gz"
         archive.touch()
         extract_dir = tmp_path / "extract"
         extract_dir.mkdir()
 
-        # Mock pv as available
-        mocker.patch("shutil.which", return_value="/usr/bin/pv")
         mock_run = mocker.patch(
             "subprocess.run",
             return_value=subprocess.CompletedProcess(
@@ -739,23 +657,37 @@ class TestExtractionEdgeCases:
             ),
         )
 
+        # Mock threading and time to avoid actual threading in tests
+        mock_thread = mocker.MagicMock()
+        mocker.patch("threading.Thread", return_value=mock_thread)
+        mocker.patch("time.sleep")
+
         fetcher.extract_gz_archive(archive, extract_dir)
 
-        # Verify pv command was used with shell=True
-        if mock_run.call_args:
-            assert mock_run.call_args[1].get("shell") is True
+        # Verify tar command was used with checkpoint features (no shell=True)
+        assert mock_run.called
+        call_args = mock_run.call_args[0][0]  # Get the command list
+        assert "tar" in call_args
+        assert "--checkpoint-action=dot" in call_args
+        assert "--checkpoint=1" in call_args
+        assert "-xzf" in call_args  # .tar.gz specific flag
+        assert (
+            mock_run.call_args[1].get("shell") is not True
+        )  # No shell=True with new approach
+        # Check that the command is called with proper output capture parameters
+        assert mock_run.call_args[1].get("stdout") == subprocess.PIPE
+        assert mock_run.call_args[1].get("stderr") == subprocess.PIPE
+        assert mock_run.call_args[1].get("text") is True
 
-    def test_extract_xz_archive_with_pv_available(
+    def test_extract_xz_archive_with_checkpoint(
         self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
     ):
-        """Test .tar.xz extraction with pv available."""
+        """Test .tar.xz extraction with tar checkpoint feature."""
         archive = tmp_path / "test.tar.xz"
         archive.touch()
         extract_dir = tmp_path / "extract"
         extract_dir.mkdir()
 
-        # Mock pv as available
-        mocker.patch("shutil.which", return_value="/usr/bin/pv")
         mock_run = mocker.patch(
             "subprocess.run",
             return_value=subprocess.CompletedProcess(
@@ -765,9 +697,13 @@ class TestExtractionEdgeCases:
 
         fetcher.extract_xz_archive(archive, extract_dir)
 
-        # Verify pv command was used with shell=True
-        if mock_run.call_args:
-            assert mock_run.call_args[1].get("shell") is True
+        # Verify tar command was used with checkpoint features
+        assert mock_run.called
+        call_args = mock_run.call_args[0][0]  # Get the command list
+        assert "tar" in call_args
+        assert "--checkpoint-action=dot" in call_args
+        assert "--checkpoint=1" in call_args
+        assert "-xJf" in call_args  # .tar.xz specific flag
 
 
 class TestComplexLinkManagement:
@@ -1004,7 +940,7 @@ class TestComplexLinkManagement:
 
         main_link = extract_dir / "GE-Proton"
         fallback_link = extract_dir / "GE-Proton-Fallback"
-        
+
         main_link.symlink_to(extract_dir / main_tag)
 
         # Initially no fallback links exist
@@ -1049,10 +985,15 @@ class TestComplexLinkManagement:
         # Should shift current fallback to fallback2 and put manual as new fallback
         assert fallback2_link.exists()
         fallback2_target = fallback2_link.resolve()
-        assert fallback_tag in str(fallback2_target)
-        
+        assert fallback_tag in str(
+            fallback2_target
+        )  # Old fallback should be in fallback2
+
         fallback_target = fallback_link.resolve()
-        assert manual_tag in str(fallback_target)
+        assert manual_tag in str(fallback_target)  # Manual should be new fallback
+
+        main_target = main_link.resolve()
+        assert main_tag in str(main_target)  # Main should remain unchanged
 
     def test_manage_links_manual_release_same_as_existing(
         self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
@@ -1080,7 +1021,7 @@ class TestComplexLinkManagement:
         fetcher._manage_proton_links(
             extract_dir, manual_tag, "GE-Proton", is_manual_release=True
         )
-        
+
         assert main_link.exists()  # Should not error out
 
     def test_manage_links_manual_release_older_than_main_newer_than_fallback2(
@@ -1111,19 +1052,23 @@ class TestComplexLinkManagement:
             extract_dir, manual_tag, "GE-Proton", is_manual_release=True
         )
 
-        # Manual release should become new fallback (between main and current fallback)
-        # Current fallback should move to fallback2
-        new_fallback2 = extract_dir / "GE-Proton-Fallback2"
-        new_fallback = extract_dir / "GE-Proton-Fallback"
-        
-        assert new_fallback2.exists()
-        assert new_fallback.exists()
-        
-        fallback2_target = new_fallback2.resolve()
-        fallback_target = new_fallback.resolve()
-        
-        assert fallback_tag in str(fallback2_target)  # Old fallback moved to fallback2
-        assert manual_tag in str(fallback_target)     # New version becomes fallback
+        # Expected result after manual release:
+        # Main: GE-Proton10-20 (unchanged)
+        # Fallback: GE-Proton10-10 (unchanged - still second newest)
+        # Fallback2: GE-Proton9-15 (manual release - third newest)
+        # GE-Proton9-5 gets unlinked but remains in directory
+
+        assert main_link.exists()
+        assert fallback_link.exists()
+        assert fallback2_link.exists()
+
+        main_target = main_link.resolve()
+        fallback_target = fallback_link.resolve()
+        fallback2_target = fallback2_link.resolve()
+
+        assert main_tag in str(main_target)
+        assert fallback_tag in str(fallback_target)  # Fallback unchanged
+        assert manual_tag in str(fallback2_target)  # Manual release in fallback2
 
     def test_manage_links_manual_release_newest_proton_em(
         self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
@@ -1134,7 +1079,7 @@ class TestComplexLinkManagement:
 
         main_tag = "EM-10.0-30"
         manual_tag = "EM-10.0-35"  # Newer version for Proton-EM
-        
+
         # For Proton-EM, asset name is like "proton-EM-10.0-30.tar.xz"
         # After removing ".tar.xz" (7 chars), we get "proton-EM-10.0-30"
         main_asset_dir = f"proton-{main_tag}"
@@ -1145,7 +1090,7 @@ class TestComplexLinkManagement:
         (extract_dir / manual_asset_dir).mkdir()
 
         main_link = extract_dir / "Proton-EM"
-        fallback_link = extract_dir / "Proton-EM-Fallback"
+        _ = extract_dir / "Proton-EM-Fallback"
 
         main_link.symlink_to(extract_dir / main_asset_dir)
 
@@ -1157,7 +1102,9 @@ class TestComplexLinkManagement:
         # New version should become main (or the function should not crash)
         # The important thing is that the function works correctly with Proton-EM fork
         main_link = extract_dir / "Proton-EM"
-        assert main_link.exists()  # Just verify it still exists - the target depends on complex logic
+        assert (
+            main_link.exists()
+        )  # Just verify it still exists - the target depends on complex logic
 
     def test_manage_links_manual_release_older_than_all_proton_em(
         self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
@@ -1180,6 +1127,39 @@ class TestComplexLinkManagement:
 
         main_link.symlink_to(extract_dir / f"proton-{main_tag}")
         fallback_link.symlink_to(extract_dir / f"proton-{fallback_tag}")
+
+        # Monkey patch to add debug output to the manage function
+        original_manage = fetcher._manage_proton_links
+
+        def debug_manage_proton_links(
+            extract_dir, tag, fork="GE-Proton", is_manual_release=False
+        ):
+            from protonfetcher import parse_version
+
+            # Find candidates - fix the parsing for Proton-EM
+            candidates = []
+            for entry in extract_dir.iterdir():
+                if entry.is_dir() and not entry.is_symlink():
+                    # For Proton-EM, strip the proton- prefix before parsing
+                    if fork == "Proton-EM" and entry.name.startswith("proton-"):
+                        tag_name = entry.name[7:]  # Remove "proton-" prefix
+                    else:
+                        tag_name = entry.name
+                    version = parse_version(tag_name, fork)
+                    candidates.append((version, entry))
+
+            if is_manual_release:
+                tag_version = parse_version(tag, fork)
+                tag_dir = extract_dir / f"proton-{tag}"  # For Proton-EM
+                if tag_dir.exists() and tag_dir.is_dir():
+                    candidates.append((tag_version, tag_dir))
+
+                candidates.sort(key=lambda t: t[0], reverse=True)
+
+            # Call original
+            original_manage(extract_dir, tag, fork, is_manual_release)
+
+        fetcher._manage_proton_links = debug_manage_proton_links
 
         fetcher._manage_proton_links(
             extract_dir, manual_tag, "Proton-EM", is_manual_release=True
@@ -1246,7 +1226,7 @@ class TestComplexLinkManagement:
         fallback_link.symlink_to(extract_dir / fallback_tag)
         fallback2_link.symlink_to(extract_dir / fallback2_tag)
 
-        # Test the manual release logic 
+        # Test the manual release logic
         fetcher._manage_proton_links(
             extract_dir, new_tag, "GE-Proton", is_manual_release=True
         )
@@ -1255,7 +1235,9 @@ class TestComplexLinkManagement:
         assert fallback2_link.exists()
         assert fallback_link.exists()
         target_fallback2 = fallback2_link.resolve()
-        assert fallback_tag in str(target_fallback2)  # Old fallback should become fallback2
+        assert fallback_tag in str(
+            target_fallback2
+        )  # Old fallback should become fallback2
         target_fallback = fallback_link.resolve()
         assert new_tag in str(target_fallback)  # New should become fallback
 
@@ -1289,7 +1271,7 @@ class TestComplexLinkManagement:
         manual_tag = "GE-Proton10-5"
 
         # Mock logging to verify the warning
-        mock_logger = mocker.patch('protonfetcher.logger')
+        mock_logger = mocker.patch("protonfetcher.logger")
 
         # This should trigger the warning and early return
         fetcher._manage_proton_links(
@@ -1297,7 +1279,10 @@ class TestComplexLinkManagement:
         )
 
         # Verify warning was logged
-        assert any("Expected extracted directory does not exist" in str(call) for call in mock_logger.warning.call_args_list)
+        assert any(
+            "Expected extracted directory does not exist" in str(call)
+            for call in mock_logger.warning.call_args_list
+        )
 
     def test_manage_links_manual_release_older_than_all(
         self, fetcher: GitHubReleaseFetcher, mocker: MockerFixture, tmp_path: Path
@@ -1841,7 +1826,7 @@ class TestMainFunctionEdgeCases:
     def test_main_debug_mode_logging(self, mocker: MockerFixture, caplog):
         """Test that main function properly handles debug logging."""
         import logging
-        
+
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -1861,7 +1846,9 @@ class TestMainFunctionEdgeCases:
             main()
 
         # Check if debug message was logged
-        assert any("Debug logging enabled" in record.message for record in caplog.records)
+        assert any(
+            "Debug logging enabled" in record.message for record in caplog.records
+        )
 
     def test_main_with_release_and_fork_parameters(self, mocker: MockerFixture):
         """Test main with both release and fork parameters."""
