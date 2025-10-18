@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fetcher.py
+protonfetcher.py
 
 Fetch and extract the latest ProtonGE GitHub release asset
 """
@@ -14,12 +14,182 @@ import re
 import shutil
 import subprocess
 import tarfile
-import threading
 import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Iterator, NoReturn, Optional
+
+
+class NetworkClient:
+    """Abstract class for network operations."""
+
+    def get(
+        self, url: str, headers: Optional[dict] = None, stream: bool = False
+    ) -> subprocess.CompletedProcess:
+        raise NotImplementedError
+
+    def head(
+        self, url: str, headers: Optional[dict] = None, follow_redirects: bool = False
+    ) -> subprocess.CompletedProcess:
+        raise NotImplementedError
+
+    def download(
+        self, url: str, output_path: Path, headers: Optional[dict] = None
+    ) -> subprocess.CompletedProcess:
+        raise NotImplementedError
+
+
+class FileSystemClient:
+    """Abstract class for file system operations."""
+
+    def exists(self, path: Path) -> bool:
+        raise NotImplementedError
+
+    def is_dir(self, path: Path) -> bool:
+        raise NotImplementedError
+
+    def mkdir(self, path: Path, parents: bool = False, exist_ok: bool = False) -> None:
+        raise NotImplementedError
+
+    def write(self, path: Path, data: bytes) -> None:
+        raise NotImplementedError
+
+    def read(self, path: Path) -> bytes:
+        raise NotImplementedError
+
+    def symlink_to(
+        self, link_path: Path, target_path: Path, target_is_directory: bool = True
+    ) -> None:
+        raise NotImplementedError
+
+    def resolve(self, path: Path) -> Path:
+        raise NotImplementedError
+
+    def unlink(self, path: Path) -> None:
+        raise NotImplementedError
+
+    def rmtree(self, path: Path) -> None:
+        raise NotImplementedError
+
+
+class DefaultNetworkClient(NetworkClient):
+    """Default implementation of NetworkClient using subprocess and urllib."""
+
+    def __init__(self, timeout: int = 30) -> None:
+        self.timeout = timeout
+
+    def get(
+        self, url: str, headers: Optional[dict] = None, stream: bool = False
+    ) -> subprocess.CompletedProcess:
+        cmd = [
+            "curl",
+            "-L",  # Follow redirects
+            "-s",  # Silent mode
+            "-S",  # Show errors
+            "-f",  # Fail on HTTP error
+            "--max-time",
+            str(self.timeout),
+        ]
+
+        # Add headers if provided explicitly (not None)
+        if headers is not None:
+            for key, value in headers.items():
+                cmd.extend(["-H", f"{key}: {value}"])
+        # When headers is None (default), we don't add any headers for backward compatibility
+
+        if stream:
+            # For streaming, we'll handle differently
+            pass
+
+        cmd.append(url)
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result
+
+    def head(
+        self, url: str, headers: Optional[dict] = None, follow_redirects: bool = False
+    ) -> subprocess.CompletedProcess:
+        cmd = [
+            "curl",
+            "-I",  # Header only
+            "-s",  # Silent mode
+            "-S",  # Show errors
+            "-f",  # Fail on HTTP error
+            "--max-time",
+            str(self.timeout),
+        ]
+
+        if follow_redirects:
+            cmd.insert(1, "-L")  # Follow redirects
+
+        if headers:
+            for key, value in headers.items():
+                cmd.extend(["-H", f"{key}: {value}"])
+
+        cmd.append(url)
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result
+
+    def download(
+        self, url: str, output_path: Path, headers: Optional[dict] = None
+    ) -> subprocess.CompletedProcess:
+        cmd = [
+            "curl",
+            "-L",  # Follow redirects
+            "-s",  # Silent mode
+            "-S",  # Show errors
+            "-f",  # Fail on HTTP error
+            "--max-time",
+            str(self.timeout),
+            "-o",
+            str(output_path),  # Output file
+        ]
+
+        if headers:
+            for key, value in headers.items():
+                cmd.extend(["-H", f"{key}: {value}"])
+
+        cmd.append(url)
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result
+
+
+class DefaultFileSystemClient(FileSystemClient):
+    """Default implementation of FileSystemClient using standard pathlib operations."""
+
+    def exists(self, path: Path) -> bool:
+        return path.exists()
+
+    def is_dir(self, path: Path) -> bool:
+        return path.is_dir()
+
+    def mkdir(self, path: Path, parents: bool = False, exist_ok: bool = False) -> None:
+        path.mkdir(parents=parents, exist_ok=exist_ok)
+
+    def write(self, path: Path, data: bytes) -> None:
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def read(self, path: Path) -> bytes:
+        with open(path, "rb") as f:
+            return f.read()
+
+    def symlink_to(
+        self, link_path: Path, target_path: Path, target_is_directory: bool = True
+    ) -> None:
+        link_path.symlink_to(target_path, target_is_directory=target_is_directory)
+
+    def resolve(self, path: Path) -> Path:
+        return path.resolve()
+
+    def unlink(self, path: Path) -> None:
+        path.unlink()
+
+    def rmtree(self, path: Path) -> None:
+        shutil.rmtree(path)
 
 
 class Spinner:
@@ -56,187 +226,107 @@ class Spinner:
         self.start_time = time.time()
         self.fps_limit = fps_limit
         self._last_update_time = 0.0
-        self._running = False
-        self._spinner_thread: Optional[threading.Thread] = None
         self._current_line = ""
-        self._lock = threading.Lock()  # Add a lock for thread safety
         self._completed = False  # Track if the spinner has completed
 
     def __enter__(self):
-        self._running = True
         if not self.disable:
-            self._spinner_thread = threading.Thread(target=self._spin)
-            self._spinner_thread.daemon = True
-            self._spinner_thread.start()
+            # Display initial state if needed
+            self._update_display()
         return self
 
     def __exit__(self, *args):
-        self._running = False
-        if self._spinner_thread:
-            self._spinner_thread.join()
         if not self.disable:
             # Clear the line when exiting and add a newline to prevent clobbering
-            with self._lock:
-                print("\r" + " " * len(self._current_line) + "\r", end="")
+            print("\r" + " " * len(self._current_line) + "\r", end="")
 
-    def _spin(self):
-        """Background thread function to update the spinner animation."""
-        while self._running:
-            current_time = time.time()
+    def _update_display(self) -> None:
+        """Update the display immediately."""
+        current_time = time.time()
 
-            # Check if we should display based on FPS limit
-            should_display = True
-            if self.fps_limit is not None and self.fps_limit > 0:
-                min_interval = 1.0 / self.fps_limit
-                if current_time - self._last_update_time < min_interval:
-                    should_display = False
+        # Check if we should display based on FPS limit
+        should_display = True
+        if self.fps_limit is not None and self.fps_limit > 0:
+            min_interval = 1.0 / self.fps_limit
+            if current_time - self._last_update_time < min_interval:
+                should_display = False
 
-            if should_display:
-                self._last_update_time = current_time
-                spinner_char = self.spinner_chars[
-                    self.spinner_idx % len(self.spinner_chars)
-                ]
-                self.spinner_idx += 1
+        if should_display:
+            self._last_update_time = current_time
+            spinner_char = self.spinner_chars[
+                self.spinner_idx % len(self.spinner_chars)
+            ]
+            self.spinner_idx += 1
 
-                # Build the display string
-                display_parts = [self.desc, ":"]
+            # Build the display string
+            display_parts = [self.desc, ":"]
 
-                if self.total and self.total > 0 and self.show_progress:
-                    # Show progress bar when total is known
-                    percent = min(
-                        self.current / self.total, 1.0
-                    )  # Ensure percent doesn't exceed 1.0
-                    filled_length = int(self.width * percent)
-                    bar = "█" * filled_length + "-" * (self.width - filled_length)
+            if self.total and self.total > 0 and self.show_progress:
+                # Show progress bar when total is known
+                percent = min(
+                    self.current / self.total, 1.0
+                )  # Ensure percent doesn't exceed 1.0
+                filled_length = int(self.width * percent)
+                bar = "█" * filled_length + "-" * (self.width - filled_length)
 
-                    display_parts.append(
-                        f" {spinner_char} |{bar}| {percent * 100:.1f}%"
-                    )
+                display_parts.append(f" {spinner_char} |{bar}| {percent * 100:.1f}%")
 
-                    # Add rate if unit is provided
-                    if self.unit:
-                        elapsed = current_time - self.start_time
-                        rate = self.current / elapsed if elapsed > 0 else 0
+                # Add rate if unit is provided
+                if self.unit:
+                    elapsed = current_time - self.start_time
+                    rate = self.current / elapsed if elapsed > 0 else 0
 
-                        if self.unit_scale and self.unit == "B":
-                            rate_str = (
-                                f"{rate:.2f}B/s"
-                                if rate <= 1024
-                                else f"{rate / 1024:.2f}KB/s"
-                                if rate < 1024**2
-                                else f"{rate / 1024**2:.2f}MB/s"
-                            )
-                        else:
-                            rate_str = f"{rate:.1f}{self.unit}/s"
-
-                        display_parts.append(f" ({rate_str})")
-                else:
-                    # Just show spinner with current count
-                    if self.unit:
-                        display_parts.append(
-                            f" {spinner_char} {self.current}{self.unit}"
+                    if self.unit_scale and self.unit == "B":
+                        rate_str = (
+                            f"{rate:.2f}B/s"
+                            if rate <= 1024
+                            else f"{rate / 1024:.2f}KB/s"
+                            if rate < 1024**2
+                            else f"{rate / 1024**2:.2f}MB/s"
                         )
                     else:
-                        display_parts.append(f" {spinner_char}")
+                        rate_str = f"{rate:.1f}{self.unit}/s"
 
-                # Join all parts and print
-                line = "".join(display_parts)
-                self._current_line = line
+                    display_parts.append(f" ({rate_str})")
+            else:
+                # Just show spinner with current count
+                if self.unit:
+                    display_parts.append(f" {spinner_char} {self.current}{self.unit}")
+                else:
+                    display_parts.append(f" {spinner_char}")
 
-                if not self.disable:
-                    with self._lock:
-                        print(f"\r{line}", end="", flush=True)
+                # Add rate information if unit is provided (even if not showing progress bar)
+                if self.unit:
+                    elapsed = current_time - self.start_time
+                    rate = self.current / elapsed if elapsed > 0 else 0
 
-            time.sleep(0.1)  # Base sleep time for the spinner
+                    if self.unit_scale and self.unit == "B":
+                        rate_str = (
+                            f"{rate:.2f}B/s"
+                            if rate <= 1024
+                            else f"{rate / 1024:.2f}KB/s"
+                            if rate < 1024**2
+                            else f"{rate / (1024**3):.2f}GB/s"
+                        )
+                    else:
+                        rate_str = f"{rate:.1f}{self.unit}/s"
+
+                    display_parts.append(f" ({rate_str})")
+
+            # Join all parts and print
+            line = "".join(display_parts)
+            self._current_line = line
+
+            if not self.disable:
+                print(f"\r{line}", end="", flush=True)
 
     def update(self, n: int = 1) -> None:
         """Update the spinner progress by n units."""
         self.current += n
 
-        # For high FPS or when no FPS limit, update display immediately
-        if not self.disable and (self.fps_limit is None or (self.fps_limit > 0)):
-            current_time = time.time()
-            # If no fps limit, display immediately; otherwise check interval
-            should_display = self.fps_limit is None
-            if self.fps_limit is not None and self.fps_limit > 0:
-                min_interval = 1.0 / self.fps_limit
-                if current_time - self._last_update_time >= min_interval:
-                    should_display = True
-
-            if should_display:
-                self._last_update_time = current_time
-                spinner_char = self.spinner_chars[
-                    self.spinner_idx % len(self.spinner_chars)
-                ]
-                self.spinner_idx += 1
-
-                # Build the display string
-                display_parts = [self.desc, ":"]
-
-                if self.total and self.total > 0 and self.show_progress:
-                    # Show progress bar when total is known
-                    percent = min(
-                        self.current / self.total, 1.0
-                    )  # Ensure percent doesn't exceed 1.0
-                    filled_length = int(self.width * percent)
-                    bar = "█" * filled_length + "-" * (self.width - filled_length)
-
-                    display_parts.append(
-                        f" {spinner_char} |{bar}| {percent * 100:.1f}%"
-                    )
-
-                    # Add rate if unit is provided
-                    if self.unit:
-                        elapsed = current_time - self.start_time
-                        rate = self.current / elapsed if elapsed > 0 else 0
-
-                        if self.unit_scale and self.unit == "B":
-                            rate_str = (
-                                f"{rate:.2f}B/s"
-                                if rate <= 1024
-                                else f"{rate / 1024:.2f}KB/s"
-                                if rate < 1024**2
-                                else f"{rate / 1024**2:.2f}MB/s"
-                            )
-                        else:
-                            rate_str = f"{rate:.1f}{self.unit}/s"
-
-                        display_parts.append(f" ({rate_str})")
-                else:
-                    # Just show spinner with current count
-                    if self.unit:
-                        display_parts.append(
-                            f" {spinner_char} {self.current}{self.unit}"
-                        )
-                    else:
-                        display_parts.append(f" {spinner_char}")
-
-                    # Add rate information if unit is provided (even if not showing progress bar)
-                    if self.unit:
-                        elapsed = current_time - self.start_time
-                        rate = self.current / elapsed if elapsed > 0 else 0
-
-                        if self.unit_scale and self.unit == "B":
-                            rate_str = (
-                                f"{rate:.2f}B/s"
-                                if rate <= 1024
-                                else f"{rate / 1024:.2f}KB/s"
-                                if rate < 1024**2
-                                else f"{rate / 1024**2:.2f}MB/s"
-                                if rate < 1024**3
-                                else f"{rate / (1024**3):.2f}GB/s"
-                            )
-                        else:
-                            rate_str = f"{rate:.1f}{self.unit}/s"
-
-                        display_parts.append(f" ({rate_str})")
-
-                # Join all parts and print
-                line = "".join(display_parts)
-                self._current_line = line
-
-                with self._lock:
-                    print(f"\r{line}", end="", flush=True)
+        # Update display immediately (subject to FPS limit)
+        if not self.disable:
+            self._update_display()
 
     def update_progress(
         self, current: int, total: int, prefix: str = "", suffix: str = ""
@@ -249,18 +339,16 @@ class Spinner:
         if prefix and not self.desc.startswith("Extracting"):
             self.desc = prefix
 
-        # The actual display update will happen in the _spin thread
+        # Update display immediately (subject to FPS limit)
+        if not self.disable:
+            self._update_display()
 
     def close(self) -> None:
         """Stop the spinner and clean up."""
-        self._running = False
-        if self._spinner_thread:
-            self._spinner_thread.join()
         if not self.disable:
             # Clear the line when closing and add a newline
-            with self._lock:
-                print("\r" + " " * len(self._current_line) + "\r", end="")
-                print()
+            print("\r" + " " * len(self._current_line) + "\r", end="")
+            print()
 
     def finish(self) -> None:
         """Mark the spinner as finished and update to 100%."""
@@ -270,45 +358,43 @@ class Spinner:
 
             # Force a final update to show 100%
             if not self.disable:
-                with self._lock:
-                    spinner_char = self.spinner_chars[
-                        self.spinner_idx % len(self.spinner_chars)
-                    ]
+                _ = time.time()
+                spinner_char = self.spinner_chars[
+                    self.spinner_idx % len(self.spinner_chars)
+                ]
 
-                    # Build the display string with 100% progress
-                    display_parts = [self.desc, ":"]
-                    percent = 1.0
-                    filled_length = int(self.width * percent)
-                    bar = "█" * filled_length  # No dashes for 100%
+                # Build the display string with 100% progress
+                display_parts = [self.desc, ":"]
+                percent = 1.0
+                filled_length = int(self.width * percent)
+                bar = "█" * filled_length  # No dashes for 100%
 
-                    display_parts.append(
-                        f" {spinner_char} |{bar}| {percent * 100:.1f}%"
-                    )
+                display_parts.append(f" {spinner_char} |{bar}| {percent * 100:.1f}%")
 
-                    if self.unit:
-                        elapsed = time.time() - self.start_time
-                        rate = self.current / elapsed if elapsed > 0 else 0
+                if self.unit:
+                    elapsed = time.time() - self.start_time
+                    rate = self.current / elapsed if elapsed > 0 else 0
 
-                        if self.unit_scale and self.unit == "B":
-                            rate_str = (
-                                f"{rate:.2f}B/s"
-                                if rate <= 1024
-                                else f"{rate / 1024:.2f}KB/s"
-                                if rate < 1024**2
-                                else f"{rate / 1024**2:.2f}MB/s"
-                            )
-                        else:
-                            rate_str = f"{rate:.1f}{self.unit}/s"
+                    if self.unit_scale and self.unit == "B":
+                        rate_str = (
+                            f"{rate:.2f}B/s"
+                            if rate <= 1024
+                            else f"{rate / 1024:.2f}KB/s"
+                            if rate < 1024**2
+                            else f"{rate / 1024**2:.2f}MB/s"
+                        )
+                    else:
+                        rate_str = f"{rate:.1f}{self.unit}/s"
 
-                        display_parts.append(f" ({rate_str})")
+                    display_parts.append(f" ({rate_str})")
 
-                    line = "".join(display_parts)
-                    print(f"\r{line}", end="", flush=True)
-                    self._current_line = line
+                line = "".join(display_parts)
+                print(f"\r{line}", end="", flush=True)
+                self._current_line = line
 
-                    # Move to beginning of next line without adding extra blank line
-                    # print("\r", end="", flush=True)
-                    print()
+                # Move to beginning of next line without adding extra blank line
+                # print("\r", end="", flush=True)
+                print()
 
     def __iter__(self) -> Iterator:
         if self._iterable is not None:
@@ -438,8 +524,15 @@ def format_bytes(bytes_value: int) -> str:
 class GitHubReleaseFetcher:
     """Handles fetching and extracting GitHub release assets."""
 
-    def __init__(self, timeout: int = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        timeout: int = DEFAULT_TIMEOUT,
+        network_client: Optional[NetworkClient] = None,
+        file_system_client: Optional[FileSystemClient] = None,
+    ) -> None:
         self.timeout = timeout
+        self.network_client = network_client or DefaultNetworkClient(timeout=timeout)
+        self.file_system_client = file_system_client or DefaultFileSystemClient()
 
     def _curl_get(
         self, url: str, headers: Optional[dict] = None, stream: bool = False
@@ -454,30 +547,7 @@ class GitHubReleaseFetcher:
         Returns:
             CompletedProcess result from subprocess
         """
-        cmd = [
-            "curl",
-            "-L",  # Follow redirects
-            "-s",  # Silent mode
-            "-S",  # Show errors
-            "-f",  # Fail on HTTP error
-            "--max-time",
-            str(self.timeout),
-        ]
-
-        # Add headers if provided explicitly (not None)
-        if headers is not None:
-            for key, value in headers.items():
-                cmd.extend(["-H", f"{key}: {value}"])
-        # When headers is None (default), we don't add any headers for backward compatibility
-
-        if stream:
-            # For streaming, we'll handle differently
-            pass
-
-        cmd.append(url)
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result
+        return self.network_client.get(url, headers, stream)
 
     def _curl_head(
         self, url: str, headers: Optional[dict] = None, follow_redirects: bool = False
@@ -492,27 +562,7 @@ class GitHubReleaseFetcher:
         Returns:
             CompletedProcess result from subprocess
         """
-        cmd = [
-            "curl",
-            "-I",  # Header only
-            "-s",  # Silent mode
-            "-S",  # Show errors
-            "-f",  # Fail on HTTP error
-            "--max-time",
-            str(self.timeout),
-        ]
-
-        if follow_redirects:
-            cmd.insert(1, "-L")  # Follow redirects
-
-        if headers:
-            for key, value in headers.items():
-                cmd.extend(["-H", f"{key}: {value}"])
-
-        cmd.append(url)
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result
+        return self.network_client.head(url, headers, follow_redirects)
 
     def _download_with_spinner(
         self, url: str, output_path: Path, headers: Optional[dict] = None
@@ -568,26 +618,7 @@ class GitHubReleaseFetcher:
         Returns:
             CompletedProcess result from subprocess
         """
-        cmd = [
-            "curl",
-            "-L",  # Follow redirects
-            "-s",  # Silent mode
-            "-S",  # Show errors
-            "-f",  # Fail on HTTP error
-            "--max-time",
-            str(self.timeout),
-            "-o",
-            str(output_path),  # Output file
-        ]
-
-        if headers:
-            for key, value in headers.items():
-                cmd.extend(["-H", f"{key}: {value}"])
-
-        cmd.append(url)
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result
+        return self.network_client.download(url, output_path, headers)
 
     def fetch_latest_tag(self, repo: str) -> str:
         """Get the latest release tag by following the redirect from /releases/latest.
@@ -854,8 +885,10 @@ class GitHubReleaseFetcher:
         logger.info(f"Checking if asset needs download from: {url}")
 
         # Check if local file already exists and has the same size as remote
-        if out_path.exists():
-            local_size = out_path.stat().st_size
+        if self.file_system_client.exists(out_path):
+            local_size = (
+                out_path.stat().st_size
+            )  # Note: .stat() is still a Path method; we can't fully abstract this
             remote_size = self.get_remote_asset_size(repo, tag, asset_name)
 
             if local_size == remote_size:
@@ -870,7 +903,7 @@ class GitHubReleaseFetcher:
         else:
             logger.info("Local asset does not exist, proceeding with download")
 
-        out_path.parent.mkdir(parents=True, exist_ok=True)
+        self.file_system_client.mkdir(out_path.parent, parents=True, exist_ok=True)
 
         # Prepare headers for download
         headers = {
@@ -938,7 +971,7 @@ class GitHubReleaseFetcher:
         else:
             # For other formats, use a subprocess approach with tar command
             # This handles cases like the test.zip file in the failing test
-            target_dir.mkdir(parents=True, exist_ok=True)
+            self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
 
             # Use tar command for general case as well, but with different flags for different formats
             # If it's not .tar.gz or .tar.xz, try a generic approach
@@ -988,7 +1021,7 @@ class GitHubReleaseFetcher:
         show_file_details: bool = True,
     ) -> None:
         """Extract archive using tarfile library."""
-        target_dir.mkdir(parents=True, exist_ok=True)
+        self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
 
         # Get archive info
         try:
@@ -1057,7 +1090,7 @@ class GitHubReleaseFetcher:
         Raises:
             FetchError: If extraction fails
         """
-        target_dir.mkdir(parents=True, exist_ok=True)
+        self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
 
         # Use tar command with checkpoint features for progress indication
         cmd = [
@@ -1087,7 +1120,7 @@ class GitHubReleaseFetcher:
         Raises:
             FetchError: If extraction fails
         """
-        target_dir.mkdir(parents=True, exist_ok=True)
+        self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
 
         # Use tar command with checkpoint features for progress indication
         cmd = [
@@ -1118,20 +1151,22 @@ class GitHubReleaseFetcher:
             FetchError: If the directory doesn't exist, isn't a directory, or isn't writable
         """
         try:
-            if not directory.exists():
+            if not self.file_system_client.exists(directory):
                 try:
-                    directory.mkdir(parents=True, exist_ok=True)
+                    self.file_system_client.mkdir(
+                        directory, parents=True, exist_ok=True
+                    )
                 except OSError as e:
                     self._raise(f"Failed to create directory {directory}: {e}")
 
-            if not directory.is_dir():
+            if not self.file_system_client.is_dir(directory):
                 self._raise(f"{directory} exists but is not a directory")
 
             # Test if directory is writable by trying to create a temporary file
             test_file = directory / ".write_test"
             try:
-                test_file.touch()
-                test_file.unlink()  # Remove the test file
+                self.file_system_client.write(test_file, b"")  # Create empty file
+                self.file_system_client.unlink(test_file)  # Remove the test file
             except (OSError, AttributeError) as e:
                 self._raise(f"Directory {directory} is not writable: {e}")
         except PermissionError as e:
@@ -1145,18 +1180,10 @@ class GitHubReleaseFetcher:
         """Raise a FetchError with the given message."""
         raise FetchError(message)
 
-    def _manage_proton_links(
-        self,
-        extract_dir: Path,
-        tag: str,
-        fork: str = "GE-Proton",
-        is_manual_release: bool = False,
-    ) -> None:
-        """
-        Ensure the three symlinks always point to the three *newest* extracted
-        versions, regardless of the order in which they were downloaded.
-        """
-        # name of the symlinks we have to maintain
+    def _get_link_names_for_fork(
+        self, extract_dir: Path, fork: str
+    ) -> tuple[Path, Path, Path]:
+        """Get the symlink names for a specific fork."""
         if fork == "Proton-EM":
             main, fb1, fb2 = (
                 extract_dir / "Proton-EM",
@@ -1169,44 +1196,47 @@ class GitHubReleaseFetcher:
                 extract_dir / "GE-Proton-Fallback",
                 extract_dir / "GE-Proton-Fallback2",
             )
+        return main, fb1, fb2
 
-        # For manual releases, first check if the target directory exists
-        tag_dir = None
-        if is_manual_release:
-            # Find the correct directory for the manual tag
-            if fork == "Proton-EM":
-                proton_em_dir = extract_dir / f"proton-{tag}"
-                if proton_em_dir.exists() and proton_em_dir.is_dir():
-                    tag_dir = proton_em_dir
+    def _find_tag_directory(
+        self, extract_dir: Path, tag: str, fork: str, is_manual_release: bool
+    ) -> Optional[Path]:
+        """Find the tag directory for manual releases."""
+        if not is_manual_release:
+            return None
+
+        # Find the correct directory for the manual tag
+        if fork == "Proton-EM":
+            proton_em_dir = extract_dir / f"proton-{tag}"
+            if self.file_system_client.exists(
+                proton_em_dir
+            ) and self.file_system_client.is_dir(proton_em_dir):
+                return proton_em_dir
 
             # If not found and it's Proton-EM, also try without proton- prefix
-            if tag_dir is None and fork == "Proton-EM":
-                tag_dir_path = extract_dir / tag
-                if tag_dir_path.exists() and tag_dir_path.is_dir():
-                    tag_dir = tag_dir_path
+            tag_dir_path = extract_dir / tag
+            if self.file_system_client.exists(
+                tag_dir_path
+            ) and self.file_system_client.is_dir(tag_dir_path):
+                return tag_dir_path
 
-            # For GE-Proton, try the tag as-is
-            if tag_dir is None and fork == "GE-Proton":
-                tag_dir_path = extract_dir / tag
-                if tag_dir_path.exists() and tag_dir_path.is_dir():
-                    tag_dir = tag_dir_path
+        # For GE-Proton, try the tag as-is
+        if fork == "GE-Proton":
+            tag_dir_path = extract_dir / tag
+            if self.file_system_client.exists(
+                tag_dir_path
+            ) and self.file_system_client.is_dir(tag_dir_path):
+                return tag_dir_path
 
-            # If no directory found for manual release, log warning and return
-            if tag_dir is None:
-                expected_path = (
-                    extract_dir / tag
-                    if fork == "GE-Proton"
-                    else extract_dir / f"proton-{tag}"
-                )
-                logger.warning(
-                    "Expected extracted directory does not exist: %s", expected_path
-                )
-                return
+        return None
 
-        # find every real (non-symlink) directory that looks like a proton build
+    def _find_version_candidates(
+        self, extract_dir: Path, fork: str
+    ) -> list[tuple[tuple, Path]]:
+        """Find all directories that look like Proton builds and parse their versions."""
         candidates: list[tuple[tuple, Path]] = []
         for entry in extract_dir.iterdir():
-            if entry.is_dir() and not entry.is_symlink():
+            if self.file_system_client.is_dir(entry) and not entry.is_symlink():
                 # For Proton-EM, strip the proton- prefix before parsing
                 if fork == "Proton-EM" and entry.name.startswith("proton-"):
                     tag_name = entry.name[7:]  # Remove "proton-" prefix
@@ -1214,6 +1244,102 @@ class GitHubReleaseFetcher:
                     tag_name = entry.name
                 # use the directory name as tag for comparison
                 candidates.append((parse_version(tag_name, fork), entry))
+        return candidates
+
+    def _create_symlinks(
+        self, main: Path, fb1: Path, fb2: Path, top_3: list[tuple[tuple, Path]]
+    ) -> None:
+        """Create symlinks pointing to the top 3 versions."""
+        # Build the wants dictionary
+        wants = {}
+        if len(top_3) > 0:
+            wants[main] = top_3[0][1]  # Main always gets the newest
+
+        if len(top_3) > 1:
+            wants[fb1] = top_3[1][1]  # Fallback gets the second newest
+
+        if len(top_3) > 2:
+            wants[fb2] = top_3[2][1]  # Fallback2 gets the third newest
+
+        # First pass: Remove unwanted symlinks and any real directories that conflict with wanted symlinks
+        for link in (main, fb1, fb2):
+            if link.is_symlink() and link not in wants:
+                self.file_system_client.unlink(link)
+            # If link exists but is a real directory, remove it (regardless of whether it's wanted)
+            # This handles the case where a real directory has the same name as a symlink that needs to be created
+            elif self.file_system_client.exists(link) and not link.is_symlink():
+                self.file_system_client.rmtree(link)
+
+        for link, target in wants.items():
+            # Double check: If link exists as a real directory, remove it before creating symlink
+            if self.file_system_client.exists(link) and not link.is_symlink():
+                self.file_system_client.rmtree(link)
+            # If link is a symlink, check if it points to the correct target
+            elif link.is_symlink():
+                try:
+                    if self.file_system_client.resolve(
+                        link
+                    ) == self.file_system_client.resolve(target):
+                        continue  # already correct
+                except OSError:
+                    # If resolve fails (broken symlink), remove and recreate
+                    self.file_system_client.unlink(link)
+                else:
+                    self.file_system_client.unlink(
+                        link
+                    )  # Remove existing symlink to replace with new target
+            # Final check: make sure there's nothing at link path before creating symlink
+            if self.file_system_client.exists(link):
+                # This should not happen with correct logic above, but for safety
+                if link.is_symlink():
+                    self.file_system_client.unlink(link)
+                else:
+                    self.file_system_client.rmtree(link)
+            # Use target_is_directory=True to correctly handle directory symlinks
+            try:
+                self.file_system_client.symlink_to(
+                    link, target, target_is_directory=True
+                )
+                logger.info("Created symlink %s -> %s", link.name, target.name)
+            except OSError as e:
+                logger.error(
+                    "Failed to create symlink %s -> %s: %s", link.name, target.name, e
+                )
+                # Don't re-raise to handle gracefully as expected by test
+                # The function should complete without crashing even if symlink creation fails
+                continue  # Continue to the next link instead of failing the entire function
+
+    def _manage_proton_links(
+        self,
+        extract_dir: Path,
+        tag: str,
+        fork: str = "GE-Proton",
+        is_manual_release: bool = False,
+    ) -> None:
+        """
+        Ensure the three symlinks always point to the three *newest* extracted
+        versions, regardless of the order in which they were downloaded.
+        """
+        # Get symlink names for the fork
+        main, fb1, fb2 = self._get_link_names_for_fork(extract_dir, fork)
+
+        # For manual releases, first check if the target directory exists
+        tag_dir = self._find_tag_directory(extract_dir, tag, fork, is_manual_release)
+
+        # If it's a manual release and no directory is found, log warning and return
+        if is_manual_release and tag_dir is None:
+            expected_path = (
+                extract_dir / tag
+                if fork == "GE-Proton"
+                else extract_dir / f"proton-{tag}"
+            )
+            logger.warning(
+                "Expected extracted directory does not exist: %s", expected_path
+            )
+            return
+
+        # Find all version candidates
+        candidates = self._find_version_candidates(extract_dir, fork)
 
         if not candidates:  # nothing to do
             logger.warning("No extracted Proton directories found – not touching links")
@@ -1238,58 +1364,8 @@ class GitHubReleaseFetcher:
             candidates.sort(key=lambda t: t[0], reverse=True)
             top_3 = candidates[:3]
 
-        # Build the wants dictionary
-        wants = {}
-        if len(top_3) > 0:
-            wants[main] = top_3[0][1]  # Main always gets the newest
-
-        if len(top_3) > 1:
-            wants[fb1] = top_3[1][1]  # Fallback gets the second newest
-
-        if len(top_3) > 2:
-            wants[fb2] = top_3[2][1]  # Fallback2 gets the third newest
-
-        # First pass: Remove unwanted symlinks and any real directories that conflict with wanted symlinks
-        for link in (main, fb1, fb2):
-            if link.is_symlink() and link not in wants:
-                link.unlink()
-            # If link exists but is a real directory, remove it (regardless of whether it's wanted)
-            # This handles the case where a real directory has the same name as a symlink that needs to be created
-            elif link.exists() and not link.is_symlink():
-                shutil.rmtree(link)
-
-        for link, target in wants.items():
-            # Double check: If link exists as a real directory, remove it before creating symlink
-            if link.exists() and not link.is_symlink():
-                shutil.rmtree(link)
-            # If link is a symlink, check if it points to the correct target
-            elif link.is_symlink():
-                try:
-                    if link.resolve() == target.resolve():
-                        continue  # already correct
-                except OSError:
-                    # If resolve fails (broken symlink), remove and recreate
-                    link.unlink()
-                else:
-                    link.unlink()  # Remove existing symlink to replace with new target
-            # Final check: make sure there's nothing at link path before creating symlink
-            if link.exists():
-                # This should not happen with correct logic above, but for safety
-                if link.is_symlink():
-                    link.unlink()
-                else:
-                    shutil.rmtree(link)
-            # Use target_is_directory=True to correctly handle directory symlinks
-            try:
-                link.symlink_to(target, target_is_directory=True)
-                logger.info("Created symlink %s -> %s", link.name, target.name)
-            except OSError as e:
-                logger.error(
-                    "Failed to create symlink %s -> %s: %s", link.name, target.name, e
-                )
-                # Don't re-raise to handle gracefully as expected by test
-                # The function should complete without crashing even if symlink creation fails
-                continue  # Continue to the next link instead of failing the entire function
+        # Create the symlinks
+        self._create_symlinks(main, fb1, fb2, top_3)
 
     def fetch_and_extract(
         self,
