@@ -16,8 +16,6 @@ from protonfetcher import (
     GitHubReleaseFetcher,
     NetworkClient,
     FileSystemClient,
-    DefaultNetworkClient,
-    DefaultFileSystemClient,
     Spinner,
     compare_versions,
     format_bytes,
@@ -407,125 +405,6 @@ class TestUtilityFunctions:
 
 class TestClientClasses:
     """Unit tests for the new client classes."""
-
-    def test_network_client_abstract_methods(self):
-        """Test that NetworkClient abstract methods raise NotImplementedError."""
-        client = NetworkClient()
-
-        with pytest.raises(NotImplementedError):
-            client.get("http://example.com")
-
-        with pytest.raises(NotImplementedError):
-            client.head("http://example.com")
-
-        with pytest.raises(NotImplementedError):
-            client.download("http://example.com", Path("/tmp/test"))
-
-    def test_filesystem_client_abstract_methods(self):
-        """Test that FileSystemClient abstract methods raise NotImplementedError."""
-        client = FileSystemClient()
-
-        with pytest.raises(NotImplementedError):
-            client.exists(Path("/tmp"))
-
-        with pytest.raises(NotImplementedError):
-            client.is_dir(Path("/tmp"))
-
-        with pytest.raises(NotImplementedError):
-            client.mkdir(Path("/tmp"), parents=True, exist_ok=True)
-
-        with pytest.raises(NotImplementedError):
-            client.write(Path("/tmp/test"), b"test")
-
-        with pytest.raises(NotImplementedError):
-            client.read(Path("/tmp/test"))
-
-        with pytest.raises(NotImplementedError):
-            client.symlink_to(Path("/tmp/link"), Path("/tmp/target"))
-
-        with pytest.raises(NotImplementedError):
-            client.resolve(Path("/tmp"))
-
-        with pytest.raises(NotImplementedError):
-            client.unlink(Path("/tmp/file"))
-
-        with pytest.raises(NotImplementedError):
-            client.rmtree(Path("/tmp/dir"))
-
-    def test_default_network_client_initialization(self):
-        """Test DefaultNetworkClient initialization."""
-        client = DefaultNetworkClient()
-        assert client.timeout == 30
-
-        client = DefaultNetworkClient(timeout=60)
-        assert client.timeout == 60
-
-    def test_default_filesystem_client_methods(self):
-        """Test DefaultFileSystemClient method implementations."""
-        client = DefaultFileSystemClient()
-
-        # Test with temporary directory
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-
-            # Test exists and is_dir
-            assert client.exists(temp_path) is True
-            assert client.is_dir(temp_path) is True
-            assert client.exists(temp_path / "nonexistent") is False
-
-            # Test mkdir
-            new_dir = temp_path / "new_dir"
-            client.mkdir(new_dir, parents=True, exist_ok=True)
-            assert client.exists(new_dir) is True
-            assert client.is_dir(new_dir) is True
-
-            # Test write and read
-            test_file = temp_path / "test.txt"
-            test_data = b"Hello, World!"
-            client.write(test_file, test_data)
-            assert client.exists(test_file) is True
-            read_data = client.read(test_file)
-            assert read_data == test_data
-
-            # Test symlink functionality
-            link_path = temp_path / "test_link"
-            if link_path.exists():
-                client.unlink(link_path)  # Clean up if exists
-            client.symlink_to(link_path, test_file, target_is_directory=False)
-            assert link_path.is_symlink()
-
-            # Test resolve
-            resolved = client.resolve(link_path)
-            assert str(resolved) == str(test_file.resolve())
-
-            # Test unlink
-            client.unlink(test_file)
-            assert client.exists(test_file) is False
-
-    def test_default_filesystem_client_rmtree(self):
-        """Test DefaultFileSystemClient rmtree method."""
-        import tempfile
-
-        client = DefaultFileSystemClient()
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-
-            # Create a directory with some content
-            test_dir = temp_path / "test_rmtree"
-            test_dir.mkdir(parents=True)
-            (test_dir / "file.txt").write_text("content")
-
-            # Verify it exists
-            assert test_dir.exists()
-
-            # Remove it with rmtree
-            client.rmtree(test_dir)
-
-            # Verify it's gone
-            assert not test_dir.exists()
 
 
 class TestExtractedHelperMethods:

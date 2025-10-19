@@ -22,59 +22,7 @@ from typing import Iterator, NoReturn, Optional
 
 
 class NetworkClient:
-    """Abstract class for network operations."""
-
-    def get(
-        self, url: str, headers: Optional[dict] = None, stream: bool = False
-    ) -> subprocess.CompletedProcess:
-        raise NotImplementedError
-
-    def head(
-        self, url: str, headers: Optional[dict] = None, follow_redirects: bool = False
-    ) -> subprocess.CompletedProcess:
-        raise NotImplementedError
-
-    def download(
-        self, url: str, output_path: Path, headers: Optional[dict] = None
-    ) -> subprocess.CompletedProcess:
-        raise NotImplementedError
-
-
-class FileSystemClient:
-    """Abstract class for file system operations."""
-
-    def exists(self, path: Path) -> bool:
-        raise NotImplementedError
-
-    def is_dir(self, path: Path) -> bool:
-        raise NotImplementedError
-
-    def mkdir(self, path: Path, parents: bool = False, exist_ok: bool = False) -> None:
-        raise NotImplementedError
-
-    def write(self, path: Path, data: bytes) -> None:
-        raise NotImplementedError
-
-    def read(self, path: Path) -> bytes:
-        raise NotImplementedError
-
-    def symlink_to(
-        self, link_path: Path, target_path: Path, target_is_directory: bool = True
-    ) -> None:
-        raise NotImplementedError
-
-    def resolve(self, path: Path) -> Path:
-        raise NotImplementedError
-
-    def unlink(self, path: Path) -> None:
-        raise NotImplementedError
-
-    def rmtree(self, path: Path) -> None:
-        raise NotImplementedError
-
-
-class DefaultNetworkClient(NetworkClient):
-    """Default implementation of NetworkClient using subprocess and urllib."""
+    """Concrete implementation of network operations using subprocess and urllib."""
 
     def __init__(self, timeout: int = 30) -> None:
         self.timeout = timeout
@@ -157,8 +105,8 @@ class DefaultNetworkClient(NetworkClient):
         return result
 
 
-class DefaultFileSystemClient(FileSystemClient):
-    """Default implementation of FileSystemClient using standard pathlib operations."""
+class FileSystemClient:
+    """Concrete implementation of file system operations using standard pathlib operations."""
 
     def exists(self, path: Path) -> bool:
         return path.exists()
@@ -531,8 +479,8 @@ class GitHubReleaseFetcher:
         file_system_client: Optional[FileSystemClient] = None,
     ) -> None:
         self.timeout = timeout
-        self.network_client = network_client or DefaultNetworkClient(timeout=timeout)
-        self.file_system_client = file_system_client or DefaultFileSystemClient()
+        self.network_client = network_client or NetworkClient(timeout=timeout)
+        self.file_system_client = file_system_client or FileSystemClient()
 
     def _curl_get(
         self, url: str, headers: Optional[dict] = None, stream: bool = False
@@ -965,9 +913,25 @@ class GitHubReleaseFetcher:
         """
         # Determine the archive format and dispatch to the appropriate method
         if archive_path.name.endswith(".tar.gz"):
-            self.extract_gz_archive(archive_path, target_dir)
+            # First try with spinner-based extraction for progress indication
+            # If it fails (e.g., invalid archive), fall back to system tar for compatibility
+            try:
+                self._extract_with_tarfile(
+                    archive_path, target_dir, show_progress, show_file_details
+                )
+            except FetchError:
+                # If spinner-based extraction fails, fall back to system tar command
+                self.extract_gz_archive(archive_path, target_dir)
         elif archive_path.name.endswith(".tar.xz"):
-            self.extract_xz_archive(archive_path, target_dir)
+            # First try with spinner-based extraction for progress indication
+            # If it fails (e.g., invalid archive), fall back to system tar for compatibility
+            try:
+                self._extract_with_tarfile(
+                    archive_path, target_dir, show_progress, show_file_details
+                )
+            except FetchError:
+                # If spinner-based extraction fails, fall back to system tar command
+                self.extract_xz_archive(archive_path, target_dir)
         else:
             # For other formats, use a subprocess approach with tar command
             # This handles cases like the test.zip file in the failing test
@@ -1242,6 +1206,18 @@ class GitHubReleaseFetcher:
                     tag_name = entry.name[7:]  # Remove "proton-" prefix
                 else:
                     tag_name = entry.name
+
+                # The key fix: Skip directories that clearly belong to the other fork
+                if fork == "Proton-EM" and tag_name.startswith("GE-Proton"):
+                    # Skip GE-Proton directories when processing Proton-EM
+                    continue
+                elif fork == "GE-Proton" and (
+                    tag_name.startswith("EM-")
+                    or (tag_name.startswith("proton-") and "EM-" in tag_name)
+                ):
+                    # Skip Proton-EM directories when processing GE-Proton
+                    continue
+
                 # use the directory name as tag for comparison
                 candidates.append((parse_version(tag_name, fork), entry))
         return candidates
@@ -1295,12 +1271,14 @@ class GitHubReleaseFetcher:
                     self.file_system_client.unlink(link)
                 else:
                     self.file_system_client.rmtree(link)
+            # Calculate relative path from the link location to the target for relative symlinks
+            relative_target = target.relative_to(link.parent)
             # Use target_is_directory=True to correctly handle directory symlinks
             try:
                 self.file_system_client.symlink_to(
-                    link, target, target_is_directory=True
+                    link, relative_target, target_is_directory=True
                 )
-                logger.info("Created symlink %s -> %s", link.name, target.name)
+                logger.info("Created symlink %s -> %s", link.name, relative_target)
             except OSError as e:
                 logger.error(
                     "Failed to create symlink %s -> %s: %s", link.name, target.name, e
@@ -1345,13 +1323,42 @@ class GitHubReleaseFetcher:
             logger.warning("No extracted Proton directories found – not touching links")
             return
 
+        # Remove duplicate versions, preferring directories with standard naming over prefixed naming
+        # Group candidates by parsed version
+        version_groups = {}
+        for parsed_version, directory_path in candidates:
+            if parsed_version not in version_groups:
+                version_groups[parsed_version] = []
+            version_groups[parsed_version].append(directory_path)
+
+        # For each group of directories with the same version, prefer the canonical name
+        unique_candidates = []
+        for parsed_version, directories in version_groups.items():
+            # Prefer directories without "proton-" prefix for Proton-EM, or standard names in general
+            # Sort by directory name to have a consistent preference - shorter/simpler names first
+            preferred_dir = min(
+                directories,
+                key=lambda d: (
+                    # Prefer directories without 'proton-' prefix
+                    1 if d.name.startswith("proton-") else 0,
+                    # Then by name length (shorter names preferred)
+                    len(d.name),
+                    # Then by name itself for consistent ordering
+                    d.name,
+                ),
+            )
+            unique_candidates.append((parsed_version, preferred_dir))
+
+        # Replace candidates with deduplicated list
+        candidates = unique_candidates
+
         if is_manual_release and tag_dir is not None:
             # For manual releases, add the manual tag to candidates and sort
             tag_version = parse_version(tag, fork)
 
-            # Check if this directory is already in candidates to avoid duplicates
-            existing_dirs = [path for _, path in candidates]
-            if tag_dir not in existing_dirs:
+            # Check if this version is already in candidates to avoid duplicates
+            existing_versions = {candidate[0] for candidate in candidates}
+            if tag_version not in existing_versions:
                 candidates.append((tag_version, tag_dir))
 
             # Sort all candidates including the manual tag
@@ -1446,10 +1453,9 @@ class GitHubReleaseFetcher:
         # (in case another process created it while we were extracting)
         if unpacked.exists() and unpacked.is_dir():
             logger.info(f"Unpacked directory exists after extraction: {unpacked}")
-        else:
-            # If for some reason the directory doesn't exist after extraction, recreate it
-            # This might happen if extraction was interrupted
-            unpacked.mkdir(exist_ok=True)
+        # Note: We don't create an empty directory if it doesn't exist
+        # The extracted archive may have a different directory structure
+        # The _manage_proton_links will find all available directories
 
         # Manage symbolic links
         self._manage_proton_links(
