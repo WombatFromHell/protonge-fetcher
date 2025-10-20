@@ -1092,6 +1092,75 @@ class TestGitHubReleaseFetcherMethods:
         with pytest.raises(FetchError, match="Test error message"):
             fetcher._raise("Test error message")
 
+    def test_list_recent_releases_success(self, fetcher, mocker):
+        """Test list_recent_releases with successful API response."""
+        repo = "GloriousEggroll/proton-ge-custom"
+
+        # Mock API response with release data
+        api_response = [
+            {"tag_name": "GE-Proton9-23", "name": "Release 9-23"},
+            {"tag_name": "GE-Proton9-22", "name": "Release 9-22"},
+            {"tag_name": "GE-Proton9-21", "name": "Release 9-21"},
+        ]
+
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(api_response), stderr=""
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        tags = fetcher.list_recent_releases(repo)
+
+        assert tags == ["GE-Proton9-23", "GE-Proton9-22", "GE-Proton9-21"]
+
+    def test_list_recent_releases_rate_limit(self, fetcher, mocker):
+        """Test list_recent_releases handles rate limit errors."""
+        repo = "GloriousEggroll/proton-ge-custom"
+
+        # Mock response with rate limit error (return code 22 for 403 error in curl)
+        mock_result = subprocess.CompletedProcess(
+            args=[],
+            returncode=22,
+            stdout="",
+            stderr="403 Forbidden: API rate limit exceeded",
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        with pytest.raises(FetchError, match="API rate limit exceeded"):
+            fetcher.list_recent_releases(repo)
+
+    def test_list_recent_releases_json_error(self, fetcher, mocker):
+        """Test list_recent_releases handles JSON parsing errors."""
+        repo = "GloriousEggroll/proton-ge-custom"
+
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="invalid json", stderr=""
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        with pytest.raises(FetchError, match="Failed to parse JSON response"):
+            fetcher.list_recent_releases(repo)
+
+    def test_list_recent_releases_with_missing_tag_names(self, fetcher, mocker):
+        """Test list_recent_releases handles releases with missing tag_name fields."""
+        repo = "GloriousEggroll/proton-ge-custom"
+
+        # API response with some releases missing tag_name
+        api_response = [
+            {"tag_name": "GE-Proton9-23", "name": "Release 9-23"},
+            {"name": "Release without tag"},  # Missing tag_name
+            {"tag_name": "GE-Proton9-21", "name": "Release 9-21"},
+        ]
+
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(api_response), stderr=""
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        tags = fetcher.list_recent_releases(repo)
+
+        # Should only include releases that have tag_name
+        assert tags == ["GE-Proton9-23", "GE-Proton9-21"]
+
     def test_extract_archive_fallback_path(self, fetcher, mocker, tmp_path):
         """Test extract_archive fallback path for unsupported archive formats."""
         # Create an archive with unsupported extension
@@ -1180,6 +1249,7 @@ class TestGitHubReleaseFetcherMethods:
                 debug=False,
                 no_progress=False,
                 no_file_details=False,
+                list=False,  # Explicitly set list to False
             ),
         )
 
@@ -1224,6 +1294,7 @@ class TestGitHubReleaseFetcherMethods:
             debug=True,  # Enable debug
             no_progress=False,
             no_file_details=False,
+            list=False,  # Explicitly set list to False
         )
         mocker.patch("argparse.ArgumentParser.parse_args", return_value=mock_args)
 

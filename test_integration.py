@@ -3,6 +3,7 @@ Integration tests for protonfetcher module.
 Testing workflows that involve multiple components working together.
 """
 
+import json
 import subprocess
 
 import pytest
@@ -648,3 +649,54 @@ class TestCompleteWorkflowIntegration:
             # Verify the call used the correct fork
             call_args = mock_manage_links.call_args
             assert call_args[0][2] == fork_name  # fork parameter
+
+    def test_list_recent_releases_workflow(self, fetcher, mocker):
+        """Test the complete list_recent_releases workflow."""
+        repo = "GloriousEggroll/proton-ge-custom"
+
+        # Mock API response with multiple releases
+        api_response = [
+            {"tag_name": f"GE-Proton9-{i:02d}", "name": f"Release 9-{i:02d}"}
+            for i in range(25, 0, -1)  # 25 releases from 9-25 to 9-01
+        ]
+
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(api_response), stderr=""
+        )
+        mocker.patch("subprocess.run", return_value=mock_result)
+
+        tags = fetcher.list_recent_releases(repo)
+
+        # Should return only the first 20 tags (most recent ones from the API)
+        expected_tags = [
+            f"GE-Proton9-{i:02d}" for i in range(25, 5, -1)
+        ]  # 9-25 down to 9-06
+        assert tags == expected_tags
+        assert len(tags) == 20  # Should be limited to 20
+
+    def test_list_recent_releases_with_different_forks(self, fetcher, mocker):
+        """Test list_recent_releases with different fork repositories."""
+        for fork_name in FORKS.keys():
+            repo = FORKS[fork_name]["repo"]
+
+            # Mock different response format based on fork
+            if fork_name == "Proton-EM":
+                api_response = [
+                    {"tag_name": f"EM-10.0-{i}", "name": f"EM Release {i}"}
+                    for i in range(30, 10, -1)
+                ]
+            else:  # GE-Proton
+                api_response = [
+                    {"tag_name": f"GE-Proton10-{i:02d}", "name": f"GE Release {i:02d}"}
+                    for i in range(20, 0, -1)
+                ]
+
+            mock_result = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=json.dumps(api_response), stderr=""
+            )
+            mocker.patch("subprocess.run", return_value=mock_result)
+
+            tags = fetcher.list_recent_releases(repo)
+
+            assert len(tags) <= 20  # Should be limited to 20 tags
+            assert all(isinstance(tag, str) for tag in tags)  # All should be strings

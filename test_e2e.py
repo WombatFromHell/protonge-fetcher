@@ -552,3 +552,237 @@ class TestE2ECLIFullWorkflowSimulation:
         assert (
             call_args[1]["show_file_details"] is False
         )  # File details should be disabled
+
+
+class TestE2ECLIListReleases:
+    """End-to-end tests for the --list/-l CLI flag functionality."""
+
+    def test_cli_list_flag_ge_proton_default(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command: ./protonfetcher --list (default GE-Proton fork)."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_recent_releases method
+        mock_fetcher.list_recent_releases.return_value = [
+            "GE-Proton9-23",
+            "GE-Proton9-22",
+            "GE-Proton9-21",
+        ]
+
+        test_args = [
+            "protonfetcher",
+            "--list",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Run main function
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify list_recent_releases was called with the correct repo
+        mock_fetcher.list_recent_releases.assert_called_once_with(
+            FORKS["GE-Proton"]["repo"]
+        )
+
+        # Capture output to verify the tags were printed
+        captured = capsys.readouterr()
+        assert "Recent releases:" in captured.out
+        assert "GE-Proton9-23" in captured.out
+        assert "GE-Proton9-22" in captured.out
+        assert "GE-Proton9-21" in captured.out
+
+    def test_cli_list_flag_ge_proton_explicit(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command: ./protonfetcher --list -f GE-Proton."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_recent_releases method
+        mock_fetcher.list_recent_releases.return_value = [
+            "GE-Proton9-25",
+            "GE-Proton9-24",
+            "GE-Proton9-23",
+        ]
+
+        test_args = [
+            "protonfetcher",
+            "--list",
+            "-f",
+            "GE-Proton",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify correct repo was used
+        mock_fetcher.list_recent_releases.assert_called_once_with(
+            FORKS["GE-Proton"]["repo"]
+        )
+
+        # Capture output to verify the tags were printed
+        captured = capsys.readouterr()
+        assert "Recent releases:" in captured.out
+        assert "GE-Proton9-25" in captured.out
+
+    def test_cli_list_flag_proton_em(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command: ./protonfetcher --list -f Proton-EM."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_recent_releases method
+        mock_fetcher.list_recent_releases.return_value = [
+            "EM-10.0-30",
+            "EM-10.0-29",
+            "EM-10.0-28",
+        ]
+
+        test_args = [
+            "protonfetcher",
+            "--list",
+            "-f",
+            "Proton-EM",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify correct repo was used
+        mock_fetcher.list_recent_releases.assert_called_once_with(
+            FORKS["Proton-EM"]["repo"]
+        )
+
+        # Capture output to verify the tags were printed
+        captured = capsys.readouterr()
+        assert "Recent releases:" in captured.out
+        assert "EM-10.0-30" in captured.out
+        assert "EM-10.0-29" in captured.out
+        assert "EM-10.0-28" in captured.out
+
+    def test_cli_list_flag_short_form(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command: ./protonfetcher -l -f GE-Proton."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_recent_releases method
+        mock_fetcher.list_recent_releases.return_value = [
+            "GE-Proton10-1",
+            "GE-Proton9-50",
+            "GE-Proton9-49",
+        ]
+
+        test_args = [
+            "protonfetcher",
+            "-l",
+            "-f",
+            "GE-Proton",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify method was called with correct repo
+        mock_fetcher.list_recent_releases.assert_called_once_with(
+            FORKS["GE-Proton"]["repo"]
+        )
+
+        # Capture output to verify the tags were printed
+        captured = capsys.readouterr()
+        assert "Recent releases:" in captured.out
+        assert "GE-Proton10-1" in captured.out
+
+    def test_cli_list_flag_with_rate_limit_error(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command handles rate limit errors properly."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_recent_releases method to raise a rate limit error
+        from protonfetcher import FetchError
+
+        mock_fetcher.list_recent_releases.side_effect = FetchError(
+            "API rate limit exceeded. Please wait a few minutes before trying again."
+        )
+
+        test_args = [
+            "protonfetcher",
+            "--list",
+            "-f",
+            "GE-Proton",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to the FetchError
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert "Error: API rate limit exceeded" in captured.out
+
+    def test_cli_list_flag_mixed_with_release_error(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test that --list and --release cannot be used together."""
+        # Don't even set up mocks since this should fail before calling any methods
+        test_args = [
+            "protonfetcher",
+            "--list",
+            "-r",
+            "GE-Proton10-11",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to argument validation
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert "Error: --list and --release cannot be used together" in captured.out

@@ -1140,6 +1140,51 @@ class GitHubReleaseFetcher:
             # Handle the case where directory is mocked and operations raise exceptions
             self._raise(f"Failed to create {directory}: {str(e)}")
 
+    def list_recent_releases(self, repo: str) -> list[str]:
+        """Fetch and return a list of recent release tags from the GitHub API.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+
+        Returns:
+            List of the 20 most recent tag names
+
+        Raises:
+            FetchError: If unable to fetch or parse the releases
+        """
+        url = f"https://api.github.com/repos/{repo}/releases"
+
+        try:
+            response = self._curl_get(url)
+            if response.returncode != 0:
+                # Check if it's a rate limit error (HTTP 403) or contains rate limit message
+                if "403" in response.stderr or "rate limit" in response.stderr.lower():
+                    self._raise(
+                        "API rate limit exceeded. Please wait a few minutes before trying again."
+                    )
+                self._raise(f"Failed to fetch releases for {repo}: {response.stderr}")
+        except Exception as e:
+            self._raise(f"Failed to fetch releases for {repo}: {e}")
+
+        # Check for rate limiting in stdout as well
+        if "rate limit" in response.stdout.lower():
+            self._raise(
+                "API rate limit exceeded. Please wait a few minutes before trying again."
+            )
+
+        try:
+            releases_data = json.loads(response.stdout)
+        except json.JSONDecodeError as e:
+            self._raise(f"Failed to parse JSON response: {e}")
+
+        # Extract tag_name from each release and limit to first 20
+        tag_names = []
+        for release in releases_data:
+            if "tag_name" in release:
+                tag_names.append(release["tag_name"])
+
+        return tag_names[:20]
+
     def _raise(self, message: str) -> NoReturn:
         """Raise a FetchError with the given message."""
         raise FetchError(message)
@@ -1500,6 +1545,12 @@ def main() -> None:
         help="Enable debug logging",
     )
     parser.add_argument(
+        "--list",
+        "-l",
+        action="store_true",
+        help="List the 20 most recent release tags for the selected fork",
+    )
+    parser.add_argument(
         "--no-progress",
         action="store_true",
         help="Disable progress bar display",
@@ -1511,6 +1562,11 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # Validate mutually exclusive arguments
+    if args.list and args.release:
+        print("Error: --list and --release cannot be used together")
+        raise SystemExit(1)
 
     # Expand user home directory (~) in paths
     extract_dir = Path(args.extract_dir).expanduser()
@@ -1540,6 +1596,17 @@ def main() -> None:
 
     try:
         fetcher = GitHubReleaseFetcher()
+
+        # Handle --list flag
+        if args.list:
+            logger.info("Fetching recent releases...")
+            tags = fetcher.list_recent_releases(repo)
+            print("Recent releases:")
+            for tag in tags:
+                print(f"  {tag}")
+            print("Success")  # Print success to maintain consistency
+            return
+
         fetcher.fetch_and_extract(
             repo,
             output_dir,
