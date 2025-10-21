@@ -1298,17 +1298,25 @@ class GitHubReleaseFetcher:
             # If link is a symlink, check if it points to the correct target
             elif link.is_symlink():
                 try:
-                    if self.file_system_client.resolve(
-                        link
-                    ) == self.file_system_client.resolve(target):
-                        continue  # already correct
+                    current_target = self.file_system_client.resolve(link)
+                    # The target is a directory path that may or may not exist yet
+                    # If it doesn't exist, we can't resolve it, so we need special handling
+                    try:
+                        expected_target = self.file_system_client.resolve(target)
+                        # Both can be resolved, compare them directly
+                        if current_target == expected_target:
+                            continue  # already correct
+                        else:
+                            # Paths don't match, remove symlink to update to new target
+                            self.file_system_client.unlink(link)
+                    except OSError:
+                        # The target directory doesn't exist yet (common case)
+                        # We can't directly compare resolved paths, so we'll update the symlink
+                        # This happens during extraction when the target directory doesn't exist yet
+                        self.file_system_client.unlink(link)
                 except OSError:
-                    # If resolve fails (broken symlink), remove and recreate
+                    # If resolve fails on the current symlink (broken symlink), remove it
                     self.file_system_client.unlink(link)
-                else:
-                    self.file_system_client.unlink(
-                        link
-                    )  # Remove existing symlink to replace with new target
             # Final check: make sure there's nothing at link path before creating symlink
             if self.file_system_client.exists(link):
                 # This should not happen with correct logic above, but for safety
