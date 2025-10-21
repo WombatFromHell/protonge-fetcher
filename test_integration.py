@@ -1299,7 +1299,7 @@ class TestDownloadAssetWorkflow:
         # Mock curl download to also fail
         mock_curl_result = mocker.MagicMock()
         mock_curl_result.returncode = 22  # curl error
-        mock_curl_download = mocker.patch.object(
+        _ = mocker.patch.object(
             fetcher, "_curl_download", return_value=mock_curl_result
         )
 
@@ -1648,7 +1648,7 @@ class TestExtractionWorkflow:
         # Mock tarfile operations to simulate an exception during extraction
         import tarfile
 
-        original_open = tarfile.open
+        _ = tarfile.open
         mock_tar = mocker.MagicMock()
         mock_member = mocker.MagicMock()
         mock_member.name = "file1.txt"

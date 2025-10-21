@@ -8,7 +8,7 @@ ProtonFetcher is a Python module designed to fetch and extract the latest Proton
 
 The module follows a modular design with clear separation of concerns:
 
-```
+```text
 protonfetcher.py
 ├── NetworkClient     - Handles all network operations
 ├── FileSystemClient  - Manages file system operations

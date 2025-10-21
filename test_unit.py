@@ -442,7 +442,7 @@ class TestUtilityFunctions:
     def test_spinner_finish_method_with_total(self, mocker):
         """Test Spinner finish method when total is set."""
         # Mock print function to avoid actual printing
-        mock_print = mocker.patch("builtins.print")
+        _ = mocker.patch("builtins.print")
 
         spinner = Spinner(total=100, disable=False)
         spinner.current = 50  # Set to less than total to see the effect
@@ -457,7 +457,7 @@ class TestUtilityFunctions:
     def test_spinner_finish_method_no_total(self, mocker):
         """Test Spinner finish method when total is not set."""
         # Mock print function to avoid actual printing
-        mock_print = mocker.patch("builtins.print")
+        _ = mocker.patch("builtins.print")
 
         spinner = Spinner(disable=False)  # No total specified
         initial_current = spinner.current
@@ -473,7 +473,7 @@ class TestUtilityFunctions:
     def test_spinner_finish_method_already_completed(self, mocker):
         """Test Spinner finish method when already completed."""
         # Mock print function to avoid actual printing
-        mock_print = mocker.patch("builtins.print")
+        _ = mocker.patch("builtins.print")
 
         spinner = Spinner(total=100, disable=False)
         spinner.current = 100
@@ -510,8 +510,6 @@ class TestUtilityFunctions:
 
     def test_spinner_update_method_with_fps_limit(self, mocker):
         """Test Spinner update method respecting FPS limit."""
-        import time
-
         # Mock time.time to control the timing logic
         mock_time = mocker.patch("time.time")
         mock_time.return_value = 100.0  # Initial time
@@ -588,7 +586,7 @@ class TestConftestFixtures:
         import subprocess
 
         # Verify that the fixture returns a proper CompletedProcess
-        result = subprocess.run(["echo", "test"], capture_output=True, text=True)
+        _ = subprocess.run(["echo", "test"], capture_output=True, text=True)
 
         # Since the fixture mocks subprocess.run, it should return the mock
         assert hasattr(mock_subprocess_success, "return_value")
@@ -854,7 +852,6 @@ class TestClientClasses:
         """Test NetworkClient download method with headers."""
         from protonfetcher import NetworkClient
         import subprocess
-        from pathlib import Path
 
         # Create a NetworkClient instance
         client = NetworkClient(timeout=30)
@@ -1083,44 +1080,6 @@ class TestDependencyInjection:
         assert fetcher.network_client.timeout == 120
         assert fetcher.file_system_client is custom_filesystem_client
 
-    def test_github_release_fetcher_with_mocks(self, mocker):
-        """Test GitHubReleaseFetcher with mocked dependencies."""
-        # Create mock clients
-        mock_network_client = mocker.MagicMock()
-        mock_file_system_client = mocker.MagicMock()
-
-        # Setup mock return values
-        mock_network_client.get.return_value = mocker.MagicMock(
-            returncode=0, stdout='{"assets": [{"name": "test.tar.gz"}]}'
-        )
-        mock_network_client.head.return_value = mocker.MagicMock(
-            returncode=0, stdout="Content-Length: 12345\nLocation: /redirect/path"
-        )
-        mock_network_client.download.return_value = mocker.MagicMock(returncode=0)
-
-        mock_file_system_client.exists.return_value = False
-        mock_file_system_client.is_dir.return_value = True
-        mock_file_system_client.mkdir.return_value = None
-        mock_file_system_client.unlink.return_value = None
-        mock_file_system_client.rmtree.return_value = None
-        mock_file_system_client.symlink_to.return_value = None
-        mock_file_system_client.resolve.return_value = Path("/resolved/path")
-
-        # Create fetcher with mocked dependencies
-        fetcher = GitHubReleaseFetcher(
-            timeout=DEFAULT_TIMEOUT,
-            network_client=mock_network_client,
-            file_system_client=mock_file_system_client,
-        )
-
-        # Test a method that uses the network client directly
-        result = fetcher._curl_get("http://example.com")
-
-        # Verify that the mocked method was called
-        mock_network_client.get.assert_called_once_with(
-            "http://example.com", None, False
-        )
-
     def test_dependency_injection_allows_isolated_testing(self, mocker):
         """Test that dependency injection allows for fully isolated testing."""
         # Create mocks that will completely isolate the fetcher from real systems
@@ -1160,43 +1119,43 @@ class TestDependencyInjection:
         assert get_result.returncode == 0
         mock_network_client.get.assert_called_once()
 
-        def test_github_release_fetcher_with_mocks(self, mocker):
-            """Test GitHubReleaseFetcher with mocked dependencies."""
-            # Create mock clients
-            mock_network_client = mocker.Mock(spec=NetworkClient)
-            mock_file_system_client = mocker.Mock(spec=FileSystemClient)
+    def test_github_release_fetcher_with_mocks(self, mocker):
+        """Test GitHubReleaseFetcher with mocked dependencies."""
+        # Create mock clients
+        mock_network_client = mocker.Mock(spec=NetworkClient)
+        mock_file_system_client = mocker.Mock(spec=FileSystemClient)
 
-            # Setup mock return values
-            mock_network_client.get.return_value = mocker.Mock(
-                returncode=0, stdout='{"assets": [{"name": "test.tar.gz"}]}'
-            )
-            mock_network_client.head.return_value = mocker.Mock(
-                returncode=0, stdout="Content-Length: 12345\nLocation: /redirect/path"
-            )
-            mock_network_client.download.return_value = mocker.Mock(returncode=0)
+        # Setup mock return values
+        mock_network_client.get.return_value = mocker.Mock(
+            returncode=0, stdout='{"assets": [{"name": "test.tar.gz"}]}'
+        )
+        mock_network_client.head.return_value = mocker.Mock(
+            returncode=0, stdout="Content-Length: 12345\nLocation: /redirect/path"
+        )
+        mock_network_client.download.return_value = mocker.Mock(returncode=0)
 
-            mock_file_system_client.exists.return_value = False
-            mock_file_system_client.is_dir.return_value = True
-            mock_file_system_client.mkdir.return_value = None
-            mock_file_system_client.unlink.return_value = None
-            mock_file_system_client.rmtree.return_value = None
-            mock_file_system_client.symlink_to.return_value = None
-            mock_file_system_client.resolve.return_value = Path("/resolved/path")
+        mock_file_system_client.exists.return_value = False
+        mock_file_system_client.is_dir.return_value = True
+        mock_file_system_client.mkdir.return_value = None
+        mock_file_system_client.unlink.return_value = None
+        mock_file_system_client.rmtree.return_value = None
+        mock_file_system_client.symlink_to.return_value = None
+        mock_file_system_client.resolve.return_value = Path("/resolved/path")
 
-            # Create fetcher with mocked dependencies
-            fetcher = GitHubReleaseFetcher(
-                timeout=DEFAULT_TIMEOUT,
-                network_client=mock_network_client,
-                file_system_client=mock_file_system_client,
-            )
+        # Create fetcher with mocked dependencies
+        fetcher = GitHubReleaseFetcher(
+            timeout=DEFAULT_TIMEOUT,
+            network_client=mock_network_client,
+            file_system_client=mock_file_system_client,
+        )
 
-            # Test a method that uses the network client directly
-            _ = fetcher._curl_get("http://example.com")
+        # Test a method that uses the network client directly
+        _ = fetcher._curl_get("http://example.com")
 
-            # Verify that the mocked method was called
-            mock_network_client.get.assert_called_once_with(
-                "http://example.com", None, False
-            )
+        # Verify that the mocked method was called
+        mock_network_client.get.assert_called_once_with(
+            "http://example.com", None, False
+        )
 
 
 class TestGitHubReleaseFetcherMethods:

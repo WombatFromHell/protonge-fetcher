@@ -106,6 +106,8 @@ This document establishes guidelines for agentic tools (AI assistants, code gene
    - Use pytest and pytest-mock for testing
    - Avoid the unittest module when designing tests
    - Utilize test parametrization to reduce boilerplate
+   - When a test's name would shadow or be substantially similar to another existing test concisely rename it based on what it actually is testing rather than whatever function name is being tested
+   - In the event two tests reside in different test category files and are substantially the same one of them should be renamed based on what category of test it is (based on its implementation) and the other should be removed to address the shadowing conflict
 
 ## Security Considerations
 
