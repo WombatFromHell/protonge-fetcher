@@ -786,3 +786,148 @@ class TestE2ECLIListReleases:
         # Capture output to verify error message
         captured = capsys.readouterr()
         assert "Error: --list and --release cannot be used together" in captured.out
+
+
+class TestE2EMainFunctionErrorHandling:
+    """End-to-end tests for main function error handling paths."""
+
+    def test_main_function_fetch_error_handling(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test main function error handling when fetch operation raises FetchError."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Make fetch_and_extract raise a FetchError
+        from protonfetcher import FetchError
+
+        mock_fetcher.fetch_and_extract.side_effect = FetchError(
+            "Network error occurred"
+        )
+
+        test_args = [
+            "protonfetcher",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Capture the SystemExit
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        # Verify exit code is 1 for error
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message was printed
+        captured = capsys.readouterr()
+        assert "Error: Network error occurred" in captured.out
+
+    def test_main_function_fetch_error_with_debug(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test main function error handling when fetch operation raises FetchError with debug enabled."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Make fetch_and_extract raise a FetchError
+        from protonfetcher import FetchError
+
+        mock_fetcher.fetch_and_extract.side_effect = FetchError(
+            "Download failed due to network timeout"
+        )
+
+        test_args = [
+            "protonfetcher",
+            "--debug",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Capture the SystemExit
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        # Verify exit code is 1 for error
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message was printed
+        captured = capsys.readouterr()
+        assert "Error: Download failed due to network timeout" in captured.out
+
+    def test_cli_list_flag_stdout_rate_limit_error(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI handles rate limit errors in stdout properly."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_recent_releases method to raise the appropriate error
+        from protonfetcher import FetchError
+
+        mock_fetcher.list_recent_releases.side_effect = FetchError(
+            "API rate limit exceeded. Please wait a few minutes before trying again."
+        )
+
+        test_args = [
+            "protonfetcher",
+            "--list",
+            "-f",
+            "GE-Proton",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to the rate limit error
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert "Error: API rate limit exceeded" in captured.out
+
+    def test_cli_list_flag_json_parse_error(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI handles JSON parsing errors in list functionality."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_recent_releases method to raise a JSON parsing error
+        from protonfetcher import FetchError
+
+        mock_fetcher.list_recent_releases.side_effect = FetchError(
+            "Failed to parse JSON response: Expecting value: line 1 column 1 (char 0)"
+        )
+
+        test_args = [
+            "protonfetcher",
+            "--list",
+            "-f",
+            "GE-Proton",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to the JSON parse error
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert "Error: Failed to parse JSON response" in captured.out

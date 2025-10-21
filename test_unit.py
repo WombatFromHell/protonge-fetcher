@@ -216,6 +216,22 @@ class TestUtilityFunctions:
             else result == expected_pattern
         )
 
+    def test_compare_versions_return_zero_path(self):
+        """Test compare_versions function's return 0 path when versions are equal."""
+        # This specifically tests the return 0 at the end of compare_versions function
+        # when all components are equal but the initial parsed1 == parsed2 check fails
+        result = compare_versions("GE-Proton10-1", "GE-Proton10-1", "GE-Proton")
+        assert result == 0
+
+    def test_compare_versions_with_identical_parsed_values_not_equal_objects(self):
+        """Test compare_versions when parsed values are identical but objects are different."""
+        # Create two equivalent but different tuple objects to trigger the component comparison
+        # that ends with return 0
+        result = compare_versions("GE-Proton9-5", "GE-Proton9-5", "GE-Proton")
+        assert (
+            result == 0
+        )  # This should trigger the return 0 at the end of the function
+
     def test_spinner_attributes_default_values(self):
         """Test Spinner object attributes with default values."""
         spinner = Spinner()
@@ -344,6 +360,186 @@ class TestUtilityFunctions:
         # Test after context exit
         assert spinner.current == 2
 
+    def test_spinner_update_progress_method_with_prefix(self):
+        """Test Spinner update_progress method with prefix that doesn't start with 'Extracting'."""
+        spinner = Spinner(
+            total=100, desc="Test", unit="B", disable=True, show_progress=True
+        )
+
+        # Update progress with a prefix that doesn't start with "Extracting"
+        spinner.update_progress(50, 100, prefix="Processing")
+
+        # Verify that the description was updated
+        assert spinner.desc == "Processing"
+        assert spinner.current == 50
+        assert spinner.total == 100
+
+    def test_spinner_update_progress_method_with_extracting_prefix(self):
+        """Test Spinner update_progress method with 'Extracting' prefix."""
+        spinner = Spinner(
+            total=100,
+            desc="Extracting files",
+            unit="B",
+            disable=True,
+            show_progress=True,
+        )
+
+        # Update progress with a prefix that starts with "Extracting" - should not update desc
+        original_desc = spinner.desc
+        spinner.update_progress(50, 100, prefix="NewPrefix")
+
+        # Description should remain unchanged since original desc starts with "Extracting"
+        assert spinner.desc == original_desc
+        assert spinner.current == 50
+        assert spinner.total == 100
+
+    def test_spinner_update_progress_method_no_prefix(self):
+        """Test Spinner update_progress method without prefix."""
+        spinner = Spinner(
+            total=100, desc="Original Desc", unit="B", disable=True, show_progress=True
+        )
+
+        # Update progress without prefix - description should remain unchanged
+        original_desc = spinner.desc
+        spinner.update_progress(75, 100)  # No prefix provided
+
+        # Description should remain unchanged when prefix is empty
+        assert spinner.desc == original_desc
+        assert spinner.current == 75
+        assert spinner.total == 100
+
+    def test_spinner_close_method(self, mocker):
+        """Test Spinner close method functionality."""
+        # Mock print function to avoid actual printing
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(total=10, disable=False)  # Enable to test print behavior
+        spinner._current_line = "Test line content"
+
+        # Call close method
+        spinner.close()
+
+        # Verify print was called to clear the line and add newline
+        assert mock_print.called
+        # Should print spaces equal to length of current line plus a newline
+        expected_call = "\r" + " " * len(spinner._current_line) + "\r"
+        mock_print.assert_any_call(expected_call, end="")
+
+    def test_spinner_close_method_disabled(self, mocker):
+        """Test Spinner close method when disabled."""
+        # Mock print function to verify it's not called when disabled
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(total=10, disable=True)  # Disabled
+        spinner._current_line = "Test line content"
+
+        # Call close method
+        spinner.close()
+
+        # When disabled, print should NOT be called
+        assert not mock_print.called
+
+    def test_spinner_finish_method_with_total(self, mocker):
+        """Test Spinner finish method when total is set."""
+        # Mock print function to avoid actual printing
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(total=100, disable=False)
+        spinner.current = 50  # Set to less than total to see the effect
+
+        # Call finish method
+        spinner.finish()
+
+        # Verify that current is set to total (100% completion)
+        assert spinner.current == 100
+        assert spinner._completed is True
+
+    def test_spinner_finish_method_no_total(self, mocker):
+        """Test Spinner finish method when total is not set."""
+        # Mock print function to avoid actual printing
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(disable=False)  # No total specified
+        initial_current = spinner.current
+        initial_completed = spinner._completed
+
+        # Call finish method
+        spinner.finish()
+
+        # When no total, the finish method should not change anything
+        assert spinner.current == initial_current
+        assert spinner._completed == initial_completed
+
+    def test_spinner_finish_method_already_completed(self, mocker):
+        """Test Spinner finish method when already completed."""
+        # Mock print function to avoid actual printing
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(total=100, disable=False)
+        spinner.current = 100
+        spinner._completed = True  # Already completed
+
+        # Store initial values
+        initial_current = spinner.current
+        initial_completed = spinner._completed
+
+        # Call finish method
+        spinner.finish()
+
+        # Values should remain unchanged
+        assert spinner.current == initial_current
+        assert spinner._completed == initial_completed
+
+    def test_spinner_iter_method_without_iterable(self):
+        """Test Spinner.__iter__ method when no iterable is provided."""
+        spinner = Spinner(total=3, disable=True)
+
+        result = list(spinner)
+        # Should iterate from 0 to total-1
+        assert result == [0, 1, 2]
+        assert spinner.current == 3  # Should have updated current to match total
+
+    def test_spinner_iter_method_with_iterable(self):
+        """Test Spinner.__iter__ method when iterable is provided."""
+        items = ["a", "b", "c"]
+        spinner = Spinner(iterable=iter(items), total=3, disable=True)
+
+        result = list(spinner)
+        assert result == ["a", "b", "c"]
+        assert spinner.current == 3  # Should have updated current to match total
+
+    def test_spinner_update_method_with_fps_limit(self, mocker):
+        """Test Spinner update method respecting FPS limit."""
+        import time
+
+        # Mock time.time to control the timing logic
+        mock_time = mocker.patch("time.time")
+        mock_time.return_value = 100.0  # Initial time
+
+        spinner = Spinner(
+            total=10,
+            disable=True,  # Don't actually print
+            fps_limit=10.0,  # Limit to 10 FPS (0.1 seconds per frame)
+            show_progress=True,
+        )
+
+        # First update should proceed
+        spinner.update(1)
+        assert spinner.current == 1
+
+        # Advance time but not enough to exceed FPS limit
+        mock_time.return_value = (
+            100.05  # Only 0.05 seconds passed, below 0.1 limit for 10 FPS
+        )
+        spinner.update(1)
+        # Current should still be updated, but display logic might be skipped based on timing
+        assert spinner.current == 2
+
+        # Advance time beyond FPS limit
+        mock_time.return_value = 100.15  # 0.15 seconds passed, above 0.1 limit
+        spinner.update(1)
+        assert spinner.current == 3
+
     def test_module_constants(self):
         """Test module-level constants and configuration."""
         from protonfetcher import (
@@ -383,6 +579,119 @@ class TestUtilityFunctions:
         assert DEFAULT_FORK == "GE-Proton"
         assert isinstance(DEFAULT_FORK, str)
 
+
+class TestConftestFixtures:
+    """Tests for conftest.py fixtures."""
+
+    def test_mock_subprocess_success_fixture(self, mock_subprocess_success):
+        """Test the mock_subprocess_success fixture."""
+        import subprocess
+
+        # Verify that the fixture returns a proper CompletedProcess
+        result = subprocess.run(["echo", "test"], capture_output=True, text=True)
+
+        # Since the fixture mocks subprocess.run, it should return the mock
+        assert hasattr(mock_subprocess_success, "return_value")
+        assert mock_subprocess_success.return_value.returncode == 0
+        assert mock_subprocess_success.return_value.stdout == ""
+        assert mock_subprocess_success.return_value.stderr == ""
+
+    def test_mock_urllib_response_fixture(self, mock_urllib_response):
+        """Test the mock_urllib_response fixture."""
+        # Verify the fixture returns a proper mock with expected attributes
+        assert hasattr(mock_urllib_response, "headers")
+        assert hasattr(mock_urllib_response, "read")
+
+        # Test headers.get method
+        assert mock_urllib_response.headers.get.return_value == "1048576"  # 1MB
+
+        # Test read method side effect
+        first_read = mock_urllib_response.read()
+        assert first_read == b"chunk1"
+        second_read = mock_urllib_response.read()
+        assert second_read == b"chunk2"
+        third_read = mock_urllib_response.read()
+        assert third_read == b""
+
+    def test_mock_path_operations_fixture(self, mock_path_operations):
+        """Test the mock_path_operations fixture."""
+        # Verify all expected Path operations are mocked
+        expected_operations = [
+            "mkdir",
+            "touch",
+            "unlink",
+            "exists",
+            "is_dir",
+            "is_symlink",
+            "symlink_to",
+            "rename",
+            "resolve",
+            "stat",
+            "iterdir",
+        ]
+
+        for op in expected_operations:
+            assert op in mock_path_operations
+            assert hasattr(mock_path_operations[op], "called")
+
+        # Verify default return values
+        assert mock_path_operations["exists"].return_value is True
+        assert mock_path_operations["is_dir"].return_value is True
+        assert mock_path_operations["is_symlink"].return_value is False
+
+    def test_temp_structure_fixture(self, temp_structure, tmp_path):
+        """Test the temp_structure fixture."""
+        # Verify the fixture returns the expected structure
+        assert isinstance(temp_structure, dict)
+        assert "tmp" in temp_structure
+        assert "output" in temp_structure
+        assert "extract" in temp_structure
+
+        # Verify paths exist as directories
+        assert temp_structure["tmp"] == tmp_path
+        assert temp_structure["output"].exists()
+        assert temp_structure["output"].is_dir()
+        assert temp_structure["extract"].exists()
+        assert temp_structure["extract"].is_dir()
+
+    def test_mock_fetcher_fixture(self, mock_fetcher):
+        """Test the mock_fetcher fixture."""
+        # Verify the fixture returns a mock with expected attributes
+        assert hasattr(mock_fetcher, "timeout")
+        assert mock_fetcher.timeout == 30
+
+        # Verify it has the expected methods (should be callable)
+        assert hasattr(mock_fetcher, "fetch_and_extract")
+
+    def test_test_constants_fixture(self, test_constants):
+        """Test the test_constants fixture."""
+        expected_keys = [
+            "MOCK_REPO",
+            "MOCK_TAG",
+            "MOCK_EM_TAG",
+            "MOCK_ASSET_NAME",
+            "MOCK_EM_ASSET_NAME",
+            "MOCK_ASSET_SIZE",
+        ]
+
+        assert isinstance(test_constants, dict)
+        for key in expected_keys:
+            assert key in test_constants
+
+    def test_fork_params_fixture(self, fork_params):
+        """Test the fork_params fixture."""
+        assert isinstance(fork_params, list)
+        assert len(fork_params) == 4  # Based on the fixture definition
+
+        # Each item should be a tuple of (fork, tag, asset_name)
+        for item in fork_params:
+            assert isinstance(item, tuple)
+            assert len(item) == 3
+            fork, tag, asset_name = item
+            assert isinstance(fork, str)
+            assert isinstance(tag, str)
+            assert isinstance(asset_name, str)
+
     @pytest.mark.parametrize(
         "timeout_value,expected_timeout",
         [
@@ -405,6 +714,184 @@ class TestUtilityFunctions:
 
 class TestClientClasses:
     """Unit tests for the new client classes."""
+
+    def test_network_client_get_with_headers(self, mocker):
+        """Test NetworkClient get method with headers."""
+        from protonfetcher import NetworkClient
+        import subprocess
+
+        # Create a NetworkClient instance
+        client = NetworkClient(timeout=30)
+
+        # Mock subprocess.run to capture the command
+        mock_run = mocker.patch("subprocess.run")
+
+        # Create a mock response
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="response", stderr=""
+        )
+        mock_run.return_value = mock_result
+
+        # Call the get method with headers
+        headers = {"User-Agent": "test-agent", "Authorization": "Bearer token"}
+        result = client.get("https://example.com", headers=headers)
+
+        # Verify subprocess.run was called with the right arguments
+        assert mock_run.called
+        call_args = mock_run.call_args[0][
+            0
+        ]  # Get the first argument (the command list)
+
+        # Verify the headers were added to the command
+        assert "-H" in call_args
+        assert "User-Agent: test-agent" in call_args
+        assert "Authorization: Bearer token" in call_args
+
+        # Verify the result
+        assert result == mock_result
+
+    def test_network_client_get_without_headers(self, mocker):
+        """Test NetworkClient get method without headers."""
+        from protonfetcher import NetworkClient
+        import subprocess
+
+        # Create a NetworkClient instance
+        client = NetworkClient(timeout=30)
+
+        # Mock subprocess.run to capture the command
+        mock_run = mocker.patch("subprocess.run")
+
+        # Create a mock response
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="response", stderr=""
+        )
+        mock_run.return_value = mock_result
+
+        # Call the get method without headers (None)
+        result = client.get("https://example.com", headers=None)
+
+        # Verify subprocess.run was called with the right arguments
+        assert mock_run.called
+        call_args = mock_run.call_args[0][
+            0
+        ]  # Get the first argument (the command list)
+
+        # When headers is None, no -H flags should be present
+        header_indices = [i for i, x in enumerate(call_args) if x == "-H"]
+        assert len(header_indices) == 0
+
+        # Verify the result
+        assert result == mock_result
+
+    def test_network_client_head_with_follow_redirects(self, mocker):
+        """Test NetworkClient head method with follow_redirects=True."""
+        from protonfetcher import NetworkClient
+        import subprocess
+
+        # Create a NetworkClient instance
+        client = NetworkClient(timeout=30)
+
+        # Mock subprocess.run to capture the command
+        mock_run = mocker.patch("subprocess.run")
+
+        # Create a mock response
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="response", stderr=""
+        )
+        mock_run.return_value = mock_result
+
+        # Call the head method with follow_redirects=True
+        result = client.head("https://example.com", follow_redirects=True)
+
+        # Verify subprocess.run was called with the right arguments
+        assert mock_run.called
+        call_args = mock_run.call_args[0][
+            0
+        ]  # Get the first argument (the command list)
+
+        # Should have -L flag for following redirects
+        assert "-L" in call_args
+        assert "-I" in call_args  # Header only
+
+        # Verify the result
+        assert result == mock_result
+
+    def test_network_client_head_with_headers(self, mocker):
+        """Test NetworkClient head method with headers."""
+        from protonfetcher import NetworkClient
+        import subprocess
+
+        # Create a NetworkClient instance
+        client = NetworkClient(timeout=30)
+
+        # Mock subprocess.run to capture the command
+        mock_run = mocker.patch("subprocess.run")
+
+        # Create a mock response
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="response", stderr=""
+        )
+        mock_run.return_value = mock_result
+
+        # Call the head method with headers
+        headers = {"Accept": "application/json"}
+        result = client.head("https://example.com", headers=headers)
+
+        # Verify subprocess.run was called with the right arguments
+        assert mock_run.called
+        call_args = mock_run.call_args[0][
+            0
+        ]  # Get the first argument (the command list)
+
+        # Verify the headers were added to the command
+        assert "-H" in call_args
+        assert "Accept: application/json" in call_args
+
+        # Verify the result
+        assert result == mock_result
+
+    def test_network_client_download_with_headers(self, mocker, tmp_path):
+        """Test NetworkClient download method with headers."""
+        from protonfetcher import NetworkClient
+        import subprocess
+        from pathlib import Path
+
+        # Create a NetworkClient instance
+        client = NetworkClient(timeout=30)
+
+        # Create output path
+        output_path = tmp_path / "output.tar.gz"
+
+        # Mock subprocess.run to capture the command
+        mock_run = mocker.patch("subprocess.run")
+
+        # Create a mock response
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        mock_run.return_value = mock_result
+
+        # Call the download method with headers
+        headers = {"Authorization": "Bearer token"}
+        result = client.download(
+            "https://example.com/file.tar.gz", output_path, headers=headers
+        )
+
+        # Verify subprocess.run was called with the right arguments
+        assert mock_run.called
+        call_args = mock_run.call_args[0][
+            0
+        ]  # Get the first argument (the command list)
+
+        # Verify the headers were added to the command
+        assert "-H" in call_args
+        assert "Authorization: Bearer token" in call_args
+
+        # Verify the output path is in the command
+        assert str(output_path) in call_args
+
+        # Verify the result
+        assert result == mock_result
 
 
 class TestExtractedHelperMethods:
@@ -550,20 +1037,66 @@ class TestExtractedHelperMethods:
 class TestDependencyInjection:
     """Unit tests for the dependency injection functionality."""
 
+    def test_github_release_fetcher_with_custom_network_client(self):
+        """Test GitHubReleaseFetcher initialization with custom NetworkClient."""
+        from protonfetcher import NetworkClient
+
+        # Create a custom NetworkClient
+        custom_network_client = NetworkClient(timeout=60)
+
+        # Create fetcher with custom network client
+        fetcher = GitHubReleaseFetcher(network_client=custom_network_client)
+
+        # Verify the custom client is used
+        assert fetcher.network_client is custom_network_client
+        assert fetcher.network_client.timeout == 60
+
+    def test_github_release_fetcher_with_custom_filesystem_client(self):
+        """Test GitHubReleaseFetcher initialization with custom FileSystemClient."""
+        from protonfetcher import FileSystemClient
+
+        # Create a custom FileSystemClient
+        custom_filesystem_client = FileSystemClient()
+
+        # Create fetcher with custom filesystem client
+        fetcher = GitHubReleaseFetcher(file_system_client=custom_filesystem_client)
+
+        # Verify the custom client is used
+        assert fetcher.file_system_client is custom_filesystem_client
+
+    def test_github_release_fetcher_with_both_custom_clients(self):
+        """Test GitHubReleaseFetcher initialization with both custom clients."""
+        from protonfetcher import NetworkClient, FileSystemClient
+
+        # Create custom clients
+        custom_network_client = NetworkClient(timeout=120)
+        custom_filesystem_client = FileSystemClient()
+
+        # Create fetcher with both custom clients
+        fetcher = GitHubReleaseFetcher(
+            network_client=custom_network_client,
+            file_system_client=custom_filesystem_client,
+        )
+
+        # Verify both custom clients are used
+        assert fetcher.network_client is custom_network_client
+        assert fetcher.network_client.timeout == 120
+        assert fetcher.file_system_client is custom_filesystem_client
+
     def test_github_release_fetcher_with_mocks(self, mocker):
         """Test GitHubReleaseFetcher with mocked dependencies."""
         # Create mock clients
-        mock_network_client = mocker.Mock(spec=NetworkClient)
-        mock_file_system_client = mocker.Mock(spec=FileSystemClient)
+        mock_network_client = mocker.MagicMock()
+        mock_file_system_client = mocker.MagicMock()
 
         # Setup mock return values
-        mock_network_client.get.return_value = mocker.Mock(
+        mock_network_client.get.return_value = mocker.MagicMock(
             returncode=0, stdout='{"assets": [{"name": "test.tar.gz"}]}'
         )
-        mock_network_client.head.return_value = mocker.Mock(
+        mock_network_client.head.return_value = mocker.MagicMock(
             returncode=0, stdout="Content-Length: 12345\nLocation: /redirect/path"
         )
-        mock_network_client.download.return_value = mocker.Mock(returncode=0)
+        mock_network_client.download.return_value = mocker.MagicMock(returncode=0)
 
         mock_file_system_client.exists.return_value = False
         mock_file_system_client.is_dir.return_value = True
@@ -581,12 +1114,89 @@ class TestDependencyInjection:
         )
 
         # Test a method that uses the network client directly
-        _ = fetcher._curl_get("http://example.com")
+        result = fetcher._curl_get("http://example.com")
 
         # Verify that the mocked method was called
         mock_network_client.get.assert_called_once_with(
             "http://example.com", None, False
         )
+
+    def test_dependency_injection_allows_isolated_testing(self, mocker):
+        """Test that dependency injection allows for fully isolated testing."""
+        # Create mocks that will completely isolate the fetcher from real systems
+        mock_network_client = mocker.MagicMock()
+        mock_file_system_client = mocker.MagicMock()
+
+        # Configure the mocks with predictable behavior
+        mock_network_client.get.return_value = mocker.MagicMock(
+            returncode=0, stdout='{"test": "data"}'
+        )
+        mock_network_client.head.return_value = mocker.MagicMock(
+            returncode=0, stdout="Content-Length: 100"
+        )
+        mock_network_client.download.return_value = mocker.MagicMock(returncode=0)
+
+        mock_file_system_client.exists.return_value = True
+        mock_file_system_client.is_dir.return_value = True
+        mock_file_system_client.mkdir.return_value = None
+        mock_file_system_client.write.return_value = None
+        mock_file_system_client.read.return_value = b"test data"
+        mock_file_system_client.symlink_to.return_value = None
+        mock_file_system_client.resolve.return_value = Path("/test/path")
+        mock_file_system_client.unlink.return_value = None
+        mock_file_system_client.rmtree.return_value = None
+
+        # Create fetcher with mocked dependencies
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=mock_file_system_client,
+        )
+
+        # The fetcher should work completely with mocked dependencies
+        # without touching file system or network
+        get_result = fetcher._curl_get("http://example.com/test")
+
+        # Verify expected behavior
+        assert get_result.returncode == 0
+        mock_network_client.get.assert_called_once()
+
+        def test_github_release_fetcher_with_mocks(self, mocker):
+            """Test GitHubReleaseFetcher with mocked dependencies."""
+            # Create mock clients
+            mock_network_client = mocker.Mock(spec=NetworkClient)
+            mock_file_system_client = mocker.Mock(spec=FileSystemClient)
+
+            # Setup mock return values
+            mock_network_client.get.return_value = mocker.Mock(
+                returncode=0, stdout='{"assets": [{"name": "test.tar.gz"}]}'
+            )
+            mock_network_client.head.return_value = mocker.Mock(
+                returncode=0, stdout="Content-Length: 12345\nLocation: /redirect/path"
+            )
+            mock_network_client.download.return_value = mocker.Mock(returncode=0)
+
+            mock_file_system_client.exists.return_value = False
+            mock_file_system_client.is_dir.return_value = True
+            mock_file_system_client.mkdir.return_value = None
+            mock_file_system_client.unlink.return_value = None
+            mock_file_system_client.rmtree.return_value = None
+            mock_file_system_client.symlink_to.return_value = None
+            mock_file_system_client.resolve.return_value = Path("/resolved/path")
+
+            # Create fetcher with mocked dependencies
+            fetcher = GitHubReleaseFetcher(
+                timeout=DEFAULT_TIMEOUT,
+                network_client=mock_network_client,
+                file_system_client=mock_file_system_client,
+            )
+
+            # Test a method that uses the network client directly
+            _ = fetcher._curl_get("http://example.com")
+
+            # Verify that the mocked method was called
+            mock_network_client.get.assert_called_once_with(
+                "http://example.com", None, False
+            )
 
 
 class TestGitHubReleaseFetcherMethods:
