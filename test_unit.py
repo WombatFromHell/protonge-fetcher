@@ -79,7 +79,7 @@ class TestSpinnerUnit:
         assert spinner.current == 10  # Should set current to total
         assert spinner._completed is True
 
-    def test_spinner_finish_method_no_total(self):
+    def test_spinner_finish_method_no_total_without_mocks(self):
         """Test Spinner finish method when total is not set."""
         spinner = Spinner(disable=True)  # No total specified
         spinner.current = 5
@@ -454,7 +454,7 @@ class TestUtilityFunctions:
         assert spinner.current == 100
         assert spinner._completed is True
 
-    def test_spinner_finish_method_no_total(self, mocker):
+    def test_spinner_finish_method_no_total_with_mocker(self, mocker):
         """Test Spinner finish method when total is not set."""
         # Mock print function to avoid actual printing
         _ = mocker.patch("builtins.print")
@@ -698,8 +698,8 @@ class TestConftestFixtures:
             (60, 60),  # Another custom timeout
         ],
     )
-    def test_github_release_fetcher_attributes(self, timeout_value, expected_timeout):
-        """Test GitHubReleaseFetcher attributes with various timeout values."""
+    def test_github_release_fetcher_timeout_attribute(self, timeout_value, expected_timeout):
+        """Test GitHubReleaseFetcher timeout attribute with various timeout values."""
         from protonfetcher import GitHubReleaseFetcher, DEFAULT_TIMEOUT
 
         if timeout_value is None:
@@ -1893,8 +1893,8 @@ class TestGitHubReleaseFetcherMethods:
         mock_debug_log.assert_called()
         mock_print.assert_called_with("Success")
 
-    def test_github_release_fetcher_attributes(self):
-        """Test GitHubReleaseFetcher object attributes."""
+    def test_github_release_fetcher_timeout_attribute_basic(self):
+        """Test GitHubReleaseFetcher timeout attribute with basic initialization."""
         # Test default timeout initialization
         fetcher = GitHubReleaseFetcher()
         assert fetcher.timeout == 30  # DEFAULT_TIMEOUT
@@ -2015,8 +2015,8 @@ class TestAdditionalCoverage:
         # Verify the error was logged
         assert mock_logger.error.called
 
-    def test_extract_with_tarfile_exception_handling(self, fetcher, mocker, tmp_path):
-        """Test _extract_with_tarfile method exception handling path."""
+    def test_extract_with_tarfile_get_archive_info_exception(self, fetcher, mocker, tmp_path):
+        """Test _extract_with_tarfile method exception handling when _get_archive_info raises."""
         archive_path = tmp_path / "test.tar"
         target_dir = tmp_path / "extracted"
 

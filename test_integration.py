@@ -1636,8 +1636,8 @@ class TestExtractionWorkflow:
         # Spinner update_progress should be called for each file extracted
         assert mock_spinner.update_progress.called
 
-    def test_extract_with_tarfile_exception_handling(self, fetcher, mocker, tmp_path):
-        """Test _extract_with_tarfile exception handling path."""
+    def test_extract_with_tarfile_extraction_exception(self, fetcher, mocker, tmp_path):
+        """Test _extract_with_tarfile method exception handling during extraction."""
         archive_path = tmp_path / "test.tar"
         target_dir = tmp_path / "extract"
         target_dir.mkdir()
@@ -1762,8 +1762,8 @@ class TestLinkManagementSystem:
         """Create a GitHubReleaseFetcher instance for testing."""
         return GitHubReleaseFetcher()
 
-    def test_get_link_names_for_fork_ge_proton(self, fetcher, tmp_path):
-        """Test _get_link_names_for_fork with GE-Proton fork."""
+    def test_get_link_names_for_fork_ge_proton_integration(self, fetcher, tmp_path):
+        """Test _get_link_names_for_fork with GE-Proton fork (integration)."""
         extract_dir = tmp_path / "extract"
 
         main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, "GE-Proton")
@@ -1772,8 +1772,8 @@ class TestLinkManagementSystem:
         assert fb1 == extract_dir / "GE-Proton-Fallback"
         assert fb2 == extract_dir / "GE-Proton-Fallback2"
 
-    def test_get_link_names_for_fork_proton_em(self, fetcher, tmp_path):
-        """Test _get_link_names_for_fork with Proton-EM fork."""
+    def test_get_link_names_for_fork_proton_em_integration(self, fetcher, tmp_path):
+        """Test _get_link_names_for_fork with Proton-EM fork (integration)."""
         extract_dir = tmp_path / "extract"
 
         main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, "Proton-EM")
@@ -1782,8 +1782,8 @@ class TestLinkManagementSystem:
         assert fb1 == extract_dir / "Proton-EM-Fallback"
         assert fb2 == extract_dir / "Proton-EM-Fallback2"
 
-    def test_find_tag_directory_manual_release_ge_proton(self, fetcher, tmp_path):
-        """Test _find_tag_directory for GE-Proton manual release."""
+    def test_find_tag_directory_manual_release_ge_proton_integration(self, fetcher, tmp_path):
+        """Test _find_tag_directory for GE-Proton manual release (integration)."""
         # Create the expected directory
         expected_dir = tmp_path / "GE-Proton10-11"
         expected_dir.mkdir()
@@ -1794,10 +1794,10 @@ class TestLinkManagementSystem:
 
         assert result == expected_dir
 
-    def test_find_tag_directory_manual_release_proton_em_with_prefix(
+    def test_find_tag_directory_manual_release_proton_em_with_prefix_integration(
         self, fetcher, tmp_path
     ):
-        """Test _find_tag_directory for Proton-EM manual release with proton- prefix."""
+        """Test _find_tag_directory for Proton-EM manual release with proton- prefix (integration)."""
         # Create the expected directory with proton- prefix
         expected_dir = tmp_path / "proton-EM-10.0-30"
         expected_dir.mkdir()
@@ -1808,10 +1808,10 @@ class TestLinkManagementSystem:
 
         assert result == expected_dir
 
-    def test_find_tag_directory_manual_release_proton_em_without_prefix(
+    def test_find_tag_directory_manual_release_proton_em_without_prefix_integration(
         self, fetcher, tmp_path
     ):
-        """Test _find_tag_directory for Proton-EM manual release without proton- prefix."""
+        """Test _find_tag_directory for Proton-EM manual release without proton- prefix (integration)."""
         # Create the expected directory without proton- prefix (fallback)
         expected_dir = tmp_path / "EM-10.0-30"
         expected_dir.mkdir()
@@ -1822,22 +1822,22 @@ class TestLinkManagementSystem:
 
         assert result == expected_dir
 
-    def test_find_tag_directory_not_found(self, fetcher, tmp_path):
-        """Test _find_tag_directory when directory doesn't exist."""
+    def test_find_tag_directory_not_found_integration(self, fetcher, tmp_path):
+        """Test _find_tag_directory when directory doesn't exist (integration)."""
         result = fetcher._find_tag_directory(
             tmp_path, "nonexistent", "GE-Proton", is_manual_release=True
         )
 
         assert result is None
 
-    def test_find_version_candidates_empty_dir(self, fetcher, tmp_path):
-        """Test _find_version_candidates with empty directory."""
+    def test_find_version_candidates_empty_dir_integration(self, fetcher, tmp_path):
+        """Test _find_version_candidates with empty directory (integration)."""
         candidates = fetcher._find_version_candidates(tmp_path, "GE-Proton")
 
         assert candidates == []
 
-    def test_find_version_candidates_ge_proton(self, fetcher, tmp_path):
-        """Test _find_version_candidates with GE-Proton versions."""
+    def test_find_version_candidates_ge_proton_integration(self, fetcher, tmp_path):
+        """Test _find_version_candidates with GE-Proton versions (integration)."""
         # Create some version directories
         v1_dir = tmp_path / "GE-Proton10-10"
         v2_dir = tmp_path / "GE-Proton10-11"
@@ -1863,8 +1863,8 @@ class TestLinkManagementSystem:
         assert expected_v2 in versions
         assert expected_other in versions
 
-    def test_find_version_candidates_proton_em(self, fetcher, tmp_path):
-        """Test _find_version_candidates with Proton-EM versions (with proton- prefix)."""
+    def test_find_version_candidates_proton_em_integration(self, fetcher, tmp_path):
+        """Test _find_version_candidates with Proton-EM versions (integration)."""
         # Create some Proton-EM version directories with proton- prefix
         v1_dir = tmp_path / "proton-EM-10.0-30"
         v2_dir = tmp_path / "proton-EM-10.0-31"
@@ -1975,47 +1975,7 @@ class TestLinkManagementSystem:
         assert fallback.resolve() == dir2.resolve()
         assert fallback2.resolve() == dir3.resolve()
 
-    def test_create_symlinks_with_resolve_oserror(self, fetcher, mocker, tmp_path):
-        """Test _create_symlinks when resolve raises OSError (broken symlink)."""
-        # Create some version candidates
-        dir1 = tmp_path / "GE-Proton10-1"
-        dir1.mkdir()
-        dir2 = tmp_path / "GE-Proton9-15"
-        dir2.mkdir()
-        dir3 = tmp_path / "GE-Proton8-20"
-        dir3.mkdir()
 
-        # Create symlinks
-        main = tmp_path / "GE-Proton"
-        fallback = tmp_path / "GE-Proton-Fallback"
-        fallback2 = tmp_path / "GE-Proton-Fallback2"
-
-        # Create a broken symlink
-        main.symlink_to(tmp_path / "nonexistent")
-
-        # Set up candidates (version, path) tuples
-        top_3 = [
-            ((10, 1, 0, 0), dir1),  # Newest
-            ((9, 15, 0, 0), dir2),  # Second newest
-            ((8, 20, 0, 0), dir3),  # Third newest
-        ]
-
-        # Mock file system client methods
-        mock_fs = mocker.MagicMock()
-        fetcher.file_system_client = mock_fs
-
-        # Configure mocks for the different scenarios
-        mock_fs.exists.return_value = True
-        mock_fs.is_dir.return_value = True
-        mock_fs.resolve.side_effect = OSError("Broken symlink")
-        mock_fs.unlink.return_value = None
-        mock_fs.symlink_to.return_value = None
-
-        # Test the _create_symlinks method
-        fetcher._create_symlinks(main, fallback, fallback2, top_3)
-
-        # Verify the unlink was called (to remove broken symlink)
-        mock_fs.unlink.assert_called()
 
     def test_manage_proton_links_success_case(self, fetcher, mocker, tmp_path):
         """Test _manage_proton_links success case."""
