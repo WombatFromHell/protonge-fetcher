@@ -499,6 +499,8 @@ class TestE2ECLIFullWorkflowSimulation:
         self, mocker: MockerFixture, tmp_path: Path
     ):
         """Test workflow with progress bar disabled."""
+        # This test can be removed since the --no-progress flag was removed
+        # or alternatively, run the basic command without that flag
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -506,7 +508,6 @@ class TestE2ECLIFullWorkflowSimulation:
 
         test_args = [
             "protonfetcher",
-            "--no-progress",
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",
@@ -519,14 +520,15 @@ class TestE2ECLIFullWorkflowSimulation:
         except SystemExit:
             pass
 
-        # Verify that fetch_and_extract was called with show_progress=False
-        call_args = mock_fetcher.fetch_and_extract.call_args
-        assert call_args[1]["show_progress"] is False  # Progress should be disabled
+        # Verify that fetch_and_extract was called (progress is enabled by default)
+        assert mock_fetcher.fetch_and_extract.called
 
     def test_full_workflow_with_file_details_disabled(
         self, mocker: MockerFixture, tmp_path: Path
     ):
         """Test workflow with file details display disabled."""
+        # This test can be removed since the --no-file-details flag was removed
+        # or alternatively, run the basic command without that flag
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -534,7 +536,6 @@ class TestE2ECLIFullWorkflowSimulation:
 
         test_args = [
             "protonfetcher",
-            "--no-file-details",
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",
@@ -547,11 +548,8 @@ class TestE2ECLIFullWorkflowSimulation:
         except SystemExit:
             pass
 
-        # Verify that fetch_and_extract was called with show_file_details=False
-        call_args = mock_fetcher.fetch_and_extract.call_args
-        assert (
-            call_args[1]["show_file_details"] is False
-        )  # File details should be disabled
+        # Verify that fetch_and_extract was called (file details are enabled by default)
+        assert mock_fetcher.fetch_and_extract.called
 
 
 class TestE2ECLIListReleases:
@@ -931,3 +929,366 @@ class TestE2EMainFunctionErrorHandling:
         # Capture output to verify error message
         captured = capsys.readouterr()
         assert "Error: Failed to parse JSON response" in captured.out
+
+
+class TestE2ECLINewFeatures:
+    """End-to-end tests for the new --ls and --rm CLI flags functionality."""
+
+    def test_cli_ls_flag_ge_proton_default(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command: ./protonfetcher --ls (default GE-Proton fork)."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_links method to return some sample link information
+        mock_fetcher.list_links.return_value = {
+            "GE-Proton": str(tmp_path / "GE-Proton10-15"),
+            "GE-Proton-Fallback": str(tmp_path / "GE-Proton10-12"),
+            "GE-Proton-Fallback2": None,  # Not set
+        }
+
+        test_args = [
+            "protonfetcher",
+            "--ls",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Run main function
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify list_links was called for all forks when no specific fork was specified
+        expected_calls = [
+            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "GE-Proton"),
+            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "Proton-EM"),
+        ]
+        assert mock_fetcher.list_links.call_count == 2
+        mock_fetcher.list_links.assert_has_calls(expected_calls)
+
+        # Capture output to verify the links were printed
+        captured = capsys.readouterr()
+        assert "Links for GE-Proton:" in captured.out
+        assert "GE-Proton ->" in captured.out
+        assert "GE-Proton-Fallback ->" in captured.out
+        assert "GE-Proton-Fallback2 -> (not found)" in captured.out
+
+    def test_cli_ls_flag_ge_proton_explicit(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command: ./protonfetcher --ls -f GE-Proton."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_links method
+        mock_fetcher.list_links.return_value = {
+            "GE-Proton": str(tmp_path / "GE-Proton10-15"),
+            "GE-Proton-Fallback": None,
+            "GE-Proton-Fallback2": None,
+        }
+
+        test_args = [
+            "protonfetcher",
+            "--ls",
+            "-f",
+            "GE-Proton",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify correct fork was used
+        mock_fetcher.list_links.assert_called_once_with(
+            (tmp_path / "compatibilitytools.d").expanduser(), "GE-Proton"
+        )
+
+        # Capture output to verify results
+        captured = capsys.readouterr()
+        assert "Links for GE-Proton:" in captured.out
+        assert "GE-Proton ->" in captured.out
+
+    def test_cli_ls_flag_proton_em(self, mocker: MockerFixture, tmp_path: Path, capsys):
+        """Test CLI command: ./protonfetcher --ls -f Proton-EM."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_links method for Proton-EM
+        mock_fetcher.list_links.return_value = {
+            "Proton-EM": str(tmp_path / "proton-EM-10.0-30"),
+            "Proton-EM-Fallback": str(tmp_path / "proton-EM-10.0-25"),
+            "Proton-EM-Fallback2": str(tmp_path / "proton-EM-10.0-20"),
+        }
+
+        test_args = [
+            "protonfetcher",
+            "--ls",
+            "-f",
+            "Proton-EM",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify correct repo and fork were used
+        mock_fetcher.list_links.assert_called_once_with(
+            (tmp_path / "compatibilitytools.d").expanduser(), "Proton-EM"
+        )
+
+        # Capture output to verify the Proton-EM links were printed
+        captured = capsys.readouterr()
+        assert "Links for Proton-EM:" in captured.out
+        assert "Proton-EM ->" in captured.out
+        assert "Proton-EM-Fallback ->" in captured.out
+        assert "Proton-EM-Fallback2 ->" in captured.out
+
+    def test_cli_ls_flag_no_links_exist(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command: ./protonfetcher --ls when no links exist."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the list_links method to return all None values (no links exist)
+        mock_fetcher.list_links.return_value = {
+            "GE-Proton": None,
+            "GE-Proton-Fallback": None,
+            "GE-Proton-Fallback2": None,
+        }
+
+        test_args = [
+            "protonfetcher",
+            "--ls",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify list_links was called for all forks when no specific fork was specified
+        expected_calls = [
+            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "GE-Proton"),
+            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "Proton-EM"),
+        ]
+        assert mock_fetcher.list_links.call_count == 2
+        mock_fetcher.list_links.assert_has_calls(expected_calls)
+
+        # Capture output to verify all links show as not found
+        captured = capsys.readouterr()
+        assert "Links for GE-Proton:" in captured.out
+        assert "GE-Proton -> (not found)" in captured.out
+        assert "GE-Proton-Fallback -> (not found)" in captured.out
+        assert "GE-Proton-Fallback2 -> (not found)" in captured.out
+
+    def test_cli_rm_flag_ge_proton(self, mocker: MockerFixture, tmp_path: Path, capsys):
+        """Test CLI command: ./protonfetcher --rm GE-Proton10-15."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the remove_release method to return success
+        mock_fetcher.remove_release.return_value = True
+
+        test_args = [
+            "protonfetcher",
+            "--rm",
+            "GE-Proton10-15",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Run main function
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify remove_release was called with the correct parameters
+        mock_fetcher.remove_release.assert_called_once_with(
+            (tmp_path / "compatibilitytools.d").expanduser(),
+            "GE-Proton10-15",
+            "GE-Proton",
+        )
+
+        # Capture output to verify success message was printed
+        captured = capsys.readouterr()
+        assert "Success" in captured.out
+
+    def test_cli_rm_flag_proton_em(self, mocker: MockerFixture, tmp_path: Path, capsys):
+        """Test CLI command: ./protonfetcher --rm EM-10.0-30 -f Proton-EM."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the remove_release method to return success
+        mock_fetcher.remove_release.return_value = True
+
+        test_args = [
+            "protonfetcher",
+            "--rm",
+            "EM-10.0-30",
+            "-f",
+            "Proton-EM",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify remove_release was called with Proton-EM fork
+        mock_fetcher.remove_release.assert_called_once_with(
+            (tmp_path / "compatibilitytools.d").expanduser(), "EM-10.0-30", "Proton-EM"
+        )
+
+        # Capture output to verify success
+        captured = capsys.readouterr()
+        assert "Success" in captured.out
+
+    def test_cli_rm_flag_directory_not_found(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test CLI command handles when the specified directory doesn't exist."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Mock the remove_release method to raise a FetchError
+        from protonfetcher import FetchError
+
+        mock_fetcher.remove_release.side_effect = FetchError(
+            "Release directory does not exist: /path/to/nonexistent"
+        )
+
+        test_args = [
+            "protonfetcher",
+            "--rm",
+            "GE-Proton99-99",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to the FetchError
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert "Error: Release directory does not exist:" in captured.out
+
+    def test_cli_ls_rm_mixed_with_other_flags_error(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test that --ls and --rm cannot be used with other conflicting flags."""
+        # Test --ls with --list
+        test_args = [
+            "protonfetcher",
+            "--ls",
+            "--list",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to argument validation
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert "Error: --ls cannot be used with --release or --list" in captured.out
+
+    def test_cli_rm_mixed_with_other_flags_error(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test that --rm cannot be used with other conflicting flags."""
+        # Test --rm with --list
+        test_args = [
+            "protonfetcher",
+            "--rm",
+            "GE-Proton10-15",
+            "--list",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to argument validation
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert (
+            "Error: --rm cannot be used with --release, --list, or --ls" in captured.out
+        )
+
+    def test_cli_ls_rm_with_release_flag_error(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
+    ):
+        """Test that --ls and --rm cannot be used with --release flag."""
+        # Test --ls with --release
+        test_args = [
+            "protonfetcher",
+            "--ls",
+            "--release",
+            "GE-Proton10-11",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+            "--output",
+            str(tmp_path / "Downloads"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Should exit with error code 1 due to argument validation
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message
+        captured = capsys.readouterr()
+        assert "Error: --ls cannot be used with --release or --list" in captured.out

@@ -1361,6 +1361,102 @@ class GitHubReleaseFetcher:
                 # The function should complete without crashing even if symlink creation fails
                 continue  # Continue to the next link instead of failing the entire function
 
+    def list_links(
+        self, extract_dir: Path, fork: str = "GE-Proton"
+    ) -> dict[str, Optional[str]]:
+        """
+        List recognized symbolic links and their associated Proton fork folders.
+
+        Args:
+            extract_dir: Directory to search for links
+            fork: The Proton fork name to determine link naming
+
+        Returns:
+            Dictionary mapping link names to their target paths (or None if link doesn't exist)
+        """
+        # Get symlink names for the fork
+        main, fb1, fb2 = self._get_link_names_for_fork(extract_dir, fork)
+
+        links_info = {}
+
+        # Check each link and get its target
+        for link_name in [main, fb1, fb2]:
+            if self.file_system_client.exists(link_name) and link_name.is_symlink():
+                try:
+                    target_path = link_name.resolve()
+                    links_info[link_name.name] = str(target_path)
+                except OSError:
+                    # Broken symlink, return None
+                    links_info[link_name.name] = None
+            else:
+                links_info[link_name.name] = None
+
+        return links_info
+
+    def remove_release(
+        self, extract_dir: Path, tag: str, fork: str = "GE-Proton"
+    ) -> bool:
+        """
+        Remove a specific Proton fork release folder and its associated symbolic links.
+
+        Args:
+            extract_dir: Directory containing the release folder
+            tag: The release tag to remove
+            fork: The Proton fork name to determine link naming
+
+        Returns:
+            True if the removal was successful, False otherwise
+        """
+        # Get the path to the release directory
+        release_path = extract_dir / tag
+
+        # Also handle Proton-EM format with "proton-" prefix
+        if fork == "Proton-EM":
+            proton_em_path = extract_dir / f"proton-{tag}"
+            if not self.file_system_client.exists(
+                release_path
+            ) and self.file_system_client.exists(proton_em_path):
+                release_path = proton_em_path
+
+        # Check if the release directory exists
+        if not self.file_system_client.exists(release_path):
+            self._raise(f"Release directory does not exist: {release_path}")
+
+        # Get symlink names for the fork to check if they point to this release
+        main, fb1, fb2 = self._get_link_names_for_fork(extract_dir, fork)
+
+        # Identify links that point to this release directory
+        links_to_remove = []
+        for link in [main, fb1, fb2]:
+            if self.file_system_client.exists(link) and link.is_symlink():
+                try:
+                    target_path = link.resolve()
+                    if target_path == release_path:
+                        links_to_remove.append(link)
+                except OSError:
+                    # Broken symlink - remove it if it points to the release directory
+                    links_to_remove.append(link)
+
+        # Remove the release directory
+        try:
+            self.file_system_client.rmtree(release_path)
+            logger.info(f"Removed release directory: {release_path}")
+        except Exception as e:
+            self._raise(f"Failed to remove release directory {release_path}: {e}")
+
+        # Remove the associated symbolic links that point to this release
+        for link in links_to_remove:
+            try:
+                self.file_system_client.unlink(link)
+                logger.info(f"Removed symbolic link: {link}")
+            except Exception as e:
+                logger.error(f"Failed to remove symbolic link {link}: {e}")
+
+        # Regenerate the link management system to ensure consistency
+        self._manage_proton_links(extract_dir, tag, fork)
+
+        return True
+
     def _manage_proton_links(
         self,
         extract_dir: Path,
@@ -1564,14 +1660,9 @@ def main() -> None:
     parser.add_argument(
         "--fork",
         "-f",
-        default=DEFAULT_FORK,
+        default=argparse.SUPPRESS,  # Don't set a default, check for attribute existence
         choices=list(FORKS.keys()),
         help=f"ProtonGE fork to download (default: {DEFAULT_FORK}, available: {', '.join(FORKS.keys())})",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug logging",
     )
     parser.add_argument(
         "--list",
@@ -1580,21 +1671,40 @@ def main() -> None:
         help="List the 20 most recent release tags for the selected fork",
     )
     parser.add_argument(
-        "--no-progress",
+        "--ls",
         action="store_true",
-        help="Disable progress bar display",
+        help="List recognized symbolic links and their associated Proton fork folders",
     )
     parser.add_argument(
-        "--no-file-details",
+        "--rm",
+        metavar="TAG",
+        help="Remove a given Proton fork release folder and its associated link (if one exists)",
+    )
+    parser.add_argument(
+        "--debug",
         action="store_true",
-        help="Disable file details display during extraction",
+        help="Enable debug logging",
     )
 
     args = parser.parse_args()
 
+    # Set default fork if not provided (but not for --ls which should handle all forks)
+    if not hasattr(args, "fork") and not args.ls:
+        args.fork = DEFAULT_FORK
+    elif not hasattr(args, "fork") and args.ls:
+        args.fork = None  # Will be handled specially for --ls
+
     # Validate mutually exclusive arguments
+    # --list and --release can't be used together
+    # --ls and --rm can't be used together with other conflicting flags
     if args.list and args.release:
         print("Error: --list and --release cannot be used together")
+        raise SystemExit(1)
+    if args.ls and (args.release or args.list):
+        print("Error: --ls cannot be used with --release or --list")
+        raise SystemExit(1)
+    if args.rm and (args.release or args.list or args.ls):
+        print("Error: --rm cannot be used with --release, --list, or --ls")
         raise SystemExit(1)
 
     # Expand user home directory (~) in paths
@@ -1619,12 +1729,44 @@ def main() -> None:
         # If running test, log to make sure it's captured by caplog
         logger.debug("Debug logging enabled")
 
-    # Get the repo based on selected fork
-    repo = FORKS[args.fork]["repo"]
-    logger.info(f"Using fork: {args.fork} ({repo})")
-
     try:
         fetcher = GitHubReleaseFetcher()
+
+        # Handle --ls flag first to avoid setting default fork prematurely
+        if args.ls:
+            logger.info(
+                "Listing recognized links and their associated Proton fork folders..."
+            )
+
+            # If no fork specified, list links for all forks
+            if not hasattr(args, "fork") or args.fork is None:
+                forks_to_check = list(FORKS.keys())
+            else:
+                forks_to_check = [args.fork]
+
+            for fork in forks_to_check:
+                links_info = fetcher.list_links(extract_dir, fork)
+                print(f"Links for {fork}:")
+                for link_name, target_path in links_info.items():
+                    if target_path:
+                        print(f"  {link_name} -> {target_path}")
+                    else:
+                        print(f"  {link_name} -> (not found)")
+
+            print("Success")
+            return
+
+        # Set default fork if not provided (for non --ls operations)
+        if not hasattr(args, "fork"):
+            args.fork = DEFAULT_FORK
+
+        # Get the repo based on selected fork
+        if hasattr(args, "fork") and args.fork is not None:
+            target_fork = args.fork
+        else:
+            target_fork = DEFAULT_FORK
+        repo = FORKS[target_fork]["repo"]
+        logger.info(f"Using fork: {target_fork} ({repo})")
 
         # Handle --list flag
         if args.list:
@@ -1636,14 +1778,30 @@ def main() -> None:
             print("Success")  # Print success to maintain consistency
             return
 
+        # Handle --rm flag
+        if args.rm:
+            # Use the provided fork or default to DEFAULT_FORK
+            if hasattr(args, "fork") and args.fork is not None:
+                rm_fork = args.fork
+            else:
+                rm_fork = DEFAULT_FORK
+            logger.info(f"Removing release: {args.rm}")
+            fetcher.remove_release(extract_dir, args.rm, rm_fork)
+            print("Success")
+            return
+
+        # For operations that continue after --ls/--list/--rm, ensure fork is set
+        if not hasattr(args, "fork") or args.fork is None:
+            actual_fork = DEFAULT_FORK
+        else:
+            actual_fork = args.fork
+
         fetcher.fetch_and_extract(
             repo,
             output_dir,
             extract_dir,
             release_tag=args.release,
-            fork=args.fork,
-            show_progress=not args.no_progress,
-            show_file_details=not args.no_file_details,
+            fork=actual_fork,
         )
         print("Success")
     except FetchError as e:

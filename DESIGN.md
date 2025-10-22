@@ -128,6 +128,12 @@ This link management system provides several benefits:
 
 The module implements a comprehensive error handling strategy with a custom FetchError exception for all failure cases. It provides detailed error messages with context, implements graceful fallbacks (e.g., from urllib to curl, from tarfile to system tar), includes proper logging at appropriate levels, and validates inputs and preconditions.
 
+For the new `--ls` and `--rm` functionality:
+- The `--ls` flag will list all known link names and their targets, showing "(not found)" for links that don't exist
+- The `--rm` flag will raise a FetchError if the specified release directory does not exist
+- Both flags follow the same error handling patterns as the rest of the module
+- The link management system is automatically updated after removal to maintain consistency
+
 ## Dependencies
 
 The module has minimal external dependencies, relying primarily on standard library modules including argparse, json, logging, re, shutil, subprocess, tarfile, time, urllib.parse, urllib.request, pathlib, and typing. It requires system dependencies of curl and tar for network operations and extraction. No third-party Python packages are required.
@@ -149,6 +155,64 @@ Create custom network and file system clients with specific configurations, then
 ### Using with Proton-EM Fork
 
 Follow the same process as basic usage but specify "Proton-EM" as the fork type to handle the different naming conventions and archive formats used by that fork.
+
+### Using --ls Flag (List Links)
+
+Use the `--ls` flag to list recognized symbolic links and their associated Proton fork folders:
+
+```bash
+# List links for ALL managed forks (default behavior)
+./protonfetcher --ls
+
+# List links for specific fork only
+./protonfetcher --ls -f Proton-EM
+
+# List links with custom extract directory  
+./protonfetcher --ls --extract-dir ~/.steam/steam/compatibilitytools.d/
+```
+
+This will output the current state of symbolic links in the format:
+```
+Links for GE-Proton:
+  GE-Proton -> /path/to/GE-Proton10-15
+  GE-Proton-Fallback -> /path/to/GE-Proton10-12
+  GE-Proton-Fallback2 -> (not found)
+Success
+```
+
+### Using --rm Flag (Remove Release)
+
+Use the `--rm` flag to remove a given Proton fork release folder and its associated links:
+
+```bash
+# Remove a specific GE-Proton release
+./protonfetcher --rm GE-Proton10-15
+
+# Remove a specific Proton-EM release
+./protonfetcher --rm EM-10.0-30 -f Proton-EM
+
+# Remove with custom extract directory
+./protonfetcher --rm GE-Proton10-15 --extract-dir ~/.steam/steam/compatibilitytools.d/
+```
+
+This will:
+1. Remove the specified release folder (e.g., `GE-Proton10-15`)
+2. Remove any symbolic links that pointed to this release
+3. Regenerate the link management system to maintain consistency
+4. Output a success message or error if the directory doesn't exist
+
+### Command-Line Interface Options
+
+Full list of command-line options:
+
+- `--extract-dir`, `-x`: Directory to extract the asset to (default: `~/.steam/steam/compatibilitytools.d/`)
+- `--output`, `-o`: Directory to download the asset to (default: `~/Downloads/`)
+- `--release`, `-r`: Manually specify a release tag to download instead of the latest
+- `--fork`, `-f`: ProtonGE fork to download (default: `GE-Proton`, available: `GE-Proton`, `Proton-EM`)
+- `--list`, `-l`: List the 20 most recent release tags for the selected fork
+- `--ls`: List recognized symbolic links and their associated Proton fork folders
+- `--rm`: Remove a given Proton fork release folder and its associated link
+- `--debug`: Enable debug logging
 
 ## Future Considerations
 

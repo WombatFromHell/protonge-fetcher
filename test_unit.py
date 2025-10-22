@@ -896,27 +896,25 @@ class TestClientClasses:
 class TestExtractedHelperMethods:
     """Unit tests for the extracted helper methods in _manage_proton_links."""
 
-    def test_get_link_names_for_fork_ge_proton(self):
-        """Test _get_link_names_for_fork with GE-Proton."""
+    @pytest.mark.parametrize(
+        "fork,expected_main,expected_fallback,expected_fallback2",
+        [
+            ("GE-Proton", "GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"),
+            ("Proton-EM", "Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"),
+        ],
+    )
+    def test_get_link_names_for_fork(
+        self, fork, expected_main, expected_fallback, expected_fallback2
+    ):
+        """Test _get_link_names_for_fork with different Proton forks."""
         fetcher = GitHubReleaseFetcher()
         extract_dir = Path("/test")
 
-        main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, "GE-Proton")
+        main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, fork)
 
-        assert main == extract_dir / "GE-Proton"
-        assert fb1 == extract_dir / "GE-Proton-Fallback"
-        assert fb2 == extract_dir / "GE-Proton-Fallback2"
-
-    def test_get_link_names_for_fork_proton_em(self):
-        """Test _get_link_names_for_fork with Proton-EM."""
-        fetcher = GitHubReleaseFetcher()
-        extract_dir = Path("/test")
-
-        main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, "Proton-EM")
-
-        assert main == extract_dir / "Proton-EM"
-        assert fb1 == extract_dir / "Proton-EM-Fallback"
-        assert fb2 == extract_dir / "Proton-EM-Fallback2"
+        assert main == extract_dir / expected_main
+        assert fb1 == extract_dir / expected_fallback
+        assert fb2 == extract_dir / expected_fallback2
 
     def test_find_tag_directory_manual_release_ge_proton(self, tmp_path):
         """Test _find_tag_directory for GE-Proton manual release."""
@@ -978,55 +976,47 @@ class TestExtractedHelperMethods:
 
         assert candidates == []
 
-    def test_find_version_candidates_ge_proton(self, tmp_path):
-        """Test _find_version_candidates with GE-Proton versions."""
+    @pytest.mark.parametrize(
+        "fork,version_dirs,expected_versions",
+        [
+            (
+                "GE-Proton",
+                ["GE-Proton10-10", "GE-Proton10-11"],
+                ["GE-Proton10-10", "GE-Proton10-11"],
+            ),
+            (
+                "Proton-EM",
+                ["proton-EM-10.0-30", "proton-EM-10.0-31"],
+                [
+                    "EM-10.0-30",
+                    "EM-10.0-31",
+                ],  # Note: Proton-EM strips "proton-" prefix for parsing
+            ),
+        ],
+    )
+    def test_find_version_candidates(
+        self, tmp_path, fork, version_dirs, expected_versions
+    ):
+        """Test _find_version_candidates with different Proton forks."""
         fetcher = GitHubReleaseFetcher()
 
-        # Create some version directories
-        v1_dir = tmp_path / "GE-Proton10-10"
-        v2_dir = tmp_path / "GE-Proton10-11"
-        v1_dir.mkdir()
-        v2_dir.mkdir()
+        # Create version directories
+        for version_dir in version_dirs:
+            (tmp_path / version_dir).mkdir()
 
         # Also create a non-version directory (this should be excluded now)
         other_dir = tmp_path / "other_dir"
         other_dir.mkdir()
 
-        candidates = fetcher._find_version_candidates(tmp_path, "GE-Proton")
+        candidates = fetcher._find_version_candidates(tmp_path, fork)
 
-        # Should have 2 candidates (only actual GE-Proton directories are included)
-        assert len(candidates) == 2
+        # Should have candidates only for the actual Proton directories (not the non-version directory)
+        assert len(candidates) == len(version_dirs)
         versions = [candidate[0] for candidate in candidates]
         # Parse expected versions
-        expected_v1 = parse_version("GE-Proton10-10", "GE-Proton")
-        expected_v2 = parse_version("GE-Proton10-11", "GE-Proton")
-        assert expected_v1 in versions
-        assert expected_v2 in versions
-
-    def test_find_version_candidates_proton_em(self, tmp_path):
-        """Test _find_version_candidates with Proton-EM versions (with proton- prefix)."""
-        fetcher = GitHubReleaseFetcher()
-
-        # Create some Proton-EM version directories with proton- prefix
-        v1_dir = tmp_path / "proton-EM-10.0-30"
-        v2_dir = tmp_path / "proton-EM-10.0-31"
-        v1_dir.mkdir()
-        v2_dir.mkdir()
-
-        # Also create a non-version directory (this should be excluded now)
-        other_dir = tmp_path / "other_dir"
-        other_dir.mkdir()
-
-        candidates = fetcher._find_version_candidates(tmp_path, "Proton-EM")
-
-        # Should have 2 candidates (only actual Proton-EM directories are included)
-        assert len(candidates) == 2
-        versions = [candidate[0] for candidate in candidates]
-        # Parse expected versions (the method strips the proton- prefix for parsing)
-        expected_v1 = parse_version("EM-10.0-30", "Proton-EM")  # Strips "proton-"
-        expected_v2 = parse_version("EM-10.0-31", "Proton-EM")
-        assert expected_v1 in versions
-        assert expected_v2 in versions
+        for expected_version in expected_versions:
+            expected_parsed = parse_version(expected_version, fork)
+            assert expected_parsed in versions
 
 
 class TestDependencyInjection:
@@ -1814,8 +1804,8 @@ class TestGitHubReleaseFetcherMethods:
                 release=None,
                 fork="GE-Proton",
                 debug=False,
-                no_progress=False,
-                no_file_details=False,
+                ls=False,  # Explicitly set ls to False
+                rm=None,  # Explicitly set rm to None
                 list=False,  # Explicitly set list to False
             ),
         )
@@ -1859,8 +1849,8 @@ class TestGitHubReleaseFetcherMethods:
             release=None,
             fork="GE-Proton",
             debug=True,  # Enable debug
-            no_progress=False,
-            no_file_details=False,
+            ls=False,  # Explicitly set ls to False
+            rm=None,  # Explicitly set rm to None
             list=False,  # Explicitly set list to False
         )
         mocker.patch("argparse.ArgumentParser.parse_args", return_value=mock_args)
@@ -2202,3 +2192,222 @@ class TestAdditionalCoverage:
 
         with pytest.raises(FetchError, match="Remote asset not found"):
             fetcher.get_remote_asset_size(repo, tag, asset_name)
+
+    def test_list_links_ge_proton(self, fetcher, mocker, tmp_path):
+        """Test list_links method for GE-Proton fork."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create mock paths for the three links
+        main_link = extract_dir / "GE-Proton"
+        # Note: fallback_link and fallback2_link are used implicitly in the method being tested
+
+        # Create target directories and make symlinks
+        target_dir = tmp_path / "GE-Proton10-15"
+        target_dir.mkdir()
+
+        main_link.symlink_to(target_dir)
+
+        # Mock file system operations
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+
+        # Only main exists as a symlink, others don't exist
+        def mock_exists(path):
+            return str(path) == str(main_link)
+
+        def mock_is_symlink(path):
+            return str(path) == str(main_link)
+
+        mock_fs.exists.side_effect = mock_exists
+        mock_fs.is_symlink.side_effect = mock_is_symlink
+
+        # Mock Path.resolve() to return the target
+        def mock_resolve(path_self):
+            if main_link.is_symlink():
+                return target_dir
+            return path_self
+
+        mocker.patch.object(type(main_link), "resolve", mock_resolve)
+
+        # Call the method
+        result = fetcher.list_links(extract_dir, "GE-Proton")
+
+        # Verify the structure of the result
+        assert "GE-Proton" in result
+        assert "GE-Proton-Fallback" in result
+        assert "GE-Proton-Fallback2" in result
+
+        # Verify each specific link target
+        assert result["GE-Proton"] == str(target_dir.resolve())
+        assert result["GE-Proton-Fallback"] is None
+        assert result["GE-Proton-Fallback2"] is None
+
+    def test_list_links_proton_em(self, fetcher, mocker, tmp_path):
+        """Test list_links method for Proton-EM fork."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Mock file system operations
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = False  # No links exist
+
+        # Call the method
+        result = fetcher.list_links(extract_dir, "Proton-EM")
+
+        # Verify the structure of the result
+        assert "Proton-EM" in result
+        assert "Proton-EM-Fallback" in result
+        assert "Proton-EM-Fallback2" in result
+        # All should be None since they don't exist
+        assert all(v is None for v in result.values())
+
+        # Verify each specific link target
+        assert result["Proton-EM"] is None
+        assert result["Proton-EM-Fallback"] is None
+        assert result["Proton-EM-Fallback2"] is None
+
+    def test_list_links_with_broken_symlink(self, fetcher, mocker, tmp_path):
+        """Test list_links method with broken symlinks."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        main_link = extract_dir / "GE-Proton"
+        # Create a broken symlink
+        main_link.symlink_to(tmp_path / "nonexistent_target")
+
+        # Mock file system operations
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = True
+        mock_fs.is_symlink.return_value = True
+
+        # Mock Path.resolve() to raise OSError for broken symlink
+        def broken_resolve(path_self):
+            raise OSError("No such file or directory")
+
+        mocker.patch.object(type(main_link), "resolve", broken_resolve)
+
+        # Call the method
+        result = fetcher.list_links(extract_dir, "GE-Proton")
+
+        # The broken link should return None
+        assert result["GE-Proton"] is None
+
+    def test_remove_release_success(self, fetcher, mocker, tmp_path):
+        """Test remove_release method with successful removal."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a release directory to remove
+        release_dir = extract_dir / "GE-Proton10-15"
+        release_dir.mkdir()
+
+        # Create some content in the release directory to make it non-empty
+        (release_dir / "proton").mkdir()
+
+        # Create mock symlinks that point to this release directory
+        main_link = extract_dir / "GE-Proton"
+        main_link.symlink_to(release_dir)
+
+        # Create mock symlinks that point to this release directory
+        fallback_link = extract_dir / "GE-Proton-Fallback"
+        fallback_link.symlink_to(release_dir)
+
+        # Mock the file system client
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = True
+        mock_fs.is_symlink.return_value = True
+        mock_fs.rmtree.return_value = None
+        mock_fs.unlink.return_value = None
+        mock_fs.resolve.return_value = (
+            release_dir  # Make resolve return the target for the test
+        )
+
+        # Mock the _manage_proton_links method to avoid actual link management
+        mocker.patch.object(fetcher, "_manage_proton_links")
+
+        # Call the method
+        result = fetcher.remove_release(extract_dir, "GE-Proton10-15", "GE-Proton")
+
+        # Verify the return value
+        assert result is True
+
+        # Verify that rmtree was called to remove the release directory
+        mock_fs.rmtree.assert_called_once()
+        # Verify that unlink was called to remove associated links
+        mock_fs.unlink.assert_called()
+
+    def test_remove_release_proton_em_format(self, fetcher, mocker, tmp_path):
+        """Test remove_release method with Proton-EM format."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a Proton-EM release directory with proton- prefix
+        release_dir = extract_dir / "proton-EM-10.0-30"
+        release_dir.mkdir()
+
+        # Create some content in the release directory
+        (release_dir / "proton").mkdir()
+
+        # Mock the file system client
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = True
+        mock_fs.is_symlink.return_value = False  # No symlinks pointing to it initially
+        mock_fs.rmtree.return_value = None
+        mock_fs.unlink.return_value = None
+
+        # Mock Path.resolve to raise an error since it won't be called for non-symlinks
+        def resolve_path(path):
+            if path == release_dir:
+                return release_dir
+            raise AttributeError("resolve not called")
+
+        # Mock the _manage_proton_links method
+        mocker.patch.object(fetcher, "_manage_proton_links")
+
+        # Call the method
+        result = fetcher.remove_release(extract_dir, "EM-10.0-30", "Proton-EM")
+
+        # Verify the return value
+        assert result is True
+
+        # Verify that rmtree was called to remove the release directory
+        mock_fs.rmtree.assert_called_once()
+
+    def test_remove_release_directory_not_found(self, fetcher, mocker, tmp_path):
+        """Test remove_release method when the release directory doesn't exist."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Mock the file system client to return False for exists
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = False
+
+        # Call the method, which should raise FetchError
+        with pytest.raises(FetchError, match="Release directory does not exist"):
+            fetcher.remove_release(extract_dir, "GE-Proton10-15", "GE-Proton")
+
+    def test_remove_release_with_exception(self, fetcher, mocker, tmp_path):
+        """Test remove_release method when rmtree raises an exception."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a release directory
+        release_dir = extract_dir / "GE-Proton10-15"
+        release_dir.mkdir()
+
+        # Mock the file system client to raise an exception during rmtree
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = True
+        mock_fs.is_symlink.return_value = False
+        mock_fs.rmtree.side_effect = Exception("Permission denied")
+
+        # Call the method, which should raise FetchError
+        with pytest.raises(FetchError, match="Failed to remove release directory"):
+            fetcher.remove_release(extract_dir, "GE-Proton10-15", "GE-Proton")

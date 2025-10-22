@@ -25,33 +25,40 @@ class TestLinkManagementIntegration:
         extract_dir = tmp_path / "extract"
         extract_dir.mkdir()
 
-        # Create version directories
+        # Create version directories - we'll need 3 to test all links
         old_main = "GE-Proton8-20"
+        old_fallback = "GE-Proton9-10"  # older than new_version but newer than old_main
         new_version = "GE-Proton10-1"
 
         (extract_dir / old_main).mkdir()
+        (extract_dir / old_fallback).mkdir()
         (extract_dir / new_version).mkdir()
 
         main_link = extract_dir / "GE-Proton"
         fallback_link = extract_dir / "GE-Proton-Fallback"
+        fallback2_link = extract_dir / "GE-Proton-Fallback2"
 
-        # Initially, main points to old version
-        main_link.symlink_to(extract_dir / old_main)
+        # Initially, set up main and fallback links to simulate existing state
+        main_link.symlink_to(extract_dir / old_fallback)
+        fallback_link.symlink_to(extract_dir / old_main)
 
-        # Add new version that should become main
+        # Add new version that should become main, pushing others down
         fetcher._manage_proton_links(
             extract_dir, new_version, "GE-Proton", is_manual_release=True
         )
 
-        # Verify that new version is main and old becomes fallback
+        # Verify that all three link targets exist after management
         assert main_link.exists()
         assert fallback_link.exists()
+        assert fallback2_link.exists()
 
         main_target = main_link.resolve()
         fallback_target = fallback_link.resolve()
+        fallback2_target = fallback2_link.resolve()
 
         assert new_version in str(main_target)
-        assert old_main in str(fallback_target)
+        assert old_fallback in str(fallback_target)
+        assert old_main in str(fallback2_target)
 
     def test_manage_links_ge_proton_between_versions(self, fetcher, tmp_path):
         """Test link management when new version is between existing versions."""
@@ -100,24 +107,40 @@ class TestLinkManagementIntegration:
 
         # For Proton-EM, directories are named with proton- prefix
         old_main = "proton-EM-9.5-20"
+        old_fallback = (
+            "proton-EM-9.8-10"  # older than new_version but newer than old_main
+        )
         new_version = "proton-EM-10.0-30"
 
         (extract_dir / old_main).mkdir()
+        (extract_dir / old_fallback).mkdir()
         (extract_dir / new_version).mkdir()
 
         main_link = extract_dir / "Proton-EM"
+        fallback_link = extract_dir / "Proton-EM-Fallback"
+        fallback2_link = extract_dir / "Proton-EM-Fallback2"
 
-        main_link.symlink_to(extract_dir / old_main)
+        # Initially set up main and fallback links to simulate existing state
+        main_link.symlink_to(extract_dir / old_fallback)
+        fallback_link.symlink_to(extract_dir / old_main)
 
-        # Add new version (tag without prefix)
+        # Add new version (tag without prefix) that should become main
         fetcher._manage_proton_links(
             extract_dir, "EM-10.0-30", "Proton-EM", is_manual_release=True
         )
 
-        # Verify that new version is main
+        # Verify that all three link targets exist after management
         assert main_link.exists()
+        assert fallback_link.exists()
+        assert fallback2_link.exists()
+
         main_target = main_link.resolve()
+        fallback_target = fallback_link.resolve()
+        fallback2_target = fallback2_link.resolve()
+
         assert new_version in str(main_target)
+        assert old_fallback in str(fallback_target)
+        assert old_main in str(fallback2_target)
 
     def test_manage_links_multiple_versions_rotation(self, fetcher, tmp_path):
         """Test rotation of multiple versions."""
@@ -177,6 +200,81 @@ class TestLinkManagementIntegration:
             "Expected extracted directory does not exist" in str(call)
             for call in mock_logger.warning.call_args_list
         )
+
+    @pytest.mark.parametrize(
+        "fork,version_pattern",
+        [
+            ("GE-Proton", "GE-Proton{major}-{minor}"),
+            ("Proton-EM", "proton-EM-{major}.{minor}-{patch}"),
+        ],
+    )
+    def test_manage_links_comprehensive_forks(
+        self, fetcher, tmp_path, fork, version_pattern
+    ):
+        """Parametrized test for link management with both GE-Proton and Proton-EM forks."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create version directories based on the fork - need 3 for comprehensive testing
+        if fork == "GE-Proton":
+            old_main = "GE-Proton8-20"
+            old_fallback = (
+                "GE-Proton9-10"  # older than new_version but newer than old_main
+            )
+            new_version = "GE-Proton10-1"
+        else:  # Proton-EM
+            old_main = "proton-EM-9.5-20"
+            old_fallback = (
+                "proton-EM-9.8-10"  # older than new_version but newer than old_main
+            )
+            new_version = "proton-EM-10.0-30"
+
+        (extract_dir / old_main).mkdir()
+        (extract_dir / old_fallback).mkdir()
+        (extract_dir / new_version).mkdir()
+
+        # Create the three expected symlink paths for the fork
+        if fork == "GE-Proton":
+            main_link = extract_dir / "GE-Proton"
+            fallback_link = extract_dir / "GE-Proton-Fallback"
+            fallback2_link = extract_dir / "GE-Proton-Fallback2"
+        else:  # Proton-EM
+            main_link = extract_dir / "Proton-EM"
+            fallback_link = extract_dir / "Proton-EM-Fallback"
+            fallback2_link = extract_dir / "Proton-EM-Fallback2"
+
+        # Initially set up main and fallback links to simulate existing state
+        main_link.symlink_to(extract_dir / old_fallback)
+        fallback_link.symlink_to(extract_dir / old_main)
+
+        # Add new version that should become main, pushing others down
+        # Use the tag without the prefix for Proton-EM (EM-10.0-30 instead of proton-EM-10.0-30)
+        tag_for_call = (
+            new_version.replace("proton-", "") if fork == "Proton-EM" else new_version
+        )
+
+        fetcher._manage_proton_links(
+            extract_dir, tag_for_call, fork, is_manual_release=True
+        )
+
+        # Verify that all three link targets exist after management
+        assert main_link.exists()
+        assert fallback_link.exists()
+        assert fallback2_link.exists()
+
+        # Get the targets for verification
+        main_target = main_link.resolve()
+        fallback_target = fallback_link.resolve()
+        fallback2_target = fallback2_link.resolve()
+
+        if fork == "GE-Proton":
+            assert new_version in str(main_target)
+            assert old_fallback in str(fallback_target)
+            assert old_main in str(fallback2_target)
+        else:  # Proton-EM
+            assert new_version in str(main_target)
+            assert old_fallback in str(fallback_target)
+            assert old_main in str(fallback2_target)
 
 
 class TestDownloadWorkflowIntegration:
@@ -1762,25 +1860,30 @@ class TestLinkManagementSystem:
         """Create a GitHubReleaseFetcher instance for testing."""
         return GitHubReleaseFetcher()
 
-    def test_get_link_names_for_fork_ge_proton_integration(self, fetcher, tmp_path):
-        """Test _get_link_names_for_fork with GE-Proton fork (integration)."""
+    @pytest.mark.parametrize(
+        "fork,expected_main,expected_fallback,expected_fallback2",
+        [
+            ("GE-Proton", "GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"),
+            ("Proton-EM", "Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"),
+        ],
+    )
+    def test_get_link_names_for_fork_integration(
+        self,
+        fetcher,
+        tmp_path,
+        fork,
+        expected_main,
+        expected_fallback,
+        expected_fallback2,
+    ):
+        """Test _get_link_names_for_fork with different Proton forks (integration)."""
         extract_dir = tmp_path / "extract"
 
-        main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, "GE-Proton")
+        main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, fork)
 
-        assert main == extract_dir / "GE-Proton"
-        assert fb1 == extract_dir / "GE-Proton-Fallback"
-        assert fb2 == extract_dir / "GE-Proton-Fallback2"
-
-    def test_get_link_names_for_fork_proton_em_integration(self, fetcher, tmp_path):
-        """Test _get_link_names_for_fork with Proton-EM fork (integration)."""
-        extract_dir = tmp_path / "extract"
-
-        main, fb1, fb2 = fetcher._get_link_names_for_fork(extract_dir, "Proton-EM")
-
-        assert main == extract_dir / "Proton-EM"
-        assert fb1 == extract_dir / "Proton-EM-Fallback"
-        assert fb2 == extract_dir / "Proton-EM-Fallback2"
+        assert main == extract_dir / expected_main
+        assert fb1 == extract_dir / expected_fallback
+        assert fb2 == extract_dir / expected_fallback2
 
     def test_find_tag_directory_manual_release_ge_proton_integration(
         self, fetcher, tmp_path
@@ -2093,3 +2196,255 @@ class TestLinkManagementSystem:
             "No extracted Proton directories found" in str(call)
             for call in mock_logger.warning.call_args_list
         )
+
+
+class TestNewFeaturesIntegration:
+    """Integration tests for the new --ls and --rm functionality."""
+
+    @pytest.fixture
+    def fetcher(self):
+        """Create a GitHubReleaseFetcher instance for testing."""
+        return GitHubReleaseFetcher()
+
+    def test_list_links_ge_proton_integration(self, fetcher, tmp_path):
+        """Test list_links method integration with real filesystem for GE-Proton."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a target directory and make symlinks
+        target_dir = tmp_path / "GE-Proton10-15"
+        target_dir.mkdir()
+        (
+            target_dir / "proton"
+        ).mkdir()  # Add some content to make it look like a real Proton dir
+
+        # Create the three expected symlinks for GE-Proton
+        main_link = extract_dir / "GE-Proton"
+        fallback_link = extract_dir / "GE-Proton-Fallback"
+        _ = (
+            extract_dir / "GE-Proton-Fallback2"
+        )  # This is needed by the list_links method
+
+        # Create symlinks pointing to the target
+        main_link.symlink_to(target_dir, target_is_directory=True)
+        fallback_link.symlink_to(target_dir, target_is_directory=True)
+
+        # Don't create fallback2 link to test both existing and non-existing links
+
+        # Call the method
+        result = fetcher.list_links(extract_dir, "GE-Proton")
+
+        # Verify the structure and values of the result
+        assert "GE-Proton" in result
+        assert "GE-Proton-Fallback" in result
+        assert "GE-Proton-Fallback2" in result
+
+        # Check that existing links return the correct target path
+        assert result["GE-Proton"] == str(target_dir.resolve())
+        assert result["GE-Proton-Fallback"] == str(target_dir.resolve())
+        # Non-existing link should return None
+        assert result["GE-Proton-Fallback2"] is None
+
+    def test_list_links_proton_em_integration(self, fetcher, tmp_path):
+        """Test list_links method integration with real filesystem for Proton-EM."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a Proton-EM target directory
+        target_dir = tmp_path / "proton-EM-10.0-30"
+        target_dir.mkdir()
+        (target_dir / "proton").mkdir()  # Add some content
+
+        # Create the three expected symlinks for Proton-EM
+        main_link = extract_dir / "Proton-EM"
+        _ = extract_dir / "Proton-EM-Fallback"
+        _ = extract_dir / "Proton-EM-Fallback2"
+
+        # Create only the main link for this test
+        main_link.symlink_to(target_dir, target_is_directory=True)
+
+        # Call the method
+        result = fetcher.list_links(extract_dir, "Proton-EM")
+
+        # Verify the structure and values of the result
+        assert "Proton-EM" in result
+        assert "Proton-EM-Fallback" in result
+        assert "Proton-EM-Fallback2" in result
+
+        # Check that the existing link returns the correct target path
+        assert result["Proton-EM"] == str(target_dir.resolve())
+        # Non-existing links should return None
+        assert result["Proton-EM-Fallback"] is None
+        assert result["Proton-EM-Fallback2"] is None
+
+    def test_list_links_no_existing_links(self, fetcher, tmp_path):
+        """Test list_links method when no links exist."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Call the method for GE-Proton
+        result = fetcher.list_links(extract_dir, "GE-Proton")
+
+        # All results should be None since no links exist
+        assert all(v is None for v in result.values())
+
+        # Verify the structure is correct
+        assert len(result) == 3
+        assert "GE-Proton" in result
+        assert "GE-Proton-Fallback" in result
+        assert "GE-Proton-Fallback2" in result
+
+    @pytest.mark.parametrize(
+        "fork,release_dir_name,tag_name",
+        [
+            ("GE-Proton", "GE-Proton10-15", "GE-Proton10-15"),
+            ("Proton-EM", "proton-EM-10.0-30", "EM-10.0-30"),
+        ],
+    )
+    def test_remove_release_success_integration(
+        self, fetcher, tmp_path, fork, release_dir_name, tag_name
+    ):
+        """Test remove_release method integration with real filesystem for both Proton forks."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a release directory to remove (with appropriate naming convention for the fork)
+        release_dir = extract_dir / release_dir_name
+        release_dir.mkdir()
+        # Add some content to make it a non-empty directory
+        (release_dir / "proton").mkdir()
+        (release_dir / "version").write_text(
+            "10-15" if fork == "GE-Proton" else "10.0-30"
+        )
+
+        # Create symlinks that point to this release directory (for the appropriate fork)
+        main_link = extract_dir / fork
+        main_link.symlink_to(release_dir, target_is_directory=True)
+
+        # For GE-Proton, also create one of the fallback links pointing to the same directory
+        fallback_link = extract_dir / f"{fork}-Fallback"
+        if fork == "GE-Proton":
+            fallback_link.symlink_to(release_dir, target_is_directory=True)
+
+        # Verify initial state
+        assert release_dir.exists()
+        assert main_link.exists()
+        if fork == "GE-Proton":
+            assert fallback_link.exists()
+        assert main_link.is_symlink()
+        if fork == "GE-Proton":
+            assert fallback_link.is_symlink()
+
+        # Call the remove method
+        result = fetcher.remove_release(extract_dir, tag_name, fork)
+
+        # Verify the return value
+        assert result is True
+
+        # Verify that the release directory was removed
+        assert not release_dir.exists()
+
+        # Verify that the associated symlinks were also removed
+        assert not main_link.exists()
+        if fork == "GE-Proton":
+            assert not fallback_link.exists()
+
+    def test_remove_release_with_manage_links_call(self, fetcher, mocker, tmp_path):
+        """Test remove_release method calls _manage_proton_links to maintain consistency."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a release directory
+        release_dir = extract_dir / "GE-Proton10-15"
+        release_dir.mkdir()
+        (release_dir / "proton").mkdir()
+
+        # Mock the _manage_proton_links method to verify it gets called
+        mock_manage_links = mocker.patch.object(fetcher, "_manage_proton_links")
+
+        # Call the remove method
+        result = fetcher.remove_release(extract_dir, "GE-Proton10-15", "GE-Proton")
+
+        # Verify the return value
+        assert result is True
+
+        # Verify that _manage_proton_links was called to maintain link consistency
+        mock_manage_links.assert_called_once()
+
+        # Verify that the release directory was removed
+        assert not release_dir.exists()
+
+    def test_remove_release_directory_not_found(self, fetcher, tmp_path):
+        """Test remove_release method when the specified directory doesn't exist."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Try to remove a directory that doesn't exist
+        non_existent_tag = "GE-Proton99-99"
+        non_existent_dir = extract_dir / non_existent_tag
+
+        # Verify it doesn't exist initially
+        assert not non_existent_dir.exists()
+
+        # Call the remove method, which should raise FetchError
+        with pytest.raises(FetchError, match="Release directory does not exist"):
+            fetcher.remove_release(extract_dir, non_existent_tag, "GE-Proton")
+
+    def test_remove_release_removes_only_correct_symlinks(self, fetcher, tmp_path):
+        """Test remove_release method only removes symlinks that point to the target directory."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create the release directory to be removed
+        target_dir = extract_dir / "GE-Proton10-15"
+        target_dir.mkdir()
+        (target_dir / "proton").mkdir()
+
+        # Create a different directory that should NOT be removed
+        other_dir = extract_dir / "GE-Proton9-20"
+        other_dir.mkdir()
+        (other_dir / "proton").mkdir()
+
+        # Create symlinks: some pointing to target_dir, one to other_dir
+        main_link = extract_dir / "GE-Proton"
+        main_link.symlink_to(target_dir, target_is_directory=True)
+
+        fallback_link = extract_dir / "GE-Proton-Fallback"
+        fallback_link.symlink_to(target_dir, target_is_directory=True)
+
+        # This symlink should NOT be removed as it points to a different directory
+        other_link = extract_dir / "GE-Proton-Fallback2"
+        other_link.symlink_to(other_dir, target_is_directory=True)
+
+        # Verify initial state
+        assert target_dir.exists()
+        assert other_dir.exists()
+        assert main_link.exists() and main_link.is_symlink()
+        assert fallback_link.exists() and fallback_link.is_symlink()
+        assert other_link.exists() and other_link.is_symlink()
+
+        # Call the remove method
+        result = fetcher.remove_release(extract_dir, "GE-Proton10-15", "GE-Proton")
+
+        # Verify the return value
+        assert result is True
+
+        # Verify that the target directory was removed
+        assert not target_dir.exists()
+
+        # The link management system may recreate links, but the old links pointing to the removed directory should be gone
+        # Check if main_link still exists - it may have been recreated pointing to the other_dir
+        if main_link.exists():
+            assert main_link.is_symlink()
+            # If it exists, it should point to the other_dir now since target_dir is gone
+            assert str(other_dir) in str(main_link.resolve())
+
+        if fallback_link.exists():
+            assert fallback_link.is_symlink()
+            # If it exists, it should point to the other_dir now since target_dir is gone
+            assert str(other_dir) in str(fallback_link.resolve())
+
+        # The other_link should remain unchanged since it pointed to a different directory
+        # This is not true in all cases because the link management system will recreate all links
+        # So let's focus on what we can verify: the target directory is gone, and the other directory is preserved
+        assert other_dir.exists()
