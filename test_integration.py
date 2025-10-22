@@ -1782,7 +1782,9 @@ class TestLinkManagementSystem:
         assert fb1 == extract_dir / "Proton-EM-Fallback"
         assert fb2 == extract_dir / "Proton-EM-Fallback2"
 
-    def test_find_tag_directory_manual_release_ge_proton_integration(self, fetcher, tmp_path):
+    def test_find_tag_directory_manual_release_ge_proton_integration(
+        self, fetcher, tmp_path
+    ):
         """Test _find_tag_directory for GE-Proton manual release (integration)."""
         # Create the expected directory
         expected_dir = tmp_path / "GE-Proton10-11"
@@ -1836,59 +1838,47 @@ class TestLinkManagementSystem:
 
         assert candidates == []
 
-    def test_find_version_candidates_ge_proton_integration(self, fetcher, tmp_path):
-        """Test _find_version_candidates with GE-Proton versions (integration)."""
-        # Create some version directories
-        v1_dir = tmp_path / "GE-Proton10-10"
-        v2_dir = tmp_path / "GE-Proton10-11"
-        v1_dir.mkdir()
-        v2_dir.mkdir()
+    @pytest.mark.parametrize(
+        "fork,version_dirs,expected_versions",
+        [
+            (
+                "GE-Proton",
+                ["GE-Proton10-10", "GE-Proton10-11"],
+                ["GE-Proton10-10", "GE-Proton10-11"],
+            ),
+            (
+                "Proton-EM",
+                ["proton-EM-10.0-30", "proton-EM-10.0-31"],
+                [
+                    "EM-10.0-30",
+                    "EM-10.0-31",
+                ],  # Note: Proton-EM strips "proton-" prefix for parsing
+            ),
+        ],
+    )
+    def test_find_version_candidates_integration(
+        self, fetcher, tmp_path, fork, version_dirs, expected_versions
+    ):
+        """Test _find_version_candidates with both GE-Proton and Proton-EM versions (parametrized integration test)."""
+        # Create version directories
+        for version_dir in version_dirs:
+            (tmp_path / version_dir).mkdir()
 
-        # Also create a non-version directory (this will still be included but with fallback parsing)
+        # Also create a non-version directory (this should be excluded now)
         other_dir = tmp_path / "other_dir"
         other_dir.mkdir()
 
-        candidates = fetcher._find_version_candidates(tmp_path, "GE-Proton")
+        candidates = fetcher._find_version_candidates(tmp_path, fork)
 
-        # Should have 3 candidates (all directories are included but parsed differently)
-        assert len(candidates) == 3
+        # Should have candidates only for the actual Proton directories (not the non-version directory)
+        assert len(candidates) == len(version_dirs)
         versions = [candidate[0] for candidate in candidates]
         # Parse expected versions
         from protonfetcher import parse_version
 
-        expected_v1 = parse_version("GE-Proton10-10", "GE-Proton")
-        expected_v2 = parse_version("GE-Proton10-11", "GE-Proton")
-        expected_other = parse_version("other_dir", "GE-Proton")  # fallback parsing
-        assert expected_v1 in versions
-        assert expected_v2 in versions
-        assert expected_other in versions
-
-    def test_find_version_candidates_proton_em_integration(self, fetcher, tmp_path):
-        """Test _find_version_candidates with Proton-EM versions (integration)."""
-        # Create some Proton-EM version directories with proton- prefix
-        v1_dir = tmp_path / "proton-EM-10.0-30"
-        v2_dir = tmp_path / "proton-EM-10.0-31"
-        v1_dir.mkdir()
-        v2_dir.mkdir()
-
-        # Also create a non-version directory (this will still be included but with fallback parsing)
-        other_dir = tmp_path / "other_dir"
-        other_dir.mkdir()
-
-        candidates = fetcher._find_version_candidates(tmp_path, "Proton-EM")
-
-        # Should have 3 candidates (all directories are included but parsed differently)
-        assert len(candidates) == 3
-        versions = [candidate[0] for candidate in candidates]
-        # Parse expected versions (the method strips the proton- prefix for parsing)
-        from protonfetcher import parse_version
-
-        expected_v1 = parse_version("EM-10.0-30", "Proton-EM")  # Strips "proton-"
-        expected_v2 = parse_version("EM-10.0-31", "Proton-EM")
-        expected_other = parse_version("other_dir", "Proton-EM")  # fallback parsing
-        assert expected_v1 in versions
-        assert expected_v2 in versions
-        assert expected_other in versions
+        for expected_version in expected_versions:
+            expected_parsed = parse_version(expected_version, fork)
+            assert expected_parsed in versions
 
     def test_create_symlinks_success(self, fetcher, mocker, tmp_path):
         """Test _create_symlinks method success case."""
@@ -1974,8 +1964,6 @@ class TestLinkManagementSystem:
         assert main.resolve() == dir1.resolve()
         assert fallback.resolve() == dir2.resolve()
         assert fallback2.resolve() == dir3.resolve()
-
-
 
     def test_manage_proton_links_success_case(self, fetcher, mocker, tmp_path):
         """Test _manage_proton_links success case."""

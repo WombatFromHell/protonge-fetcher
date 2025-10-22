@@ -1252,7 +1252,7 @@ class GitHubReleaseFetcher:
                 else:
                     tag_name = entry.name
 
-                # The key fix: Skip directories that clearly belong to the other fork
+                # Skip directories that clearly belong to the other fork
                 if fork == "Proton-EM" and tag_name.startswith("GE-Proton"):
                     # Skip GE-Proton directories when processing Proton-EM
                     continue
@@ -1263,8 +1263,29 @@ class GitHubReleaseFetcher:
                     # Skip Proton-EM directories when processing GE-Proton
                     continue
 
-                # use the directory name as tag for comparison
-                candidates.append((parse_version(tag_name, fork), entry))
+                # For each fork, validate that the directory name matches expected pattern
+                # This prevents non-Proton directories like "LegacyRuntime" from being included
+                is_valid_proton_dir = False
+
+                if fork == "GE-Proton":
+                    # GE-Proton directories should match pattern: GE-Proton{major}-{minor}
+                    ge_pattern = r"^GE-Proton\d+-\d+$"
+                    if re.match(ge_pattern, entry.name):
+                        is_valid_proton_dir = True
+                elif fork == "Proton-EM":
+                    # Proton-EM directories should match pattern: proton-EM-{major}.{minor}-{patch}
+                    # or EM-{major}.{minor}-{patch}
+                    em_pattern1 = r"^proton-EM-\d+\.\d+-\d+$"
+                    em_pattern2 = r"^EM-\d+\.\d+-\d+$"
+                    if re.match(em_pattern1, entry.name) or re.match(
+                        em_pattern2, entry.name
+                    ):
+                        is_valid_proton_dir = True
+
+                # Only add to candidates if it's a valid Proton directory for this fork
+                if is_valid_proton_dir:
+                    # use the directory name as tag for comparison
+                    candidates.append((parse_version(tag_name, fork), entry))
         return candidates
 
     def _create_symlinks(

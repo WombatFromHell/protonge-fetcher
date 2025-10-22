@@ -698,7 +698,9 @@ class TestConftestFixtures:
             (60, 60),  # Another custom timeout
         ],
     )
-    def test_github_release_fetcher_timeout_attribute(self, timeout_value, expected_timeout):
+    def test_github_release_fetcher_timeout_attribute(
+        self, timeout_value, expected_timeout
+    ):
         """Test GitHubReleaseFetcher timeout attribute with various timeout values."""
         from protonfetcher import GitHubReleaseFetcher, DEFAULT_TIMEOUT
 
@@ -986,22 +988,20 @@ class TestExtractedHelperMethods:
         v1_dir.mkdir()
         v2_dir.mkdir()
 
-        # Also create a non-version directory (this will still be included but with fallback parsing)
+        # Also create a non-version directory (this should be excluded now)
         other_dir = tmp_path / "other_dir"
         other_dir.mkdir()
 
         candidates = fetcher._find_version_candidates(tmp_path, "GE-Proton")
 
-        # Should have 3 candidates (all directories are included but parsed differently)
-        assert len(candidates) == 3
+        # Should have 2 candidates (only actual GE-Proton directories are included)
+        assert len(candidates) == 2
         versions = [candidate[0] for candidate in candidates]
         # Parse expected versions
         expected_v1 = parse_version("GE-Proton10-10", "GE-Proton")
         expected_v2 = parse_version("GE-Proton10-11", "GE-Proton")
-        expected_other = parse_version("other_dir", "GE-Proton")  # fallback parsing
         assert expected_v1 in versions
         assert expected_v2 in versions
-        assert expected_other in versions
 
     def test_find_version_candidates_proton_em(self, tmp_path):
         """Test _find_version_candidates with Proton-EM versions (with proton- prefix)."""
@@ -1013,22 +1013,20 @@ class TestExtractedHelperMethods:
         v1_dir.mkdir()
         v2_dir.mkdir()
 
-        # Also create a non-version directory (this will still be included but with fallback parsing)
+        # Also create a non-version directory (this should be excluded now)
         other_dir = tmp_path / "other_dir"
         other_dir.mkdir()
 
         candidates = fetcher._find_version_candidates(tmp_path, "Proton-EM")
 
-        # Should have 3 candidates (all directories are included but parsed differently)
-        assert len(candidates) == 3
+        # Should have 2 candidates (only actual Proton-EM directories are included)
+        assert len(candidates) == 2
         versions = [candidate[0] for candidate in candidates]
         # Parse expected versions (the method strips the proton- prefix for parsing)
         expected_v1 = parse_version("EM-10.0-30", "Proton-EM")  # Strips "proton-"
         expected_v2 = parse_version("EM-10.0-31", "Proton-EM")
-        expected_other = parse_version("other_dir", "Proton-EM")  # fallback parsing
         assert expected_v1 in versions
         assert expected_v2 in versions
-        assert expected_other in versions
 
 
 class TestDependencyInjection:
@@ -2015,7 +2013,9 @@ class TestAdditionalCoverage:
         # Verify the error was logged
         assert mock_logger.error.called
 
-    def test_extract_with_tarfile_get_archive_info_exception(self, fetcher, mocker, tmp_path):
+    def test_extract_with_tarfile_get_archive_info_exception(
+        self, fetcher, mocker, tmp_path
+    ):
         """Test _extract_with_tarfile method exception handling when _get_archive_info raises."""
         archive_path = tmp_path / "test.tar"
         target_dir = tmp_path / "extracted"
