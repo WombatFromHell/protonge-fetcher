@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pyright: strict
 """
 protonfetcher.py
 
@@ -18,7 +19,7 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Iterator, NoReturn, Optional
+from typing import Iterator, NoReturn, Optional, Any
 
 
 class NetworkClient:
@@ -28,8 +29,8 @@ class NetworkClient:
         self.timeout = timeout
 
     def get(
-        self, url: str, headers: Optional[dict] = None, stream: bool = False
-    ) -> subprocess.CompletedProcess:
+        self, url: str, headers: Optional[dict[str, str]] = None, stream: bool = False
+    ) -> subprocess.CompletedProcess[str]:
         cmd = [
             "curl",
             "-L",  # Follow redirects
@@ -56,8 +57,11 @@ class NetworkClient:
         return result
 
     def head(
-        self, url: str, headers: Optional[dict] = None, follow_redirects: bool = False
-    ) -> subprocess.CompletedProcess:
+        self,
+        url: str,
+        headers: Optional[dict[str, str]] = None,
+        follow_redirects: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         cmd = [
             "curl",
             "-I",  # Header only
@@ -81,8 +85,8 @@ class NetworkClient:
         return result
 
     def download(
-        self, url: str, output_path: Path, headers: Optional[dict] = None
-    ) -> subprocess.CompletedProcess:
+        self, url: str, output_path: Path, headers: Optional[dict[str, str]] = None
+    ) -> subprocess.CompletedProcess[str]:
         cmd = [
             "curl",
             "-L",  # Follow redirects
@@ -145,7 +149,7 @@ class Spinner:
 
     def __init__(
         self,
-        iterable: Iterator | None = None,
+        iterable: Optional[Iterator[Any]] = None,
         total: Optional[int] = None,
         desc: str = "",
         unit: Optional[str] = None,
@@ -155,7 +159,7 @@ class Spinner:
         width: int = 10,
         show_progress: bool = False,  # New parameter to control progress display
         show_file_details: bool = False,  # New parameter to control file details display
-        **kwargs,
+        **kwargs: Any,
     ):
         self._iterable = iterable
         self.total = total
@@ -183,7 +187,7 @@ class Spinner:
             self._update_display()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object):
         if not self.disable:
             # Clear the line when exiting and add a newline to prevent clobbering
             print("\r" + " " * len(self._current_line) + "\r", end="")
@@ -344,7 +348,7 @@ class Spinner:
                 # print("\r", end="", flush=True)
                 print()
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator[Any]:
         if self._iterable is not None:
             for item in self._iterable:
                 yield item
@@ -373,7 +377,7 @@ FORKS = {
 DEFAULT_FORK = "GE-Proton"
 
 
-def parse_version(tag: str, fork: str = "GE-Proton") -> tuple:
+def parse_version(tag: str, fork: str = "GE-Proton") -> tuple[str, int, int, int]:
     """
     Parse a version tag to extract the numeric components for comparison.
 
@@ -416,18 +420,37 @@ def compare_versions(tag1: str, tag2: str, fork: str = "GE-Proton") -> int:
     Returns:
         -1 if tag1 is older than tag2, 0 if equal, 1 if tag1 is newer than tag2
     """
-    parsed1 = parse_version(tag1, fork)
-    parsed2 = parse_version(tag2, fork)
+    p1_prefix, p1_major, p1_minor, p1_patch = parse_version(tag1, fork)
+    p2_prefix, p2_major, p2_minor, p2_patch = parse_version(tag2, fork)
 
-    if parsed1 == parsed2:
+    if (p1_prefix, p1_major, p1_minor, p1_patch) == (
+        p2_prefix,
+        p2_major,
+        p2_minor,
+        p2_patch,
+    ):
         return 0
 
     # Compare component by component
-    for comp1, comp2 in zip(parsed1, parsed2):
-        if comp1 < comp2:
-            return -1
-        elif comp1 > comp2:
-            return 1
+    if p1_prefix < p2_prefix:
+        return -1
+    elif p1_prefix > p2_prefix:
+        return 1
+
+    if p1_major < p2_major:
+        return -1
+    elif p1_major > p2_major:
+        return 1
+
+    if p1_minor < p2_minor:
+        return -1
+    elif p1_minor > p2_minor:
+        return 1
+
+    if p1_patch < p2_patch:
+        return -1
+    elif p1_patch > p2_patch:
+        return 1
 
     return 0  # If all components are equal
 
@@ -483,8 +506,8 @@ class GitHubReleaseFetcher:
         self.file_system_client = file_system_client or FileSystemClient()
 
     def _curl_get(
-        self, url: str, headers: Optional[dict] = None, stream: bool = False
-    ) -> subprocess.CompletedProcess:
+        self, url: str, headers: Optional[dict[str, str]] = None, stream: bool = False
+    ) -> subprocess.CompletedProcess[str]:
         """Make a GET request using curl.
 
         Args:
@@ -498,8 +521,11 @@ class GitHubReleaseFetcher:
         return self.network_client.get(url, headers, stream)
 
     def _curl_head(
-        self, url: str, headers: Optional[dict] = None, follow_redirects: bool = False
-    ) -> subprocess.CompletedProcess:
+        self,
+        url: str,
+        headers: Optional[dict[str, str]] = None,
+        follow_redirects: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         """Make a HEAD request using curl.
 
         Args:
@@ -513,7 +539,7 @@ class GitHubReleaseFetcher:
         return self.network_client.head(url, headers, follow_redirects)
 
     def _download_with_spinner(
-        self, url: str, output_path: Path, headers: Optional[dict] = None
+        self, url: str, output_path: Path, headers: Optional[dict[str, str]] = None
     ) -> None:
         """Download a file with progress spinner using urllib."""
 
@@ -554,8 +580,8 @@ class GitHubReleaseFetcher:
             self._raise(f"Failed to download {url}: {str(e)}")
 
     def _curl_download(
-        self, url: str, output_path: Path, headers: Optional[dict] = None
-    ) -> subprocess.CompletedProcess:
+        self, url: str, output_path: Path, headers: Optional[dict[str, str]] = None
+    ) -> subprocess.CompletedProcess[str]:
         """Download a file using curl.
 
         Args:
@@ -1178,7 +1204,7 @@ class GitHubReleaseFetcher:
             self._raise(f"Failed to parse JSON response: {e}")
 
         # Extract tag_name from each release and limit to first 20
-        tag_names = []
+        tag_names: list[str] = []
         for release in releases_data:
             if "tag_name" in release:
                 tag_names.append(release["tag_name"])
@@ -1241,9 +1267,9 @@ class GitHubReleaseFetcher:
 
     def _find_version_candidates(
         self, extract_dir: Path, fork: str
-    ) -> list[tuple[tuple, Path]]:
+    ) -> list[tuple[tuple[str, int, int, int], Path]]:
         """Find all directories that look like Proton builds and parse their versions."""
-        candidates: list[tuple[tuple, Path]] = []
+        candidates: list[tuple[tuple[str, int, int, int], Path]] = []
         for entry in extract_dir.iterdir():
             if self.file_system_client.is_dir(entry) and not entry.is_symlink():
                 # For Proton-EM, strip the proton- prefix before parsing
@@ -1289,11 +1315,15 @@ class GitHubReleaseFetcher:
         return candidates
 
     def _create_symlinks(
-        self, main: Path, fb1: Path, fb2: Path, top_3: list[tuple[tuple, Path]]
+        self,
+        main: Path,
+        fb1: Path,
+        fb2: Path,
+        top_3: list[tuple[tuple[str, int, int, int], Path]],
     ) -> None:
         """Create symlinks pointing to the top 3 versions."""
         # Build the wants dictionary
-        wants = {}
+        wants: dict[Path, Path] = {}
         if len(top_3) > 0:
             wants[main] = top_3[0][1]  # Main always gets the newest
 
@@ -1377,7 +1407,7 @@ class GitHubReleaseFetcher:
         # Get symlink names for the fork
         main, fb1, fb2 = self._get_link_names_for_fork(extract_dir, fork)
 
-        links_info = {}
+        links_info: dict[str, Optional[str]] = {}
 
         # Check each link and get its target
         for link_name in [main, fb1, fb2]:
@@ -1426,7 +1456,7 @@ class GitHubReleaseFetcher:
         main, fb1, fb2 = self._get_link_names_for_fork(extract_dir, fork)
 
         # Identify links that point to this release directory
-        links_to_remove = []
+        links_to_remove: list[Path] = []
         for link in [main, fb1, fb2]:
             if self.file_system_client.exists(link) and link.is_symlink():
                 try:
@@ -1495,14 +1525,14 @@ class GitHubReleaseFetcher:
 
         # Remove duplicate versions, preferring directories with standard naming over prefixed naming
         # Group candidates by parsed version
-        version_groups = {}
+        version_groups: dict[tuple[str, int, int, int], list[Path]] = {}
         for parsed_version, directory_path in candidates:
             if parsed_version not in version_groups:
                 version_groups[parsed_version] = []
             version_groups[parsed_version].append(directory_path)
 
         # For each group of directories with the same version, prefer the canonical name
-        unique_candidates = []
+        unique_candidates: list[tuple[tuple[str, int, int, int], Path]] = []
         for parsed_version, directories in version_groups.items():
             # Prefer directories without "proton-" prefix for Proton-EM, or standard names in general
             # Sort by directory name to have a consistent preference - shorter/simpler names first
@@ -1527,7 +1557,9 @@ class GitHubReleaseFetcher:
             tag_version = parse_version(tag, fork)
 
             # Check if this version is already in candidates to avoid duplicates
-            existing_versions = {candidate[0] for candidate in candidates}
+            existing_versions: set[tuple[str, int, int, int]] = {
+                candidate[0] for candidate in candidates
+            }
             if tag_version not in existing_versions:
                 candidates.append((tag_version, tag_dir))
 
@@ -1535,11 +1567,11 @@ class GitHubReleaseFetcher:
             candidates.sort(key=lambda t: t[0], reverse=True)
 
             # Take top 3
-            top_3 = candidates[:3]
+            top_3: list[tuple[tuple[str, int, int, int], Path]] = candidates[:3]
         else:
             # sort descending by version (newest first)
             candidates.sort(key=lambda t: t[0], reverse=True)
-            top_3 = candidates[:3]
+            top_3: list[tuple[tuple[str, int, int, int], Path]] = candidates[:3]
 
         # Create the symlinks
         self._create_symlinks(main, fb1, fb2, top_3)
