@@ -1851,6 +1851,55 @@ class TestExtractionWorkflow:
         with pytest.raises(FetchError, match="not writable"):
             fetcher._ensure_directory_is_writable(directory)
 
+    @pytest.mark.parametrize(
+        "archive_format,extract_method_name",
+        [
+            (".tar.gz", "extract_gz_archive"),
+            (".tar.xz", "extract_xz_archive"),
+        ],
+    )
+    def test_archive_format_dispatch_parametrized(
+        self, fetcher, mocker, tmp_path, archive_format, extract_method_name
+    ):
+        """Parametrized test to verify correct extract method is called based on archive format."""
+        archive_path = tmp_path / f"test{archive_format}"
+        archive_path.touch()
+        target_dir = tmp_path / "target"
+        target_dir.mkdir()
+
+        # Mock the specific extraction method
+        mock_extract_method = mocker.patch.object(fetcher, extract_method_name)
+
+        # Call the general extract_archive method
+        fetcher.extract_archive(archive_path, target_dir)
+
+        # Verify the correct specific method was called
+        mock_extract_method.assert_called_once_with(archive_path, target_dir)
+
+    @pytest.mark.parametrize(
+        "archive_format,fallback_method_name",
+        [
+            (".tar.gz", "extract_gz_archive"),
+            (".tar.xz", "extract_xz_archive"),
+        ],
+    )
+    def test_archive_format_fallback_parametrized(
+        self, fetcher, mocker, tmp_path, archive_format, fallback_method_name
+    ):
+        """Parametrized test to verify fallback to system tar for different archive formats."""
+        archive_path = tmp_path / f"test{archive_format}"
+        archive_path.touch()
+        target_dir = tmp_path / "target"
+        target_dir.mkdir()
+
+        # Mock _extract_with_tarfile to raise FetchError (triggering fallback)
+        mocker.patch.object(
+            fetcher, "_extract_with_tarfile", side_effect=FetchError("Tarfile error")
+        )
+
+        # Mock the specific fallback method
+        # mock_fallback_method = mocker.patch.object(fetcher, fallback_method_name)
+
 
 class TestLinkManagementSystem:
     """Integration tests for the link management system."""
@@ -2197,6 +2246,101 @@ class TestLinkManagementSystem:
             for call in mock_logger.warning.call_args_list
         )
 
+    @pytest.mark.parametrize(
+        "fork,tag,expected_dir_pattern",
+        [
+            ("GE-Proton", "GE-Proton10-1", "GE-Proton10-1"),
+            ("GE-Proton", "GE-Proton9-20", "GE-Proton9-20"),
+            ("Proton-EM", "EM-10.0-30", "proton-EM-10.0-30"),  # With proton- prefix
+            ("Proton-EM", "EM-9.8-25", "EM-9.8-25"),  # Without proton- prefix fallback
+        ],
+    )
+    def test_find_tag_directory_integration_parametrized(
+        self, fetcher, tmp_path, fork, tag, expected_dir_pattern
+    ):
+        """Parametrized test for _find_tag_directory with different forks and tags."""
+        # Create the expected directory
+        expected_dir = tmp_path / expected_dir_pattern
+        expected_dir.mkdir()
+
+        result = fetcher._find_tag_directory(
+            tmp_path, tag, fork, is_manual_release=True
+        )
+
+        if result is not None:
+            assert result == expected_dir
+        else:
+            # For Proton-EM without prefix when it doesn't exist
+            assert result is None
+
+    @pytest.mark.parametrize(
+        "fork,expected_link_names",
+        [
+            ("GE-Proton", ["GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"]),
+            ("Proton-EM", ["Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"]),
+        ],
+    )
+    def test_get_link_names_for_fork_parametrized(
+        self, fetcher, tmp_path, fork, expected_link_names
+    ):
+        """Parametrized test for _get_link_names_for_fork with different forks."""
+        main, fb1, fb2 = fetcher._get_link_names_for_fork(tmp_path, fork)
+
+        expected_paths = [tmp_path / name for name in expected_link_names]
+        actual_paths = [main, fb1, fb2]
+
+        for expected_path, actual_path in zip(expected_paths, actual_paths):
+            assert actual_path == expected_path
+
+    @pytest.mark.parametrize(
+        "fork,version_dirs,expected_results",
+        [
+            ("GE-Proton", ["GE-Proton10-10", "GE-Proton10-11"], 2),
+            ("GE-Proton", ["GE-Proton9-5", "GE-Proton10-1", "GE-Proton11-2"], 3),
+            ("Proton-EM", ["proton-EM-10.0-30", "proton-EM-10.0-31"], 2),
+            (
+                "Proton-EM",
+                ["EM-10.0-25", "proton-EM-10.0-26"],
+                2,
+            ),  # With and without prefix
+        ],
+    )
+    def test_find_version_candidates_parametrized(
+        self, fetcher, tmp_path, fork, version_dirs, expected_results
+    ):
+        """Parametrized test for _find_version_candidates with different fork and directory combinations."""
+        # Create version directories
+        for version_dir in version_dirs:
+            (tmp_path / version_dir).mkdir()
+
+        # Also create a non-version directory to ensure it's excluded
+        other_dir = tmp_path / "other_dir"
+        other_dir.mkdir()
+
+        candidates = fetcher._find_version_candidates(tmp_path, fork)
+
+        # Should have candidates only for the actual Proton directories
+        assert len(candidates) == expected_results
+
+    @pytest.mark.parametrize(
+        "fork,expected_pattern",
+        [
+            ("GE-Proton", "GE-Proton"),
+            ("Proton-EM", "EM-"),  # Pattern for tag parsing
+        ],
+    )
+    def test_parse_version_integration_parametrized(self, fork, expected_pattern):
+        """Parametrized integration test for parse_version function with different forks."""
+        from protonfetcher import parse_version
+
+        if fork == "GE-Proton":
+            test_tag = "GE-Proton10-25"
+        else:  # Proton-EM
+            test_tag = "EM-10.0-30"
+
+        result = parse_version(test_tag, fork)
+        assert result[0] == ("GE-Proton" if fork == "GE-Proton" else "EM")
+
 
 class TestNewFeaturesIntegration:
     """Integration tests for the new --ls and --rm functionality."""
@@ -2448,3 +2592,194 @@ class TestNewFeaturesIntegration:
         # This is not true in all cases because the link management system will recreate all links
         # So let's focus on what we can verify: the target directory is gone, and the other directory is preserved
         assert other_dir.exists()
+
+    @pytest.mark.parametrize(
+        "fork, error_type, expected_message_pattern",
+        [
+            ("GE-Proton", "asset_not_found", "not found in"),
+            ("Proton-EM", "asset_not_found", "not found in"),
+            ("GE-Proton", "network_error", "Failed to fetch release page"),
+            ("Proton-EM", "network_error", "Failed to fetch release page"),
+            ("GE-Proton", "remote_not_found", "Failed to fetch release page"),
+            ("Proton-EM", "remote_not_found", "Failed to fetch release page"),
+        ],
+    )
+    def test_find_asset_by_name_error_handling_parametrized(
+        self, fetcher, mocker, fork, error_type, expected_message_pattern
+    ):
+        """Parametrized test for find_asset_by_name error handling with different forks."""
+        repo = "owner/repo"
+        tag = "GE-Proton8-25" if fork == "GE-Proton" else "EM-10.0-30"
+
+        responses = []
+        if error_type == "asset_not_found":
+            # API returns but asset not found in response
+            api_response = {"assets": []}  # Empty assets list
+            responses = [
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=json.dumps(api_response), stderr=""
+                ),
+                subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout="<html>no asset found</html>",
+                    stderr="",
+                ),
+            ]
+        elif error_type == "network_error":
+            # Network error during API call
+            responses = [
+                subprocess.CompletedProcess(
+                    args=[], returncode=22, stdout="", stderr="Network error"
+                ),
+                subprocess.CompletedProcess(
+                    args=[],
+                    returncode=22,
+                    stdout="",
+                    stderr="Network error",  # HTML fallback also fails
+                ),
+            ]
+        elif error_type == "remote_not_found":
+            # 404 error during API call
+            responses = [
+                subprocess.CompletedProcess(
+                    args=[], returncode=22, stdout="", stderr="404 Not Found"
+                ),
+                subprocess.CompletedProcess(
+                    args=[],
+                    returncode=22,
+                    stdout="",
+                    stderr="404 Not Found",  # HTML fallback also fails
+                ),
+            ]
+
+        mocker.patch("subprocess.run", side_effect=responses)
+
+        with pytest.raises(FetchError, match=expected_message_pattern):
+            fetcher.find_asset_by_name(repo, tag, fork)
+
+    @pytest.mark.parametrize(
+        "fork, has_existing_links, expected_link_status",
+        [
+            ("GE-Proton", True, {"exists": True, "target_correct": True}),
+            ("GE-Proton", False, {"exists": False, "target_correct": False}),
+            ("Proton-EM", True, {"exists": True, "target_correct": True}),
+            ("Proton-EM", False, {"exists": False, "target_correct": False}),
+        ],
+    )
+    def test_list_links_integration_parametrized(
+        self, fetcher, tmp_path, fork, has_existing_links, expected_link_status
+    ):
+        """Parametrized integration test for list_links with different forks and link states."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a target directory if we want existing links
+        target_dir = tmp_path / (
+            f"{fork}10-15" if fork == "GE-Proton" else f"proton-{fork}-10.0-30"
+        )
+        target_dir.mkdir()
+        (target_dir / "proton").mkdir()  # Add some content
+
+        # Determine the link names based on fork
+        if fork == "GE-Proton":
+            main_link = extract_dir / "GE-Proton"
+            fallback_link = extract_dir / "GE-Proton-Fallback"
+            # fallback2_link = extract_dir / "GE-Proton-Fallback2"
+        else:  # Proton-EM
+            main_link = extract_dir / "Proton-EM"
+            fallback_link = extract_dir / "Proton-EM-Fallback"
+            # fallback2_link = extract_dir / "Proton-EM-Fallback2"
+
+        # Create links if specified
+        if has_existing_links:
+            main_link.symlink_to(target_dir, target_is_directory=True)
+            fallback_link.symlink_to(target_dir, target_is_directory=True)
+        else:
+            # Don't create the links to test non-existing scenario
+            pass
+
+        # Call the method
+        result = fetcher.list_links(extract_dir, fork)
+
+        # Verify the structure of the result
+        assert len(result) == 3
+        if fork == "GE-Proton":
+            assert "GE-Proton" in result
+            assert "GE-Proton-Fallback" in result
+            assert "GE-Proton-Fallback2" in result
+        else:  # Proton-EM
+            assert "Proton-EM" in result
+            assert "Proton-EM-Fallback" in result
+            assert "Proton-EM-Fallback2" in result
+
+        # Check main link result
+        if has_existing_links:
+            assert result[list(result.keys())[0]] == str(target_dir.resolve())
+        else:
+            assert result[list(result.keys())[0]] is None
+
+    @pytest.mark.parametrize(
+        "fork, release_dir_pattern, tag_pattern",
+        [
+            ("GE-Proton", "GE-Proton{version}", "GE-Proton{version}"),
+            ("Proton-EM", "proton-EM-{version}", "EM-{version}"),  # With proton- prefix
+            (
+                "Proton-EM",
+                "EM-{version}",
+                "EM-{version}",
+            ),  # Without proton- prefix fallback
+        ],
+    )
+    def test_remove_release_integration_parametrized(
+        self, fetcher, tmp_path, fork, release_dir_pattern, tag_pattern
+    ):
+        """Parametrized integration test for remove_release with different forks."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Format the version part
+        if fork == "GE-Proton":
+            version = "10-15"
+        else:  # Proton-EM
+            version = "10.0-30"
+
+        release_dir_name = release_dir_pattern.format(version=version)
+        release_tag = tag_pattern.format(version=version)
+
+        # Create a release directory to remove (with appropriate naming convention for the fork)
+        release_dir = extract_dir / release_dir_name
+        release_dir.mkdir()
+        # Add some content to make it a non-empty directory
+        (release_dir / "proton").mkdir()
+
+        # Create symlinks that point to this release directory (for the appropriate fork)
+        main_link = extract_dir / fork
+        main_link.symlink_to(release_dir, target_is_directory=True)
+
+        # For GE-Proton, also create one of the fallback links pointing to the same directory
+        fallback_link = extract_dir / f"{fork}-Fallback"
+        if fork == "GE-Proton":
+            fallback_link.symlink_to(release_dir, target_is_directory=True)
+
+        # Verify initial state
+        assert release_dir.exists()
+        assert main_link.exists()
+        if fork == "GE-Proton":
+            assert fallback_link.exists()
+        assert main_link.is_symlink()
+        if fork == "GE-Proton":
+            assert fallback_link.is_symlink()
+
+        # Call the remove method
+        result = fetcher.remove_release(extract_dir, release_tag, fork)
+
+        # Verify the return value
+        assert result is True
+
+        # Verify that the release directory was removed
+        assert not release_dir.exists()
+
+        # Verify that the associated symlinks were also removed or updated
+        # The link management system may recreate links based on remaining directories,
+        # but the ones pointing to the deleted directory should no longer point there

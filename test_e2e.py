@@ -1292,3 +1292,129 @@ class TestE2ECLINewFeatures:
         # Capture output to verify error message
         captured = capsys.readouterr()
         assert "Error: --ls cannot be used with --release or --list" in captured.out
+
+    @pytest.mark.parametrize(
+        "fork, error_scenario, expected_error_message",
+        [
+            ("GE-Proton", "fetch_error", "Network error occurred"),
+            ("Proton-EM", "fetch_error", "Network error occurred"),
+            ("GE-Proton", "rate_limit", "API rate limit exceeded"),
+            ("Proton-EM", "rate_limit", "API rate limit exceeded"),
+        ],
+    )
+    def test_cli_error_handling_parametrized(
+        self,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        capsys,
+        fork,
+        error_scenario,
+        expected_error_message,
+    ):
+        """Parametrized test for CLI error handling with different forks."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        # Configure different error scenarios
+        if error_scenario == "fetch_error":
+            from protonfetcher import FetchError
+
+            mock_fetcher.fetch_and_extract.side_effect = FetchError(
+                expected_error_message
+            )
+        elif error_scenario == "rate_limit":
+            from protonfetcher import FetchError
+
+            mock_fetcher.list_recent_releases.side_effect = FetchError(
+                expected_error_message
+            )
+
+        # Test both fetch_and_extract and list_recent_releases depending on scenario
+        test_args = ["protonfetcher", "-f", fork]
+
+        if error_scenario == "rate_limit":
+            test_args.insert(
+                1, "--list"
+            )  # Add list flag to trigger list_recent_releases
+
+        test_args.extend(
+            [
+                "--extract-dir",
+                str(tmp_path / "compatibilitytools.d"),
+                "--output",
+                str(tmp_path / "Downloads"),
+            ]
+        )
+        mocker.patch("sys.argv", test_args)
+
+        # Capture the SystemExit
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        # Verify exit code is 1 for error
+        assert exc_info.value.code == 1
+
+        # Capture output to verify error message was printed
+        captured = capsys.readouterr()
+        assert f"Error: {expected_error_message}" in captured.out
+
+    @pytest.mark.parametrize(
+        "fork,release_tag,cli_flag",
+        [
+            ("GE-Proton", None, None),  # Default fork, no specific release
+            ("GE-Proton", "GE-Proton10-11", "-r"),  # GE-Proton with specific release
+            ("Proton-EM", None, "-f"),  # Proton-EM fork, no specific release
+            ("Proton-EM", "EM-10.0-30", "-r"),  # Proton-EM with specific release
+        ],
+    )
+    def test_cli_fork_combinations_parametrized(
+        self,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        fork: str,
+        release_tag: str,
+        cli_flag: str,
+    ):
+        """Parametrized test for different fork and release combinations."""
+        mock_fetcher = mocker.MagicMock()
+        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+
+        mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
+
+        # Build test arguments based on the parameters
+        test_args = ["protonfetcher"]
+
+        # Add fork flag if needed (for Proton-EM or when explicit fork is requested)
+        if fork == "Proton-EM":
+            test_args.extend(["-f", fork])
+
+        # Add release flag if needed
+        if release_tag:
+            test_args.extend(["-r", release_tag])
+
+        # Add required directories
+        test_args.extend(
+            [
+                "--extract-dir",
+                str(tmp_path / "compatibilitytools.d"),
+                "--output",
+                str(tmp_path / "Downloads"),
+            ]
+        )
+
+        mocker.patch("sys.argv", test_args)
+
+        try:
+            main()
+        except SystemExit:
+            pass
+
+        # Verify correct call was made
+        call_args = mock_fetcher.fetch_and_extract.call_args
+        expected_repo = FORKS[fork]["repo"]
+        assert call_args[0][0] == expected_repo  # repo
+        assert call_args[1]["fork"] == fork  # fork
+        if release_tag:
+            assert call_args[1]["release_tag"] == release_tag  # specific release
+        else:
+            assert call_args[1]["release_tag"] is None  # should fetch latest

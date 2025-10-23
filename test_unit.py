@@ -892,6 +892,95 @@ class TestClientClasses:
         # Verify the result
         assert result == mock_result
 
+    @pytest.mark.parametrize(
+        "method_name,http_method,expected_flags",
+        [
+            ("get", "GET", ["-L", "-s", "-S", "-f"]),  # GET request
+            ("head", "HEAD", ["-I", "-s", "-S", "-f"]),  # HEAD request
+        ],
+    )
+    def test_network_client_method_flags_parametrized(
+        self, mocker, method_name, http_method, expected_flags
+    ):
+        """Parametrized test for NetworkClient methods and their expected curl flags."""
+        from protonfetcher import NetworkClient
+        import subprocess
+
+        # Create a NetworkClient instance
+        client = NetworkClient(timeout=30)
+
+        # Mock subprocess.run
+        mock_run = mocker.patch("subprocess.run")
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="response", stderr=""
+        )
+        mock_run.return_value = mock_result
+
+        # Call the appropriate method
+        method = getattr(client, method_name)
+        result = method("https://example.com")
+
+        # Verify subprocess.run was called with expected flags
+        assert mock_run.called
+        call_args = mock_run.call_args[0][0]  # Get the command list
+
+        for flag in expected_flags:
+            assert flag in call_args
+
+        # Verify the result
+        assert result == mock_result
+
+    @pytest.mark.parametrize(
+        "headers,expected_header_strings",
+        [
+            ({"User-Agent": "test-agent"}, ["User-Agent: test-agent"]),
+            ({"Authorization": "Bearer token"}, ["Authorization: Bearer token"]),
+            (
+                {"Content-Type": "application/json", "Accept": "text/html"},
+                ["Content-Type: application/json", "Accept: text/html"],
+            ),
+            (None, []),  # No headers case
+        ],
+    )
+    def test_network_client_headers_parametrized(
+        self, mocker, headers, expected_header_strings
+    ):
+        """Parametrized test for NetworkClient with different header configurations."""
+        from protonfetcher import NetworkClient
+        import subprocess
+
+        # Create a NetworkClient instance
+        client = NetworkClient(timeout=30)
+
+        # Mock subprocess.run to capture the command
+        mock_run = mocker.patch("subprocess.run")
+
+        # Create a mock response
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="response", stderr=""
+        )
+        mock_run.return_value = mock_result
+
+        # Call the get method with different headers
+        result = client.get("https://example.com", headers=headers)
+
+        # Verify subprocess.run was called
+        assert mock_run.called
+        call_args = mock_run.call_args[0][0]  # Get the command list
+
+        # Verify the expected headers were added to the command
+        if headers:
+            assert "-H" in call_args
+            for expected_header in expected_header_strings:
+                assert expected_header in call_args
+        else:
+            # When headers is None, no -H flags should be present
+            header_indices = [i for i, x in enumerate(call_args) if x == "-H"]
+            assert len(header_indices) == 0
+
+        # Verify the result
+        assert result == mock_result
+
 
 class TestExtractedHelperMethods:
     """Unit tests for the extracted helper methods in _manage_proton_links."""
@@ -1912,6 +2001,55 @@ class TestGitHubReleaseFetcherMethods:
         # Check that it's callable
         assert callable(getattr(fetcher, method, None))
 
+    @pytest.mark.parametrize(
+        "fork,expected_repo,expected_format",
+        [
+            ("GE-Proton", "GloriousEggroll/proton-ge-custom", ".tar.gz"),
+            ("Proton-EM", "Etaash-mathamsetty/Proton", ".tar.xz"),
+        ],
+    )
+    def test_fork_configurations(self, fork, expected_repo, expected_format):
+        """Test FORK configurations are correct for different Proton forks."""
+        from protonfetcher import FORKS
+
+        assert fork in FORKS
+        assert FORKS[fork]["repo"] == expected_repo
+        assert FORKS[fork]["archive_format"] == expected_format
+
+    @pytest.mark.parametrize(
+        "fork,tag,expected_asset_pattern",
+        [
+            ("GE-Proton", "GE-Proton10-1", "GE-Proton10-1.tar.gz"),
+            ("GE-Proton", "GE-Proton9-20", "GE-Proton9-20.tar.gz"),
+            ("Proton-EM", "EM-10.0-30", "proton-EM-10.0-30.tar.xz"),
+            ("Proton-EM", "EM-9.5-25", "proton-EM-9.5-25.tar.xz"),
+        ],
+    )
+    def test_get_proton_asset_name_fork_variations(
+        self, fork, tag, expected_asset_pattern
+    ):
+        """Test get_proton_asset_name with different fork and tag combinations."""
+        from protonfetcher import get_proton_asset_name
+
+        result = get_proton_asset_name(tag, fork)
+        assert result == expected_asset_pattern
+
+    @pytest.mark.parametrize(
+        "fork,version_tag,expected_parsed",
+        [
+            ("GE-Proton", "GE-Proton10-25", ("GE-Proton", 10, 0, 25)),
+            ("GE-Proton", "GE-Proton8-5", ("GE-Proton", 8, 0, 5)),
+            ("Proton-EM", "EM-10.0-30", ("EM", 10, 0, 30)),
+            ("Proton-EM", "EM-9.5-25", ("EM", 9, 5, 25)),
+        ],
+    )
+    def test_parse_version_fork_variations(self, fork, version_tag, expected_parsed):
+        """Test parse_version with different fork and version tag combinations."""
+        from protonfetcher import parse_version
+
+        result = parse_version(version_tag, fork)
+        assert result == expected_parsed
+
 
 class TestAdditionalCoverage:
     """Additional tests to cover uncovered scenarios."""
@@ -2411,3 +2549,124 @@ class TestAdditionalCoverage:
         # Call the method, which should raise FetchError
         with pytest.raises(FetchError, match="Failed to remove release directory"):
             fetcher.remove_release(extract_dir, "GE-Proton10-15", "GE-Proton")
+
+    @pytest.mark.parametrize(
+        "fork, error_scenario, expected_error_pattern",
+        [
+            ("GE-Proton", "directory_not_found", "Release directory does not exist"),
+            ("Proton-EM", "directory_not_found", "Release directory does not exist"),
+            ("GE-Proton", "filesystem_error", "Failed to remove release directory"),
+            ("Proton-EM", "filesystem_error", "Failed to remove release directory"),
+        ],
+    )
+    def test_remove_release_error_handling_parametrized(
+        self, fetcher, mocker, tmp_path, fork, error_scenario, expected_error_pattern
+    ):
+        """Parametrized test for remove_release error handling with different forks."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        if error_scenario == "directory_not_found":
+            # Mock the file system client to return False for exists
+            mock_fs = mocker.MagicMock()
+            fetcher.file_system_client = mock_fs
+            mock_fs.exists.return_value = False
+
+            with pytest.raises(FetchError, match=expected_error_pattern):
+                fetcher.remove_release(
+                    extract_dir,
+                    "GE-Proton10-15" if fork == "GE-Proton" else "EM-10.0-30",
+                    fork,
+                )
+        elif error_scenario == "filesystem_error":
+            # Create a release directory
+            release_dir = extract_dir / (
+                "GE-Proton10-15" if fork == "GE-Proton" else "proton-EM-10.0-30"
+            )
+            release_dir.mkdir()
+
+            # Mock the file system client to raise an exception during rmtree
+            mock_fs = mocker.MagicMock()
+            fetcher.file_system_client = mock_fs
+            mock_fs.exists.return_value = True
+            mock_fs.is_symlink.return_value = False
+            mock_fs.rmtree.side_effect = Exception("Permission denied")
+
+            with pytest.raises(FetchError, match=expected_error_pattern):
+                fetcher.remove_release(
+                    extract_dir,
+                    "GE-Proton10-15" if fork == "GE-Proton" else "EM-10.0-30",
+                    fork,
+                )
+
+    @pytest.mark.parametrize(
+        "fork, release_name, expected_dir_name",
+        [
+            ("GE-Proton", "GE-Proton10-15", "GE-Proton10-15"),
+            (
+                "Proton-EM",
+                "EM-10.0-30",
+                "EM-10.0-30",
+            ),  # Use tag name for directory lookup
+            ("Proton-EM", "EM-9.5-25", "EM-9.5-25"),  # Without proton- prefix fallback
+        ],
+    )
+    def test_remove_release_parametrized(
+        self, fetcher, mocker, tmp_path, fork, release_name, expected_dir_name
+    ):
+        """Parametrized test for remove_release functionality with different forks."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create a release directory to remove (with appropriate naming convention for the fork)
+        release_dir = extract_dir / expected_dir_name
+        release_dir.mkdir()
+        # Add some content to make it a non-empty directory
+        (release_dir / "proton").mkdir()
+
+        # Mock the file system client
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = True  # Directory exists
+        mock_fs.is_symlink.return_value = False
+        mock_fs.unlink.return_value = None
+        mock_fs.rmtree.return_value = None  # Mock successful removal
+
+        # Mock the _manage_proton_links method
+        _mock_manage_links = mocker.patch.object(fetcher, "_manage_proton_links")
+
+        # Call the remove method
+        result = fetcher.remove_release(extract_dir, release_name, fork)
+
+        # Verify the return value
+        assert result is True
+
+        # Verify that rmtree was called to remove the release directory
+        mock_fs.rmtree.assert_called_once_with(release_dir)
+
+    @pytest.mark.parametrize(
+        "fork, link_names",
+        [
+            ("GE-Proton", ["GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"]),
+            ("Proton-EM", ["Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"]),
+        ],
+    )
+    def test_list_links_parametrized(self, fetcher, mocker, tmp_path, fork, link_names):
+        """Parametrized test for list_links functionality with different forks."""
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Mock file system operations
+        mock_fs = mocker.MagicMock()
+        fetcher.file_system_client = mock_fs
+        mock_fs.exists.return_value = False  # No links exist initially
+
+        # Call the method
+        result = fetcher.list_links(extract_dir, fork)
+
+        # Verify the structure of the result
+        for link_name in link_names:
+            assert link_name in result
+        assert len(result) == 3  # All three links should be present
+        # All should be None since they don't exist
+        assert all(v is None for v in result.values())
