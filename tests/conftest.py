@@ -2,9 +2,14 @@
 Shared pytest configuration and fixtures for protonfetcher tests.
 """
 
-import pytest
-from pathlib import Path
 import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
 
 
 @pytest.fixture
@@ -89,3 +94,88 @@ def fork_params():
         ("Proton-EM", "EM-10.0-30", "proton-EM-10.0-30.tar.xz"),
         ("Proton-EM", "EM-9.5-25", "proton-EM-9.5-25.tar.xz"),
     ]
+
+
+@pytest.fixture
+def mock_network_client(mocker):
+    """Create a mocked NetworkClientProtocol instance."""
+    from protonfetcher import NetworkClientProtocol
+
+    mock = mocker.MagicMock(spec=NetworkClientProtocol)
+    mock.timeout = 30
+    return mock
+
+
+@pytest.fixture
+def mock_filesystem_client(mocker):
+    """Create a mocked FileSystemClientProtocol instance."""
+    from protonfetcher import FileSystemClientProtocol
+
+    mock = mocker.MagicMock(spec=FileSystemClientProtocol)
+    return mock
+
+
+@pytest.fixture
+def mock_clients(mock_network_client, mock_filesystem_client):
+    """Create both network and filesystem client mocks together."""
+    return {"network": mock_network_client, "filesystem": mock_filesystem_client}
+
+
+@pytest.fixture
+def mock_release_manager(mocker):
+    """Create a mocked ReleaseManager instance."""
+    from protonfetcher import ReleaseManager
+
+    mock = mocker.MagicMock(spec=ReleaseManager)
+    return mock
+
+
+@pytest.fixture
+def mock_asset_downloader(mocker):
+    """Create a mocked AssetDownloader instance."""
+    from protonfetcher import AssetDownloader
+
+    mock = mocker.MagicMock(spec=AssetDownloader)
+    return mock
+
+
+@pytest.fixture
+def mock_archive_extractor(mocker):
+    """Create a mocked ArchiveExtractor instance."""
+    from protonfetcher import ArchiveExtractor
+
+    mock = mocker.MagicMock(spec=ArchiveExtractor)
+    return mock
+
+
+@pytest.fixture
+def mock_link_manager(mocker):
+    """Create a mocked LinkManager instance."""
+    from protonfetcher import LinkManager
+
+    mock = mocker.MagicMock(spec=LinkManager)
+    return mock
+
+
+@pytest.fixture
+def mock_successful_download(mocker):
+    """Mock successful download operation."""
+    mock_response = mocker.MagicMock()
+    mock_response.returncode = 0
+    mock_response.stderr = ""
+    return mock_response
+
+
+@pytest.fixture
+def mock_failed_download(mocker):
+    """Mock failed download operation."""
+    mock_response = mocker.MagicMock()
+    mock_response.returncode = 1
+    mock_response.stderr = "Download failed"
+    return mock_response
+
+
+@pytest.fixture
+def mock_extraction_result(mocker):
+    """Mock extraction result."""
+    return {"status": "success", "files_extracted": 10, "size": 1024 * 1024}

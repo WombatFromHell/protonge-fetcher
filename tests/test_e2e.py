@@ -3,13 +3,24 @@ End-to-end tests for protonfetcher CLI interactions.
 Testing the actual user-facing commands and their expected behavior.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
 from pytest_mock import MockerFixture
 
-import protonfetcher
-from protonfetcher import FORKS, main
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from protonfetcher import (  # noqa: E402
+    FORKS,
+    GitHubReleaseFetcher,
+    ProtonFetcherError,
+    main,
+)
+
+# For backward compatibility in tests
+ProtonFetcherError = ProtonFetcherError
 
 
 class TestE2ECLIGetLatestGEProton:
@@ -19,7 +30,7 @@ class TestE2ECLIGetLatestGEProton:
         self, mocker: MockerFixture, tmp_path: Path, capsys
     ):
         """Test CLI command: ./protonfetcher (default - latest GE-Proton)."""
-        # Mock the GitHubReleaseFetcher methods to avoid network calls
+        # Use the mock_fetcher fixture if it exists, otherwise make a new mock
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -37,9 +48,7 @@ class TestE2ECLIGetLatestGEProton:
         mocker.patch("sys.argv", test_args)
 
         # Mock the directory validation to succeed
-        mocker.patch.object(
-            protonfetcher.GitHubReleaseFetcher, "_ensure_directory_is_writable"
-        )
+        mocker.patch.object(GitHubReleaseFetcher, "_ensure_directory_is_writable")
 
         # Run main function (which handles the CLI)
         try:
@@ -204,10 +213,10 @@ class TestE2ECLIErrorsAndEdgeCases:
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
-        # Make fetch_and_extract raise a FetchError
-        from protonfetcher import FetchError
+        # Make fetch_and_extract raise a ProtonFetcherError
+        from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.fetch_and_extract.side_effect = FetchError(
+        mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
             "Network error occurred"
         )
 
@@ -730,9 +739,9 @@ class TestE2ECLIListReleases:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_recent_releases method to raise a rate limit error
-        from protonfetcher import FetchError
+        from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.list_recent_releases.side_effect = FetchError(
+        mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
             "API rate limit exceeded. Please wait a few minutes before trying again."
         )
 
@@ -748,7 +757,7 @@ class TestE2ECLIListReleases:
         ]
         mocker.patch("sys.argv", test_args)
 
-        # Should exit with error code 1 due to the FetchError
+        # Should exit with error code 1 due to the ProtonFetcherError
         with pytest.raises(SystemExit) as exc_info:
             main()
 
@@ -792,14 +801,14 @@ class TestE2EMainFunctionErrorHandling:
     def test_main_function_fetch_error_handling(
         self, mocker: MockerFixture, tmp_path: Path, capsys
     ):
-        """Test main function error handling when fetch operation raises FetchError."""
+        """Test main function error handling when fetch operation raises ProtonFetcherError."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
-        # Make fetch_and_extract raise a FetchError
-        from protonfetcher import FetchError
+        # Make fetch_and_extract raise a ProtonFetcherError
+        from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.fetch_and_extract.side_effect = FetchError(
+        mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
             "Network error occurred"
         )
 
@@ -826,14 +835,14 @@ class TestE2EMainFunctionErrorHandling:
     def test_main_function_fetch_error_with_debug(
         self, mocker: MockerFixture, tmp_path: Path, capsys
     ):
-        """Test main function error handling when fetch operation raises FetchError with debug enabled."""
+        """Test main function error handling when fetch operation raises ProtonFetcherError with debug enabled."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
-        # Make fetch_and_extract raise a FetchError
-        from protonfetcher import FetchError
+        # Make fetch_and_extract raise a ProtonFetcherError
+        from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.fetch_and_extract.side_effect = FetchError(
+        mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
             "Download failed due to network timeout"
         )
 
@@ -866,9 +875,9 @@ class TestE2EMainFunctionErrorHandling:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_recent_releases method to raise the appropriate error
-        from protonfetcher import FetchError
+        from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.list_recent_releases.side_effect = FetchError(
+        mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
             "API rate limit exceeded. Please wait a few minutes before trying again."
         )
 
@@ -902,9 +911,9 @@ class TestE2EMainFunctionErrorHandling:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_recent_releases method to raise a JSON parsing error
-        from protonfetcher import FetchError
+        from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.list_recent_releases.side_effect = FetchError(
+        mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
             "Failed to parse JSON response: Expecting value: line 1 column 1 (char 0)"
         )
 
@@ -1183,10 +1192,10 @@ class TestE2ECLINewFeatures:
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
-        # Mock the remove_release method to raise a FetchError
-        from protonfetcher import FetchError
+        # Mock the remove_release method to raise a ProtonFetcherError
+        from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.remove_release.side_effect = FetchError(
+        mock_fetcher.remove_release.side_effect = ProtonFetcherError(
             "Release directory does not exist: /path/to/nonexistent"
         )
 
@@ -1201,7 +1210,7 @@ class TestE2ECLINewFeatures:
         ]
         mocker.patch("sys.argv", test_args)
 
-        # Should exit with error code 1 due to the FetchError
+        # Should exit with error code 1 due to the ProtonFetcherError
         with pytest.raises(SystemExit) as exc_info:
             main()
 
@@ -1317,15 +1326,15 @@ class TestE2ECLINewFeatures:
 
         # Configure different error scenarios
         if error_scenario == "fetch_error":
-            from protonfetcher import FetchError
+            from protonfetcher import ProtonFetcherError
 
-            mock_fetcher.fetch_and_extract.side_effect = FetchError(
+            mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
                 expected_error_message
             )
         elif error_scenario == "rate_limit":
-            from protonfetcher import FetchError
+            from protonfetcher import ProtonFetcherError
 
-            mock_fetcher.list_recent_releases.side_effect = FetchError(
+            mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
                 expected_error_message
             )
 
@@ -1411,6 +1420,7 @@ class TestE2ECLINewFeatures:
 
         # Verify correct call was made
         call_args = mock_fetcher.fetch_and_extract.call_args
+        assert fork in FORKS, f"Invalid fork: {fork}"
         expected_repo = FORKS[fork]["repo"]
         assert call_args[0][0] == expected_repo  # repo
         assert call_args[1]["fork"] == fork  # fork
