@@ -44,8 +44,16 @@ graph TB
         Q[LinkManagementError]
     end
 
-    A --> H
-    A --> I
+    A --> B
+    A --> C
+    A --> D
+    A --> E
+    B --> H
+    B --> I
+    C --> H
+    C --> I
+    D --> I
+    E --> I
     H -.-> F
     I -.-> G
     A --> J
@@ -66,12 +74,14 @@ graph TB
     style I fill:#FF9800,stroke:#E65100,color:#fff
 ```
 
-The GitHubReleaseFetcher class serves as the main orchestrator, delegating specific responsibilities to specialized component classes:
+The GitHubReleaseFetcher class serves as the main orchestrator, initializing and coordinating specialized component classes:
 
 - ReleaseManager handles release discovery and selection with direct network client access
-- AssetDownloader manages asset downloads with caching and progress indication using direct network client calls
-- ArchiveExtractor handles archive extraction with format-specific methods and streamlined logic
-- LinkManager manages symbolic links with version sorting and cross-fork validation
+- AssetDownloader manages asset downloads with intelligent caching and progress indication using direct network client calls
+- ArchiveExtractor handles archive extraction with format-specific methods, progress indication, and multiple extraction methods
+- LinkManager manages symbolic links with enhanced version sorting, duplicate prevention, and cross-fork validation
+
+Each component class is focused on a single responsibility and is initialized with the appropriate network and file system clients.
 
 ## Components
 
@@ -101,7 +111,7 @@ Handles archive extraction operations with progress indication for both .tar.gz 
 
 ### LinkManager
 
-Manages symbolic links for Proton installations with sophisticated version sorting and duplicate handling. It ensures that the three main symlinks always point to the three newest extracted versions regardless of download order. The manager includes functionality to list existing links, remove specific releases and their associated links, and handle both GE-Proton and Proton-EM fork formats with proper validation. It includes duplicate prevention and proper symlink target resolution.
+Manages symbolic links for Proton installations with sophisticated version sorting and enhanced duplicate handling. It ensures that the three main symlinks always point to the three newest extracted versions regardless of download order. The manager includes functionality to list existing links (`list_links`), remove specific releases and their associated links (`remove_release`), and handle both GE-Proton and Proton-EM fork formats with proper cross-fork validation. It includes duplicate prevention by preferring canonical naming conventions, proper symlink target resolution, and enhanced cross-fork validation to prevent linking across different fork types.
 
 ### GitHubReleaseFetcher
 
@@ -294,7 +304,7 @@ This link management system provides several benefits:
 
 ## Error Handling
 
-The module implements a comprehensive error handling strategy with a hierarchy of custom exception types for specific failure cases. The base ProtonFetcherError serves as the parent exception, with NetworkError for network operations, ExtractionError for archive extraction failures, and LinkManagementError for symbolic link operations. It provides detailed error messages with context, implements graceful fallbacks (e.g., from urllib to direct network client calls, from tarfile to system tar), includes proper logging at appropriate levels, and validates inputs and preconditions. Redundant internal error wrapper methods have been removed to reduce complexity while maintaining the same error handling capabilities.
+The module implements a comprehensive error handling strategy with a hierarchy of custom exception types for specific failure cases. The base ProtonFetcherError serves as the parent exception, with NetworkError for network operations, ExtractionError for archive extraction failures, and LinkManagementError for symbolic link operations. For backward compatibility, FetchError is maintained as an alias for ProtonFetcherError. The system provides detailed error messages with context, implements graceful fallbacks (e.g., from urllib to direct network client calls, from tarfile to system tar), includes proper logging at appropriate levels, and validates inputs and preconditions. Redundant internal error wrapper methods have been removed to reduce complexity while maintaining the same error handling capabilities.
 
 The system handles various error scenarios:
 
@@ -438,9 +448,11 @@ Full list of command-line options:
 - `--release`, `-r`: Manually specify a release tag to download instead of the latest
 - `--fork`, `-f`: ProtonGE fork to download (default: `GE-Proton`, available: `GE-Proton`, `Proton-EM`)
 - `--list`, `-l`: List the 20 most recent release tags for the selected fork
-- `--ls`: List recognized symbolic links and their associated Proton fork folders
-- `--rm`: Remove a given Proton fork release folder and its associated link
+- `--ls`: List recognized symbolic links and their associated Proton fork folders (mutually exclusive with --rm, --release, --list)
+- `--rm`: Remove a given Proton fork release folder and its associated link (mutually exclusive with --ls, --release, --list)
 - `--debug`: Enable debug logging
+
+Note: The --ls, --rm, --list, and --release flags have mutual exclusion constraints. --list and --release cannot be used together. --ls cannot be used with --release or --list. --rm cannot be used with --release, --list, or --ls.
 
 ## Testing Architecture
 
