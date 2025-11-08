@@ -1759,10 +1759,31 @@ class GitHubReleaseFetcher:
         asset_name = self.release_manager.find_asset_by_name(repo, release_tag, fork)
 
         # Check if unpacked directory already exists
+        # For Proton-EM, the directory might be named with "proton-" prefix
         unpacked = extract_dir / release_tag
-        if unpacked.exists() and unpacked.is_dir():
+        unpacked_for_em = extract_dir / f"proton-{release_tag}"
+
+        # Check for directory existence based on fork naming convention
+        directory_exists = False
+        actual_directory = None
+
+        if fork == "Proton-EM":
+            # For Proton-EM, check both possible names: tag name directly or with "proton-" prefix
+            if unpacked_for_em.exists() and unpacked_for_em.is_dir():
+                directory_exists = True
+                actual_directory = unpacked_for_em
+            elif unpacked.exists() and unpacked.is_dir():
+                directory_exists = True
+                actual_directory = unpacked
+        else:
+            # For GE-Proton, only check with tag name directly
+            if unpacked.exists() and unpacked.is_dir():
+                directory_exists = True
+                actual_directory = unpacked
+
+        if directory_exists and actual_directory is not None:
             logger.info(
-                f"Unpacked directory already exists: {unpacked}, skipping download and extraction"
+                f"Unpacked directory already exists: {actual_directory}, skipping download and extraction"
             )
             # Still manage links for consistency
             self.link_manager.manage_proton_links(

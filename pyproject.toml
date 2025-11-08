@@ -1,6 +1,6 @@
 [project]
 name = "protonge-fetcher"
-version = "1.0.0"
+version = "1.0.1"
 description = "Grab the latest Proton-GE release from GitHub and keep 'compatibilitytools.d' up-to-date"
 readme = "README.md"
 requires-python = ">=3.13"

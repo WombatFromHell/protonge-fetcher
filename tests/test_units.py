@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from protonfetcher import (
+    FORKS,
     ArchiveExtractor,
     AssetDownloader,
     ExtractionError,
@@ -1545,3 +1546,114 @@ class TestGitHubReleaseFetcherWithFixtures:
 
         assert result == ["v1.0", "v1.1"]
         mock_release_manager.list_recent_releases.assert_called_once_with(repo)
+
+
+class TestGitHubReleaseFetcherDirectoryCheck:
+    """Tests for directory existence checking in fetch_and_extract method."""
+
+    @pytest.mark.parametrize(
+        "fork,tag,dir_name,expected_skip",
+        [
+            # GE-Proton tests
+            ("GE-Proton", "GE-Proton10-20", "GE-Proton10-20", True),  # Direct match
+            ("GE-Proton", "GE-Proton10-20", "GE-Proton10-21", False),  # No match
+            # Proton-EM tests
+            (
+                "Proton-EM",
+                "EM-10.0-30",
+                "proton-EM-10.0-30",
+                True,
+            ),  # With prefix (main case from bug)
+            (
+                "Proton-EM",
+                "EM-10.0-30",
+                "EM-10.0-30",
+                True,
+            ),  # Without prefix (fallback)
+            ("Proton-EM", "EM-10.0-30", "proton-EM-10.0-31", False),  # No match
+        ],
+    )
+    def test_fetch_and_extract_directory_existence_check(
+        self, tmp_path, mocker, fork, tag, dir_name, expected_skip
+    ):
+        """Test that fetch_and_extract properly detects existing directories for both forks."""
+        # Set up filesystem client mock with custom exists and is_dir logic
+        mock_fs = mocker.Mock()
+
+        # Create actual directories for output and extract dirs
+        output_dir = tmp_path / "Downloads"
+        extract_dir = tmp_path / "extract"
+        output_dir.mkdir()
+        extract_dir.mkdir()
+
+        def mock_exists(path):
+            # Handle the actual directories we create
+            if str(path) == str(output_dir) or str(path) == str(extract_dir):
+                return True
+            # For the test scenario - check if this is the expected directory name
+            return str(path.name) == dir_name
+
+        def mock_is_dir(path):
+            # Handle the actual directories we create
+            if str(path) == str(output_dir) or str(path) == str(extract_dir):
+                return True
+            # For the test scenario - check if this is the expected directory name
+            return str(path.name) == dir_name
+
+        mock_fs.exists = mock_exists
+        mock_fs.is_dir = mock_is_dir
+
+        # Also mock the filesystem operations that are used internally
+        mock_fs.mkdir = mocker.Mock(return_value=None)
+        mock_fs.write = mocker.Mock(return_value=None)
+        mock_fs.unlink = mocker.Mock(return_value=None)
+        mock_fs.resolve = mocker.Mock(
+            side_effect=lambda x: x.resolve() if x.exists() else x
+        )
+        mock_fs.symlink_to = mocker.Mock(return_value=None)
+        mock_fs.rmtree = mocker.Mock(return_value=None)
+
+        # Set up network client mock
+        mock_network = mocker.Mock()
+
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network, file_system_client=mock_fs
+        )
+
+        # Mock the helper methods to avoid actual network calls
+        fetcher.release_manager = mocker.Mock()
+        fetcher.asset_downloader = mocker.Mock()
+        fetcher.archive_extractor = mocker.Mock()
+        fetcher.link_manager = mocker.Mock()
+
+        fetcher.release_manager.fetch_latest_tag.return_value = tag
+        expected_asset = (
+            f"proton-{tag}.tar.xz" if fork == "Proton-EM" else f"{tag}.tar.gz"
+        )
+        fetcher.release_manager.find_asset_by_name.return_value = expected_asset
+
+        # Create the test directory if expected to exist
+        if expected_skip:
+            test_dir = extract_dir / dir_name
+            test_dir.mkdir(exist_ok=True)
+            (test_dir / "proton").write_text("dummy")
+
+        # Call fetch_and_extract
+        result = fetcher.fetch_and_extract(
+            FORKS[fork]["repo"], output_dir, extract_dir, fork=fork
+        )
+
+        if expected_skip:
+            # Verify that download and extraction were NOT called when directory exists
+            fetcher.asset_downloader.download_asset.assert_not_called()
+            fetcher.archive_extractor.extract_archive.assert_not_called()
+        else:
+            # Verify that download and extraction were called when directory doesn't exist
+            fetcher.asset_downloader.download_asset.assert_called()
+            fetcher.archive_extractor.extract_archive.assert_called()
+
+        # Verify that link management was always called for consistency
+        fetcher.link_manager.manage_proton_links.assert_called()
+
+        # Verify the method returned successfully
+        assert result == extract_dir
