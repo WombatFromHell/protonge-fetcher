@@ -20,6 +20,7 @@ This document establishes guidelines for agentic tools (AI assistants, code gene
   - Lint checking can be done by using the command: `ruff check --select I --fix; ruff format; pyright`
   - Formatting can be done by using the command: `ruff format; prettier --cache -c -w *.md`.
   - Formatting for markdown files can be done by using the command: `prettier --cache -c -w *.md`
+  - Radon checks measuring checking code complexity can be done by using the command: `uv run radon hal ./protonfetcher.py`
 
 - When running into a test that won't pass, only attempt to fix it 3 times before stopping and prompting the user what to do next. Do not make sweeping changes to the logic of the project without express permission granted by the user to do so.
 

@@ -4,4 +4,9 @@ version = "1.0.1"
 description = "Grab the latest Proton-GE release from GitHub and keep 'compatibilitytools.d' up-to-date"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["pytest>=8.4.2", "pytest-mock>=3.15.1", "slipcover>=1.0.17"]
+dependencies = [
+    "pytest>=8.4.2",
+    "pytest-mock>=3.15.1",
+    "radon>=6.0.1",
+    "slipcover>=1.0.17",
+]
