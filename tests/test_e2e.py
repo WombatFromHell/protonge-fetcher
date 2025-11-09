@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
+from protonfetcher import ForkName
+
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
@@ -61,8 +63,8 @@ class TestE2ECLIGetLatestGEProton:
         call_args = mock_fetcher.fetch_and_extract.call_args
 
         # Verify parameters: (repo, output_dir, extract_dir, release_tag, fork)
-        assert call_args[0][0] == FORKS["GE-Proton"]["repo"]  # repo
-        assert call_args[1]["fork"] == "GE-Proton"  # fork
+        assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]  # repo
+        assert call_args[1]["fork"] == ForkName.GE_PROTON  # fork
         assert (
             call_args[1]["release_tag"] is None
         )  # Should fetch latest (not a specific tag)
@@ -70,7 +72,7 @@ class TestE2ECLIGetLatestGEProton:
     def test_cli_get_latest_ge_proton_explicit(
         self, mocker: MockerFixture, tmp_path: Path
     ):
-        """Test CLI command: ./protonfetcher -f 'GE-Proton' (explicit fork)."""
+        """Test CLI command: ./protonfetcher -f ForkName.GE_PROTON (explicit fork)."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -94,8 +96,8 @@ class TestE2ECLIGetLatestGEProton:
 
         # Verify that GE-Proton fork was used explicitly
         call_args = mock_fetcher.fetch_and_extract.call_args
-        assert call_args[0][0] == FORKS["GE-Proton"]["repo"]
-        assert call_args[1]["fork"] == "GE-Proton"
+        assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]
+        assert call_args[1]["fork"] == ForkName.GE_PROTON
 
 
 class TestE2ECLIGetManualGEProton:
@@ -104,7 +106,7 @@ class TestE2ECLIGetManualGEProton:
     def test_cli_get_manual_ge_proton(
         self, mocker: MockerFixture, tmp_path: Path, capsys
     ):
-        """Test CLI command: ./protonfetcher.py -f 'GE-Proton' -r 'GE-Proton10-11'."""
+        """Test CLI command: ./protonfetcher.py -f ForkName.GE_PROTON -r 'GE-Proton10-11'."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -130,8 +132,8 @@ class TestE2ECLIGetManualGEProton:
 
         # Verify the call parameters
         call_args = mock_fetcher.fetch_and_extract.call_args
-        assert call_args[0][0] == FORKS["GE-Proton"]["repo"]
-        assert call_args[1]["fork"] == "GE-Proton"
+        assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]
+        assert call_args[1]["fork"] == ForkName.GE_PROTON
         assert call_args[1]["release_tag"] == "GE-Proton10-11"
 
 
@@ -139,7 +141,7 @@ class TestE2ECLIGetLatestProtonEM:
     """End-to-end tests for getting the latest Proton-EM release."""
 
     def test_cli_get_latest_proton_em(self, mocker: MockerFixture, tmp_path: Path):
-        """Test CLI command: ./protonfetcher.py -f 'Proton-EM'."""
+        """Test CLI command: ./protonfetcher.py -f ForkName.PROTON_EM."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -163,8 +165,8 @@ class TestE2ECLIGetLatestProtonEM:
 
         # Verify that Proton-EM fork was used
         call_args = mock_fetcher.fetch_and_extract.call_args
-        assert call_args[0][0] == FORKS["Proton-EM"]["repo"]
-        assert call_args[1]["fork"] == "Proton-EM"
+        assert call_args[0][0] == FORKS[ForkName.PROTON_EM]["repo"]
+        assert call_args[1]["fork"] == ForkName.PROTON_EM
         assert call_args[1]["release_tag"] is None  # Should fetch latest
 
 
@@ -172,7 +174,7 @@ class TestE2ECLIGetManualProtonEM:
     """End-to-end tests for getting a manual Proton-EM release."""
 
     def test_cli_get_manual_proton_em(self, mocker: MockerFixture, tmp_path: Path):
-        """Test CLI command: ./protonfetcher.py -f 'Proton-EM' -r 'Proton-EM-10.0-2F'."""
+        """Test CLI command: ./protonfetcher.py -f ForkName.PROTON_EM -r 'Proton-EM-10.0-2F'."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
@@ -198,8 +200,8 @@ class TestE2ECLIGetManualProtonEM:
 
         # Verify the call parameters for Proton-EM
         call_args = mock_fetcher.fetch_and_extract.call_args
-        assert call_args[0][0] == FORKS["Proton-EM"]["repo"]
-        assert call_args[1]["fork"] == "Proton-EM"
+        assert call_args[0][0] == FORKS[ForkName.PROTON_EM]["repo"]
+        assert call_args[1]["fork"] == ForkName.PROTON_EM
         assert call_args[1]["release_tag"] == "Proton-EM-10.0-2F"
 
 
@@ -362,17 +364,17 @@ class TestE2ECLIAllForkCombinations:
     @pytest.mark.parametrize(
         "fork,release_tag,expected_repo",
         [
-            ("GE-Proton", None, "GloriousEggroll/proton-ge-custom"),
-            ("Proton-EM", None, "Etaash-mathamsetty/Proton"),
-            ("GE-Proton", "GE-Proton10-11", "GloriousEggroll/proton-ge-custom"),
-            ("Proton-EM", "Proton-EM-10.0-2F", "Etaash-mathamsetty/Proton"),
+            (ForkName.GE_PROTON, None, "GloriousEggroll/proton-ge-custom"),
+            (ForkName.PROTON_EM, None, "Etaash-mathamsetty/Proton"),
+            (ForkName.GE_PROTON, "GE-Proton10-11", "GloriousEggroll/proton-ge-custom"),
+            (ForkName.PROTON_EM, "Proton-EM-10.0-2F", "Etaash-mathamsetty/Proton"),
         ],
     )
     def test_cli_all_fork_release_combinations(
         self,
         mocker: MockerFixture,
         tmp_path: Path,
-        fork: str,
+        fork: ForkName,
         release_tag: str,
         expected_repo: str,
     ):
@@ -382,7 +384,11 @@ class TestE2ECLIAllForkCombinations:
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
-        test_args = ["protonfetcher", "-f", fork]
+        test_args = [
+            "protonfetcher",
+            "-f",
+            fork.value,
+        ]  # Convert enum to string for CLI
         if release_tag:
             test_args.extend(["-r", release_tag])
         test_args.extend(
@@ -404,7 +410,7 @@ class TestE2ECLIAllForkCombinations:
         # Verify correct repo was used
         call_args = mock_fetcher.fetch_and_extract.call_args
         assert call_args[0][0] == expected_repo
-        assert call_args[1]["fork"] == fork
+        assert call_args[1]["fork"] == fork  # fork is now the enum type
         if release_tag:
             assert call_args[1]["release_tag"] == release_tag
         else:
@@ -476,7 +482,7 @@ class TestE2ECLIFullWorkflowSimulation:
         (tmp_path / "Downloads").mkdir()
         (tmp_path / "extract").mkdir()
 
-        # Simulate command: ./protonfetcher.py -f 'Proton-EM' -r 'Proton-EM-10.0-2F'
+        # Simulate command: ./protonfetcher.py -f ForkName.PROTON_EM -r 'Proton-EM-10.0-2F'
         test_args = [
             "protonfetcher.py",
             "-f",
@@ -499,9 +505,9 @@ class TestE2ECLIFullWorkflowSimulation:
         # Verify the workflow happened as expected for Proton-EM
         call_args = mock_fetcher.fetch_and_extract.call_args
         assert (
-            call_args[0][0] == FORKS["Proton-EM"]["repo"]
+            call_args[0][0] == FORKS[ForkName.PROTON_EM]["repo"]
         )  # Correct repo for Proton-EM
-        assert call_args[1]["fork"] == "Proton-EM"  # Correct fork
+        assert call_args[1]["fork"] == ForkName.PROTON_EM  # Correct fork
         assert call_args[1]["release_tag"] == "Proton-EM-10.0-2F"  # Correct manual tag
 
     def test_full_workflow_with_progress_disabled(
@@ -572,7 +578,7 @@ class TestE2ECLIListReleases:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_recent_releases method
-        mock_fetcher.list_recent_releases.return_value = [
+        mock_fetcher.release_manager.list_recent_releases.return_value = [
             "GE-Proton9-23",
             "GE-Proton9-22",
             "GE-Proton9-21",
@@ -595,8 +601,8 @@ class TestE2ECLIListReleases:
             pass
 
         # Verify list_recent_releases was called with the correct repo
-        mock_fetcher.list_recent_releases.assert_called_once_with(
-            FORKS["GE-Proton"]["repo"]
+        mock_fetcher.release_manager.list_recent_releases.assert_called_once_with(
+            FORKS[ForkName.GE_PROTON]["repo"]
         )
 
         # Capture output to verify the tags were printed
@@ -614,7 +620,7 @@ class TestE2ECLIListReleases:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_recent_releases method
-        mock_fetcher.list_recent_releases.return_value = [
+        mock_fetcher.release_manager.list_recent_releases.return_value = [
             "GE-Proton9-25",
             "GE-Proton9-24",
             "GE-Proton9-23",
@@ -638,8 +644,8 @@ class TestE2ECLIListReleases:
             pass
 
         # Verify correct repo was used
-        mock_fetcher.list_recent_releases.assert_called_once_with(
-            FORKS["GE-Proton"]["repo"]
+        mock_fetcher.release_manager.list_recent_releases.assert_called_once_with(
+            FORKS[ForkName.GE_PROTON]["repo"]
         )
 
         # Capture output to verify the tags were printed
@@ -655,7 +661,7 @@ class TestE2ECLIListReleases:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_recent_releases method
-        mock_fetcher.list_recent_releases.return_value = [
+        mock_fetcher.release_manager.list_recent_releases.return_value = [
             "EM-10.0-30",
             "EM-10.0-29",
             "EM-10.0-28",
@@ -679,8 +685,8 @@ class TestE2ECLIListReleases:
             pass
 
         # Verify correct repo was used
-        mock_fetcher.list_recent_releases.assert_called_once_with(
-            FORKS["Proton-EM"]["repo"]
+        mock_fetcher.release_manager.list_recent_releases.assert_called_once_with(
+            FORKS[ForkName.PROTON_EM]["repo"]
         )
 
         # Capture output to verify the tags were printed
@@ -698,7 +704,7 @@ class TestE2ECLIListReleases:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_recent_releases method
-        mock_fetcher.list_recent_releases.return_value = [
+        mock_fetcher.release_manager.list_recent_releases.return_value = [
             "GE-Proton10-1",
             "GE-Proton9-50",
             "GE-Proton9-49",
@@ -722,8 +728,8 @@ class TestE2ECLIListReleases:
             pass
 
         # Verify method was called with correct repo
-        mock_fetcher.list_recent_releases.assert_called_once_with(
-            FORKS["GE-Proton"]["repo"]
+        mock_fetcher.release_manager.list_recent_releases.assert_called_once_with(
+            FORKS[ForkName.GE_PROTON]["repo"]
         )
 
         # Capture output to verify the tags were printed
@@ -741,7 +747,7 @@ class TestE2ECLIListReleases:
         # Mock the list_recent_releases method to raise a rate limit error
         from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
+        mock_fetcher.release_manager.list_recent_releases.side_effect = ProtonFetcherError(
             "API rate limit exceeded. Please wait a few minutes before trying again."
         )
 
@@ -877,7 +883,7 @@ class TestE2EMainFunctionErrorHandling:
         # Mock the list_recent_releases method to raise the appropriate error
         from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
+        mock_fetcher.release_manager.list_recent_releases.side_effect = ProtonFetcherError(
             "API rate limit exceeded. Please wait a few minutes before trying again."
         )
 
@@ -913,7 +919,7 @@ class TestE2EMainFunctionErrorHandling:
         # Mock the list_recent_releases method to raise a JSON parsing error
         from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
+        mock_fetcher.release_manager.list_recent_releases.side_effect = ProtonFetcherError(
             "Failed to parse JSON response: Expecting value: line 1 column 1 (char 0)"
         )
 
@@ -951,7 +957,7 @@ class TestE2ECLINewFeatures:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_links method to return some sample link information
-        mock_fetcher.list_links.return_value = {
+        mock_fetcher.link_manager.list_links.return_value = {
             "GE-Proton": str(tmp_path / "GE-Proton10-15"),
             "GE-Proton-Fallback": str(tmp_path / "GE-Proton10-12"),
             "GE-Proton-Fallback2": None,  # Not set
@@ -978,8 +984,8 @@ class TestE2ECLINewFeatures:
             mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "GE-Proton"),
             mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "Proton-EM"),
         ]
-        assert mock_fetcher.list_links.call_count == 2
-        mock_fetcher.list_links.assert_has_calls(expected_calls)
+        assert mock_fetcher.link_manager.list_links.call_count == 2
+        mock_fetcher.link_manager.list_links.assert_has_calls(expected_calls)
 
         # Capture output to verify the links were printed
         captured = capsys.readouterr()
@@ -996,7 +1002,7 @@ class TestE2ECLINewFeatures:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_links method
-        mock_fetcher.list_links.return_value = {
+        mock_fetcher.link_manager.list_links.return_value = {
             "GE-Proton": str(tmp_path / "GE-Proton10-15"),
             "GE-Proton-Fallback": None,
             "GE-Proton-Fallback2": None,
@@ -1020,7 +1026,7 @@ class TestE2ECLINewFeatures:
             pass
 
         # Verify correct fork was used
-        mock_fetcher.list_links.assert_called_once_with(
+        mock_fetcher.link_manager.list_links.assert_called_once_with(
             (tmp_path / "compatibilitytools.d").expanduser(), "GE-Proton"
         )
 
@@ -1035,7 +1041,7 @@ class TestE2ECLINewFeatures:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_links method for Proton-EM
-        mock_fetcher.list_links.return_value = {
+        mock_fetcher.link_manager.list_links.return_value = {
             "Proton-EM": str(tmp_path / "proton-EM-10.0-30"),
             "Proton-EM-Fallback": str(tmp_path / "proton-EM-10.0-25"),
             "Proton-EM-Fallback2": str(tmp_path / "proton-EM-10.0-20"),
@@ -1059,7 +1065,7 @@ class TestE2ECLINewFeatures:
             pass
 
         # Verify correct repo and fork were used
-        mock_fetcher.list_links.assert_called_once_with(
+        mock_fetcher.link_manager.list_links.assert_called_once_with(
             (tmp_path / "compatibilitytools.d").expanduser(), "Proton-EM"
         )
 
@@ -1078,7 +1084,7 @@ class TestE2ECLINewFeatures:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the list_links method to return all None values (no links exist)
-        mock_fetcher.list_links.return_value = {
+        mock_fetcher.link_manager.list_links.return_value = {
             "GE-Proton": None,
             "GE-Proton-Fallback": None,
             "GE-Proton-Fallback2": None,
@@ -1104,8 +1110,8 @@ class TestE2ECLINewFeatures:
             mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "GE-Proton"),
             mocker.call((tmp_path / "compatibilitytools.d").expanduser(), "Proton-EM"),
         ]
-        assert mock_fetcher.list_links.call_count == 2
-        mock_fetcher.list_links.assert_has_calls(expected_calls)
+        assert mock_fetcher.link_manager.list_links.call_count == 2
+        mock_fetcher.link_manager.list_links.assert_has_calls(expected_calls)
 
         # Capture output to verify all links show as not found
         captured = capsys.readouterr()
@@ -1120,7 +1126,7 @@ class TestE2ECLINewFeatures:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the remove_release method to return success
-        mock_fetcher.remove_release.return_value = True
+        mock_fetcher.link_manager.remove_release.return_value = True
 
         test_args = [
             "protonfetcher",
@@ -1140,7 +1146,7 @@ class TestE2ECLINewFeatures:
             pass
 
         # Verify remove_release was called with the correct parameters
-        mock_fetcher.remove_release.assert_called_once_with(
+        mock_fetcher.link_manager.remove_release.assert_called_once_with(
             (tmp_path / "compatibilitytools.d").expanduser(),
             "GE-Proton10-15",
             "GE-Proton",
@@ -1156,7 +1162,7 @@ class TestE2ECLINewFeatures:
         mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
 
         # Mock the remove_release method to return success
-        mock_fetcher.remove_release.return_value = True
+        mock_fetcher.link_manager.remove_release.return_value = True
 
         test_args = [
             "protonfetcher",
@@ -1177,7 +1183,7 @@ class TestE2ECLINewFeatures:
             pass
 
         # Verify remove_release was called with Proton-EM fork
-        mock_fetcher.remove_release.assert_called_once_with(
+        mock_fetcher.link_manager.remove_release.assert_called_once_with(
             (tmp_path / "compatibilitytools.d").expanduser(), "EM-10.0-30", "Proton-EM"
         )
 
@@ -1195,7 +1201,7 @@ class TestE2ECLINewFeatures:
         # Mock the remove_release method to raise a ProtonFetcherError
         from protonfetcher import ProtonFetcherError
 
-        mock_fetcher.remove_release.side_effect = ProtonFetcherError(
+        mock_fetcher.link_manager.remove_release.side_effect = ProtonFetcherError(
             "Release directory does not exist: /path/to/nonexistent"
         )
 
@@ -1334,8 +1340,8 @@ class TestE2ECLINewFeatures:
         elif error_scenario == "rate_limit":
             from protonfetcher import ProtonFetcherError
 
-            mock_fetcher.list_recent_releases.side_effect = ProtonFetcherError(
-                expected_error_message
+            mock_fetcher.release_manager.list_recent_releases.side_effect = (
+                ProtonFetcherError(expected_error_message)
             )
 
         # Test both fetch_and_extract and list_recent_releases depending on scenario
@@ -1370,17 +1376,21 @@ class TestE2ECLINewFeatures:
     @pytest.mark.parametrize(
         "fork,release_tag,cli_flag",
         [
-            ("GE-Proton", None, None),  # Default fork, no specific release
-            ("GE-Proton", "GE-Proton10-11", "-r"),  # GE-Proton with specific release
-            ("Proton-EM", None, "-f"),  # Proton-EM fork, no specific release
-            ("Proton-EM", "EM-10.0-30", "-r"),  # Proton-EM with specific release
+            (ForkName.GE_PROTON, None, None),  # Default fork, no specific release
+            (
+                ForkName.GE_PROTON,
+                "GE-Proton10-11",
+                "-r",
+            ),  # GE-Proton with specific release
+            (ForkName.PROTON_EM, None, "-f"),  # Proton-EM fork, no specific release
+            (ForkName.PROTON_EM, "EM-10.0-30", "-r"),  # Proton-EM with specific release
         ],
     )
     def test_cli_fork_combinations_parametrized(
         self,
         mocker: MockerFixture,
         tmp_path: Path,
-        fork: str,
+        fork: ForkName,
         release_tag: str,
         cli_flag: str,
     ):
@@ -1394,8 +1404,8 @@ class TestE2ECLINewFeatures:
         test_args = ["protonfetcher"]
 
         # Add fork flag if needed (for Proton-EM or when explicit fork is requested)
-        if fork == "Proton-EM":
-            test_args.extend(["-f", fork])
+        if fork == ForkName.PROTON_EM:
+            test_args.extend(["-f", fork.value])
 
         # Add release flag if needed
         if release_tag:

@@ -1068,13 +1068,13 @@ class TestLinkManager:
         manager = LinkManager(mock_fs)
 
         # Test GE-Proton
-        main, fb1, fb2 = manager.get_link_names_for_fork(tmp_path, "GE-Proton")
+        main, fb1, fb2 = manager.get_link_names_for_fork(tmp_path, ForkName.GE_PROTON)
         assert main.name == "GE-Proton"
         assert fb1.name == "GE-Proton-Fallback"
         assert fb2.name == "GE-Proton-Fallback2"
 
         # Test Proton-EM
-        main, fb1, fb2 = manager.get_link_names_for_fork(tmp_path, "Proton-EM")
+        main, fb1, fb2 = manager.get_link_names_for_fork(tmp_path, ForkName.PROTON_EM)
         assert main.name == "Proton-EM"
         assert fb1.name == "Proton-EM-Fallback"
         assert fb2.name == "Proton-EM-Fallback2"
@@ -1111,7 +1111,7 @@ class TestLinkManager:
 
         mock_fs.iterdir.return_value = [mock_ge_dir1, mock_ge_dir2, mock_legacy_dir]
 
-        candidates = manager.find_version_candidates(tmp_path, "GE-Proton")
+        candidates = manager.find_version_candidates(tmp_path, ForkName.GE_PROTON)
 
         # Should have GE-Proton10-20 and GE-Proton9-15 (parsed versions)
         # LegacyRuntime should be filtered out based on naming pattern
@@ -1153,13 +1153,13 @@ class TestLinkManager:
         mock_fs.exists.return_value = True
         mock_fs.iterdir.return_value = [mock_em_dir1, mock_em_dir2, mock_ge_dir]
 
-        candidates = manager.find_version_candidates(tmp_path, "Proton-EM")
+        candidates = manager.find_version_candidates(tmp_path, ForkName.PROTON_EM)
 
         # Should have Proton-EM directories but not GE-Proton
         # Proton-EM directories should be parsed with expected versions
         expected_versions = [
-            parse_version("EM-10.0-30", "Proton-EM"),
-            parse_version("EM-10.0-25", "Proton-EM"),
+            parse_version("EM-10.0-30", ForkName.PROTON_EM),
+            parse_version("EM-10.0-25", ForkName.PROTON_EM),
         ]
         found_versions = [c[0] for c in candidates]
         for expected in expected_versions:
@@ -1241,7 +1241,7 @@ class TestLinkManager:
             "No such file or directory"
         )  # This would be the case for non-existent symlinks
 
-        links = manager.list_links(tmp_path, "GE-Proton")
+        links = manager.list_links(tmp_path, ForkName.GE_PROTON)
 
         # Should have 3 links
         assert len(links) == 3
@@ -1273,11 +1273,13 @@ class TestLinkManager:
         # Mock manage_proton_links to avoid side effects
         mock_manage = mocker.patch.object(manager, "manage_proton_links")
 
-        success = manager.remove_release(tmp_path, "GE-Proton10-20", "GE-Proton")
+        success = manager.remove_release(tmp_path, "GE-Proton10-20", ForkName.GE_PROTON)
 
         assert success is True
         mock_fs.rmtree.assert_called_once_with(release_dir)
-        mock_manage.assert_called_once_with(tmp_path, "GE-Proton10-20", "GE-Proton")
+        mock_manage.assert_called_once_with(
+            tmp_path, "GE-Proton10-20", ForkName.GE_PROTON
+        )
 
     def test_remove_release_not_found(self, tmp_path, mocker):
         """Test removal of a non-existent release."""
@@ -1288,7 +1290,7 @@ class TestLinkManager:
         mock_fs.exists.return_value = False
 
         with pytest.raises(LinkManagementError):
-            manager.remove_release(tmp_path, "NonExistent", "GE-Proton")
+            manager.remove_release(tmp_path, "NonExistent", ForkName.GE_PROTON)
 
 
 class TestLinkManagerWithFixtures:
@@ -1356,7 +1358,7 @@ class TestGitHubReleaseFetcher:
         fetcher.release_manager = mock_release_manager
         mock_release_manager.list_recent_releases.return_value = ["v1.0", "v1.1"]
 
-        result = fetcher.list_recent_releases("test/repo")
+        result = fetcher.release_manager.list_recent_releases("test/repo")
 
         assert result == ["v1.0", "v1.1"]
         mock_release_manager.list_recent_releases.assert_called_once_with("test/repo")
@@ -1374,7 +1376,7 @@ class TestGitHubReleaseFetcher:
         fetcher.link_manager = mock_link_manager
         mock_link_manager.list_links.return_value = {"GE-Proton": "/path/to/proton"}
 
-        result = fetcher.list_links(tmp_path, "GE-Proton")
+        result = fetcher.link_manager.list_links(tmp_path, "GE-Proton")
 
         assert result == {"GE-Proton": "/path/to/proton"}
         mock_link_manager.list_links.assert_called_once_with(tmp_path, "GE-Proton")
@@ -1392,7 +1394,9 @@ class TestGitHubReleaseFetcher:
         fetcher.link_manager = mock_link_manager
         mock_link_manager.remove_release.return_value = True
 
-        result = fetcher.remove_release(tmp_path, "GE-Proton10-20", "GE-Proton")
+        result = fetcher.link_manager.remove_release(
+            tmp_path, "GE-Proton10-20", "GE-Proton"
+        )
 
         assert result is True
         mock_link_manager.remove_release.assert_called_once_with(
@@ -1412,7 +1416,7 @@ class TestGitHubReleaseFetcher:
         fetcher.release_manager = mock_release_manager
         mock_release_manager.fetch_latest_tag.return_value = "GE-Proton10-20"
 
-        result = fetcher.fetch_latest_tag("test/repo")
+        result = fetcher.release_manager.fetch_latest_tag("test/repo")
 
         assert result == "GE-Proton10-20"
         mock_release_manager.fetch_latest_tag.assert_called_once_with("test/repo")
@@ -1430,7 +1434,9 @@ class TestGitHubReleaseFetcher:
         fetcher.release_manager = mock_release_manager
         mock_release_manager.find_asset_by_name.return_value = "GE-Proton10-20.tar.gz"
 
-        result = fetcher.find_asset_by_name("test/repo", "GE-Proton10-20")
+        result = fetcher.release_manager.find_asset_by_name(
+            "test/repo", "GE-Proton10-20", "GE-Proton"
+        )
 
         assert result == "GE-Proton10-20.tar.gz"
         mock_release_manager.find_asset_by_name.assert_called_once_with(
@@ -1450,7 +1456,7 @@ class TestGitHubReleaseFetcher:
         fetcher.release_manager = mock_release_manager
         mock_release_manager.get_remote_asset_size.return_value = 123456789
 
-        result = fetcher.get_remote_asset_size(
+        result = fetcher.release_manager.get_remote_asset_size(
             "test/repo", "GE-Proton10-20", "GE-Proton10-20.tar.gz"
         )
 
@@ -1473,8 +1479,12 @@ class TestGitHubReleaseFetcher:
         asset_path = tmp_path / "test.tar.gz"
         mock_asset_downloader.download_asset.return_value = asset_path
 
-        result = fetcher.download_asset(
-            "test/repo", "GE-Proton10-20", "GE-Proton10-20.tar.gz", asset_path
+        result = fetcher.asset_downloader.download_asset(
+            "test/repo",
+            "GE-Proton10-20",
+            "GE-Proton10-20.tar.gz",
+            asset_path,
+            fetcher.release_manager,
         )
 
         assert result == asset_path
@@ -1495,7 +1505,7 @@ class TestGitHubReleaseFetcher:
         archive_path = tmp_path / "test.tar.gz"
         target_dir = tmp_path / "target"
 
-        fetcher.extract_archive(archive_path, target_dir)
+        fetcher.archive_extractor.extract_archive(archive_path, target_dir, True, True)
 
         mock_archive_extractor.extract_archive.assert_called_once_with(
             archive_path,
@@ -1555,22 +1565,27 @@ class TestGitHubReleaseFetcherDirectoryCheck:
         "fork,tag,dir_name,expected_skip",
         [
             # GE-Proton tests
-            ("GE-Proton", "GE-Proton10-20", "GE-Proton10-20", True),  # Direct match
-            ("GE-Proton", "GE-Proton10-20", "GE-Proton10-21", False),  # No match
+            (
+                ForkName.GE_PROTON,
+                "GE-Proton10-20",
+                "GE-Proton10-20",
+                True,
+            ),  # Direct match
+            (ForkName.GE_PROTON, "GE-Proton10-20", "GE-Proton10-21", False),  # No match
             # Proton-EM tests
             (
-                "Proton-EM",
+                ForkName.PROTON_EM,
                 "EM-10.0-30",
                 "proton-EM-10.0-30",
                 True,
             ),  # With prefix (main case from bug)
             (
-                "Proton-EM",
+                ForkName.PROTON_EM,
                 "EM-10.0-30",
                 "EM-10.0-30",
                 True,
             ),  # Without prefix (fallback)
-            ("Proton-EM", "EM-10.0-30", "proton-EM-10.0-31", False),  # No match
+            (ForkName.PROTON_EM, "EM-10.0-30", "proton-EM-10.0-31", False),  # No match
         ],
     )
     def test_fetch_and_extract_directory_existence_check(
@@ -1628,7 +1643,7 @@ class TestGitHubReleaseFetcherDirectoryCheck:
 
         fetcher.release_manager.fetch_latest_tag.return_value = tag
         expected_asset = (
-            f"proton-{tag}.tar.xz" if fork == "Proton-EM" else f"{tag}.tar.gz"
+            f"proton-{tag}.tar.xz" if fork == ForkName.PROTON_EM else f"{tag}.tar.gz"
         )
         fetcher.release_manager.find_asset_by_name.return_value = expected_asset
 

@@ -10,36 +10,68 @@ from __future__ import annotations
 
 # Standard library imports
 import argparse
+import dataclasses
+import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 import urllib.parse
 import urllib.request
-from pathlib import Path
 
 # Type imports
+from enum import StrEnum
+from pathlib import Path
 from typing import (
     Any,
     Dict,
     Iterator,
     List,
-    Literal,
     Optional,
     Protocol,
-    Set,
+    Self,
     Tuple,
 )
 
 # Type aliases for better readability
-Headers = Dict[str, str]
+Headers = dict[str, str]
 ProcessResult = subprocess.CompletedProcess[str]
-ForkName = Literal["GE-Proton", "Proton-EM"]
-AssetInfo = Tuple[str, int]  # (name, size)
-VersionTuple = Tuple[str, int, int, int]  # (prefix, major, minor, patch)
+
+
+@dataclasses.dataclass(frozen=True)
+class ForkConfig:
+    repo: str
+    archive_format: str
+
+    def __getitem__(self, key: str) -> str:
+        """Allow dict-like access for backward compatibility."""
+        if key == "repo":
+            return self.repo
+        elif key == "archive_format":
+            return self.archive_format
+        else:
+            raise KeyError(key)
+
+
+@dataclasses.dataclass
+class SymlinkSpec:
+    link_path: Path
+    target_path: Path
+    priority: int  # 0 = main, 1 = fallback, 2 = fallback2
+
+
+class ForkName(StrEnum):
+    GE_PROTON = "GE-Proton"
+    PROTON_EM = "Proton-EM"
+
+
+AssetInfo = tuple[str, int]  # (name, size)
+VersionTuple = tuple[str, int, int, int]  # (prefix, major, minor, patch)
 
 
 class NetworkClientProtocol(Protocol):
@@ -197,6 +229,20 @@ class FileSystemClient:
         shutil.rmtree(path)
 
 
+@dataclasses.dataclass
+class SpinnerConfig:
+    iterable: Optional[Iterator[Any]] = None
+    total: Optional[int] = None
+    desc: str = ""
+    unit: Optional[str] = None
+    unit_scale: Optional[bool] = None
+    disable: bool = False
+    fps_limit: Optional[float] = None
+    width: int = 10
+    show_progress: bool = False  # New parameter to control progress display
+    show_file_details: bool = False  # New parameter to control file details display
+
+
 class Spinner:
     """A simple native spinner progress indicator without external dependencies."""
 
@@ -234,7 +280,7 @@ class Spinner:
         self._current_line = ""
         self._completed = False  # Track if the spinner has completed
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         if not self.disable:
             # Display initial state if needed
             self._update_display()
@@ -420,17 +466,20 @@ DEFAULT_TIMEOUT = 30
 GITHUB_URL_PATTERN = r"/releases/tag/([^/?#]+)"
 
 # Constants for ProtonGE forks
-FORKS: Dict[ForkName, Dict[str, str]] = {
-    "GE-Proton": {
-        "repo": "GloriousEggroll/proton-ge-custom",
-        "archive_format": ".tar.gz",
-    },
-    "Proton-EM": {"repo": "Etaash-mathamsetty/Proton", "archive_format": ".tar.xz"},
+FORKS: dict[ForkName, ForkConfig] = {
+    ForkName.GE_PROTON: ForkConfig(
+        repo="GloriousEggroll/proton-ge-custom",
+        archive_format=".tar.gz",
+    ),
+    ForkName.PROTON_EM: ForkConfig(
+        repo="Etaash-mathamsetty/Proton",
+        archive_format=".tar.xz",
+    ),
 }
-DEFAULT_FORK: ForkName = "GE-Proton"
+DEFAULT_FORK: ForkName = ForkName.GE_PROTON
 
 
-def parse_version(tag: str, fork: ForkName = "GE-Proton") -> VersionTuple:
+def parse_version(tag: str, fork: ForkName = ForkName.GE_PROTON) -> VersionTuple:
     """
     Parse a version tag to extract the numeric components for comparison.
 
@@ -439,29 +488,34 @@ def parse_version(tag: str, fork: ForkName = "GE-Proton") -> VersionTuple:
         fork: The fork name to determine parsing logic
 
     Returns:
-        A tuple of (prefix, major, minor, patch) for comparison purposes, or None if parsing fails
+        A tuple of (prefix, major, minor, patch) for comparison purposes, or a fallback tuple if parsing fails
     """
-    if fork == "Proton-EM":
-        # Proton-EM format: EM-10.0-30 -> prefix="EM", major=10, minor=0, patch=30
-        pattern = r"EM-(\d+)\.(\d+)-(\d+)"
-        match = re.match(pattern, tag)
-        if match:
-            major, minor, patch = map(int, match.groups())
-            return ("EM", major, minor, patch)
-    else:  # Default to GE-Proton
-        # GE-Proton format: GE-Proton10-20 -> prefix="GE-Proton", major=10, minor=20
-        pattern = r"GE-Proton(\d+)-(\d+)"
-        match = re.match(pattern, tag)
-        if match:
-            major, minor = map(int, match.groups())
-            # For GE-Proton, we treat the minor as a patch-like value for comparison
-            return ("GE-Proton", major, 0, minor)
+    match fork:
+        case ForkName.PROTON_EM:
+            # Proton-EM format: EM-10.0-30 -> prefix="EM", major=10, minor=0, patch=30
+            pattern = r"EM-(\d+)\.(\d+)-(\d+)"
+            match_result = re.match(pattern, tag)
+            if match_result:
+                major, minor, patch = map(int, match_result.groups())
+                return ("EM", major, minor, patch)
+            # If no match, return a tuple that will put this tag at the end for comparison
+            return (tag, 0, 0, 0)
+        case ForkName.GE_PROTON:
+            # GE-Proton format: GE-Proton10-20 -> prefix="GE-Proton", major=10, minor=20
+            pattern = r"GE-Proton(\d+)-(\d+)"
+            match_result = re.match(pattern, tag)
+            if match_result:
+                major, minor = map(int, match_result.groups())
+                # For GE-Proton, we treat the minor as a patch-like value for comparison
+                return ("GE-Proton", major, 0, minor)
+            # If no match, return a tuple that will put this tag at the end for comparison
+            return (tag, 0, 0, 0)
+        case _:
+            # If unexpected fork value, return a tuple that will put this tag at the end for comparison
+            return (tag, 0, 0, 0)
 
-    # If no match, return a tuple that will put this tag at the end for comparison
-    return (tag, 0, 0, 0)
 
-
-def compare_versions(tag1: str, tag2: str, fork: ForkName = "GE-Proton") -> int:
+def compare_versions(tag1: str, tag2: str, fork: ForkName = ForkName.GE_PROTON) -> int:
     """
     Compare two version tags to determine which is newer.
 
@@ -528,7 +582,11 @@ class LinkManagementError(ProtonFetcherError):
     """Raised when link management operations fail."""
 
 
-def get_proton_asset_name(tag: str, fork: ForkName = "GE-Proton") -> str:
+class MultiLinkManagementError(ProtonFetcherError, ExceptionGroup):
+    """Raised when multiple link management operations fail."""
+
+
+def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
     """
     Generate the expected Proton asset name from a tag and fork.
 
@@ -539,7 +597,7 @@ def get_proton_asset_name(tag: str, fork: ForkName = "GE-Proton") -> str:
     Returns:
         The expected asset name (e.g., 'GE-Proton10-20.tar.gz' or 'proton-EM-10.0-30.tar.xz')
     """
-    if fork == "Proton-EM":
+    if fork == ForkName.PROTON_EM:
         # For Proton-EM, the asset name follows pattern: proton-<tag>.tar.xz
         # e.g., tag 'EM-10.0-30' becomes 'proton-EM-10.0-30.tar.xz'
         return f"proton-{tag}.tar.xz"
@@ -573,6 +631,16 @@ class ReleaseManager:
         self.network_client = network_client
         self.file_system_client = file_system_client
         self.timeout = timeout
+
+        # Initialize cache directory
+        xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+        if xdg_cache_home:
+            self._cache_dir = Path(xdg_cache_home) / "protonfetcher"
+        else:
+            self._cache_dir = Path.home() / ".cache" / "protonfetcher"
+
+        # Create cache directory if it doesn't exist
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     def fetch_latest_tag(self, repo: str) -> str:
         """Get the latest release tag by following the redirect from /releases/latest.
@@ -629,8 +697,62 @@ class ReleaseManager:
         logger.info(f"Found latest tag: {tag}")
         return tag
 
+    def _get_cache_key(self, repo: str, tag: str, asset_name: str) -> str:
+        """Generate a cache key for the given asset."""
+        key_data = f"{repo}_{tag}_{asset_name}_size"
+        return hashlib.md5(key_data.encode()).hexdigest()
+
+    def _get_cache_path(self, cache_key: str) -> Path:
+        """Get the cache file path for a given key."""
+        return self._cache_dir / cache_key
+
+    def _is_cache_valid(self, cache_path: Path, max_age: int = 3600) -> bool:
+        """Check if cached data is still valid (not expired)."""
+        if not cache_path.exists():
+            return False
+
+        age = time.time() - cache_path.stat().st_mtime
+        return age < max_age
+
+    def _get_cached_asset_size(
+        self, repo: str, tag: str, asset_name: str
+    ) -> Optional[int]:
+        """Get cached asset size if available and not expired."""
+        cache_key = self._get_cache_key(repo, tag, asset_name)
+        cache_path = self._get_cache_path(cache_key)
+
+        if self._is_cache_valid(cache_path):
+            try:
+                with open(cache_path, "r") as f:
+                    cached_data = json.load(f)
+                    return cached_data.get("size")
+            except (json.JSONDecodeError, KeyError, IOError):
+                # If cache file is invalid, return None to force a fresh fetch
+                pass
+        return None
+
+    def _cache_asset_size(
+        self, repo: str, tag: str, asset_name: str, size: int
+    ) -> None:
+        """Cache the asset size."""
+        cache_key = self._get_cache_key(repo, tag, asset_name)
+        cache_path = self._get_cache_path(cache_key)
+
+        try:
+            cache_data = {
+                "size": size,
+                "timestamp": time.time(),
+                "repo": repo,
+                "tag": tag,
+                "asset_name": asset_name,
+            }
+            with open(cache_path, "w") as f:
+                json.dump(cache_data, f)
+        except IOError as e:
+            logger.debug(f"Failed to write to cache: {e}")
+
     def find_asset_by_name(
-        self, repo: str, tag: str, fork: ForkName = "GE-Proton"
+        self, repo: str, tag: str, fork: ForkName = ForkName.GE_PROTON
     ) -> str:
         """Find the Proton asset in a GitHub release using the GitHub API first,
         falling back to HTML parsing if API fails.
@@ -663,7 +785,7 @@ class ReleaseManager:
                 )
 
             try:
-                release_data: Dict[str, Any] = json.loads(response.stdout)
+                release_data: dict[str, Any] = json.loads(response.stdout)
             except json.JSONDecodeError as e:
                 logger.debug(f"Failed to parse JSON response: {e}")
                 raise Exception(f"Failed to parse JSON: {e}")
@@ -672,11 +794,11 @@ class ReleaseManager:
             if "assets" not in release_data:
                 raise Exception("No assets found in release API response")
 
-            assets: List[Dict[str, Any]] = release_data["assets"]
+            assets: list[dict[str, Any]] = release_data["assets"]
 
             # Determine the expected extension based on fork
             expected_extension = (
-                FORKS[fork]["archive_format"] if fork in FORKS else ".tar.gz"
+                FORKS[fork].archive_format if fork in FORKS else ".tar.gz"
             )
 
             # Find assets with the expected extension
@@ -755,6 +877,17 @@ class ReleaseManager:
         Raises:
             FetchError: If unable to get asset size
         """
+        # Don't use cache during tests to preserve test isolation
+        in_test = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+
+        cached_size = None
+        if not in_test:
+            # Check if size is already cached
+            cached_size = self._get_cached_asset_size(repo, tag, asset_name)
+            if cached_size is not None:
+                logger.debug(f"Using cached size for {asset_name}: {cached_size} bytes")
+                return cached_size
+
         url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
         logger.info(f"Getting remote asset size from: {url}")
 
@@ -762,11 +895,27 @@ class ReleaseManager:
             # First try with HEAD request following redirects
             result = self.network_client.head(url, follow_redirects=True)
             if result.returncode != 0:
-                if "404" in result.stderr or "not found" in result.stderr.lower():
+                stderr_content = getattr(result, "stderr", "")
+                if isinstance(stderr_content, str) and (
+                    "404" in stderr_content or "not found" in stderr_content.lower()
+                ):
                     raise NetworkError(f"Remote asset not found: {asset_name}")
                 raise NetworkError(
-                    f"Failed to get remote asset size for {asset_name}: {result.stderr}"
+                    f"Failed to get remote asset size for {asset_name}: {stderr_content}"
                 )
+
+            # Check for 404 or similar errors in the response headers or stderr even if returncode is 0
+            stdout_content = getattr(result, "stdout", "")
+            stderr_content = getattr(result, "stderr", "")
+
+            if isinstance(stdout_content, str) and (
+                "404" in stdout_content or "not found" in stdout_content.lower()
+            ):
+                raise NetworkError(f"Remote asset not found: {asset_name}")
+            if isinstance(stderr_content, str) and (
+                "404" in stderr_content or "not found" in stderr_content.lower()
+            ):
+                raise NetworkError(f"Remote asset not found: {asset_name}")
 
             # Extract Content-Length from headers - look for it in various formats
             # Split the response into lines and search each one for content-length
@@ -779,6 +928,9 @@ class ReleaseManager:
                         size = int(length_match.group(1))
                         if size > 0:  # Only return if size is greater than 0
                             logger.info(f"Remote asset size: {size} bytes")
+                            # Cache the result for future use (if not testing)
+                            if not in_test:
+                                self._cache_asset_size(repo, tag, asset_name, size)
                             return size
 
             # If not found in individual lines, try regex on full response
@@ -789,6 +941,9 @@ class ReleaseManager:
                 size = int(content_length_match.group(1))
                 if size > 0:  # Only return if size is greater than 0
                     logger.info(f"Remote asset size: {size} bytes")
+                    # Cache the result for future use (if not testing)
+                    if not in_test:
+                        self._cache_asset_size(repo, tag, asset_name, size)
                     return size
 
             # If content-length is not available or is 0, we'll try a different approach
@@ -803,6 +958,21 @@ class ReleaseManager:
                         redirect_url, follow_redirects=False
                     )
                     if result.returncode == 0:
+                        # Check for 404 or similar errors in redirect response too
+                        stdout_content = getattr(result, "stdout", "")
+                        stderr_content = getattr(result, "stderr", "")
+
+                        if isinstance(stdout_content, str) and (
+                            "404" in stdout_content
+                            or "not found" in stdout_content.lower()
+                        ):
+                            raise NetworkError(f"Remote asset not found: {asset_name}")
+                        if isinstance(stderr_content, str) and (
+                            "404" in stderr_content
+                            or "not found" in stderr_content.lower()
+                        ):
+                            raise NetworkError(f"Remote asset not found: {asset_name}")
+
                         for line in result.stdout.splitlines():
                             if "content-length" in line.lower():
                                 length_match = re.search(
@@ -812,6 +982,11 @@ class ReleaseManager:
                                     size = int(length_match.group(1))
                                     if size > 0:
                                         logger.info(f"Remote asset size: {size} bytes")
+                                        # Cache the result for future use (if not testing)
+                                        if not in_test:
+                                            self._cache_asset_size(
+                                                repo, tag, asset_name, size
+                                            )
                                         return size
                         # Try regex on full response as backup
                         content_length_match = re.search(
@@ -821,6 +996,9 @@ class ReleaseManager:
                             size = int(content_length_match.group(1))
                             if size > 0:
                                 logger.info(f"Remote asset size: {size} bytes")
+                                # Cache the result for future use (if not testing)
+                                if not in_test:
+                                    self._cache_asset_size(repo, tag, asset_name, size)
                                 return size
 
             # If we still can't find the content-length, log the response for debugging
@@ -831,7 +1009,7 @@ class ReleaseManager:
         except Exception as e:
             raise NetworkError(f"Failed to get remote asset size for {asset_name}: {e}")
 
-    def list_recent_releases(self, repo: str) -> List[str]:
+    def list_recent_releases(self, repo: str) -> list[str]:
         """Fetch and return a list of recent release tags from the GitHub API.
 
         Args:
@@ -866,12 +1044,12 @@ class ReleaseManager:
             )
 
         try:
-            releases_data: List[Dict[str, Any]] = json.loads(response.stdout)
+            releases_data: list[dict[str, Any]] = json.loads(response.stdout)
         except json.JSONDecodeError as e:
             raise NetworkError(f"Failed to parse JSON response: {e}")
 
         # Extract tag_name from each release and limit to first 20
-        tag_names: List[str] = []
+        tag_names: list[str] = []
         for release in releases_data:
             if "tag_name" in release:
                 tag_names.append(release["tag_name"])
@@ -901,14 +1079,14 @@ class AssetDownloader:
     def curl_head(
         self,
         url: str,
-        headers: Optional[Headers] = None,
+        headers: Headers | None = None,
         follow_redirects: bool = False,
     ) -> ProcessResult:
         """Make a HEAD request using curl."""
         return self.network_client.head(url, headers, follow_redirects)
 
     def curl_download(
-        self, url: str, output_path: Path, headers: Optional[Headers] = None
+        self, url: str, output_path: Path, headers: Headers | None = None
     ) -> ProcessResult:
         """Download a file using curl."""
         return self.network_client.download(url, output_path, headers)
@@ -1084,46 +1262,52 @@ class ArchiveExtractor:
                 )
             except ProtonFetcherError:
                 # If spinner-based extraction fails, fall back to system tar command
-                if archive_path.name.endswith(".tar.gz"):
-                    self.extract_gz_archive(archive_path, target_dir)
-                elif archive_path.name.endswith(".tar.xz"):
-                    self.extract_xz_archive(archive_path, target_dir)
+                match archive_path.suffixes[-2:]:
+                    case [".tar", ".gz"]:
+                        self.extract_gz_archive(archive_path, target_dir)
+                    case [".tar", ".xz"]:
+                        self.extract_xz_archive(archive_path, target_dir)
+                    case _:
+                        # For other formats, try general tar command
+                        self._extract_with_system_tar(archive_path, target_dir)
         else:
             # For other formats, use a subprocess approach with tar command
             # This handles cases like the test.zip file in the failing test
-            self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
+            self._extract_with_system_tar(archive_path, target_dir)
 
-            # Use tar command for general case as well, but with different flags for different formats
-            # If it's not .tar.gz or .tar.xz, try a generic approach
-            cmd = [
-                "tar",
-                "--checkpoint=1",  # Show progress every 1 record
-                "--checkpoint-action=dot",  # Show dot for progress
-                "-xf",  # Extract tar (uncompressed, gz, or xz)
-                str(archive_path),
-                "-C",  # Extract to target directory
-                str(target_dir),
-            ]
+    def _extract_with_system_tar(self, target_dir: Path, archive_path: Path) -> None:
+        """Extract archive using system tar command."""
+        self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
 
-            result = subprocess.run(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
+        # Use tar command for general case as well, but with different flags for different formats
+        # If it's not .tar.gz or .tar.xz, try a generic approach
+        cmd = [
+            "tar",
+            "--checkpoint=1",  # Show progress every 1 record
+            "--checkpoint-action=dot",  # Show dot for progress
+            "-xf",  # Extract tar (uncompressed, gz, or xz)
+            str(archive_path),
+            "-C",  # Extract to target directory
+            str(target_dir),
+        ]
 
-            if result.returncode != 0:
-                # If tar command fails, try with tarfile as a fallback for the actual tar operations
-                # but handle the case where the file might not be a tar archive
-                if not self.is_tar_file(archive_path):
-                    # For non-tar files, we'd need a different extraction approach
-                    # Since the test expects the subprocess to work, let's handle it the way the test expects
-                    # For the test case with zip files, we'll need to adapt
-                    raise ExtractionError(
-                        f"Failed to extract archive {archive_path}: {result.stderr}"
-                    )
-                else:
-                    # Use tarfile as fallback for tar files
-                    self.extract_with_tarfile(
-                        archive_path, target_dir, show_progress, show_file_details
-                    )
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+
+        if result.returncode != 0:
+            # If tar command fails, try with tarfile as a fallback for the actual tar operations
+            # but handle the case where the file might not be a tar archive
+            if not self.is_tar_file(archive_path):
+                # For non-tar files, we'd need a different extraction approach
+                # Since the test expects the subprocess to work, let's handle it the way the test expects
+                # For the test case with zip files, we'll need to adapt
+                raise ExtractionError(
+                    f"Failed to extract archive {archive_path}: {result.stderr}"
+                )
+            else:
+                # Use tarfile as fallback for tar files
+                self.extract_with_tarfile(archive_path, target_dir, True, True)
 
     def is_tar_file(self, archive_path: Path) -> bool:
         """Check if the file is a tar file."""
@@ -1274,31 +1458,32 @@ class LinkManager:
 
     def get_link_names_for_fork(
         self, extract_dir: Path, fork: ForkName
-    ) -> Tuple[Path, Path, Path]:
+    ) -> tuple[Path, Path, Path]:
         """Get the symlink names for a specific fork."""
-        if fork == "Proton-EM":
-            main, fb1, fb2 = (
-                extract_dir / "Proton-EM",
-                extract_dir / "Proton-EM-Fallback",
-                extract_dir / "Proton-EM-Fallback2",
-            )
-        else:  # GE-Proton
-            main, fb1, fb2 = (
-                extract_dir / "GE-Proton",
-                extract_dir / "GE-Proton-Fallback",
-                extract_dir / "GE-Proton-Fallback2",
-            )
+        match fork:
+            case ForkName.PROTON_EM:
+                main, fb1, fb2 = (
+                    extract_dir / "Proton-EM",
+                    extract_dir / "Proton-EM-Fallback",
+                    extract_dir / "Proton-EM-Fallback2",
+                )
+            case ForkName.GE_PROTON:
+                main, fb1, fb2 = (
+                    extract_dir / "GE-Proton",
+                    extract_dir / "GE-Proton-Fallback",
+                    extract_dir / "GE-Proton-Fallback2",
+                )
         return main, fb1, fb2
 
     def find_tag_directory(
         self, extract_dir: Path, tag: str, fork: ForkName, is_manual_release: bool
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """Find the tag directory for manual releases."""
         if not is_manual_release:
             return None
 
         # Find the correct directory for the manual tag
-        if fork == "Proton-EM":
+        if fork == ForkName.PROTON_EM:
             proton_em_dir = extract_dir / f"proton-{tag}"
             if self.file_system_client.exists(
                 proton_em_dir
@@ -1313,7 +1498,7 @@ class LinkManager:
                 return tag_dir_path
 
         # For GE-Proton, try the tag as-is
-        if fork == "GE-Proton":
+        if fork == ForkName.GE_PROTON:
             tag_dir_path = extract_dir / tag
             if self.file_system_client.exists(
                 tag_dir_path
@@ -1324,22 +1509,22 @@ class LinkManager:
 
     def find_version_candidates(
         self, extract_dir: Path, fork: ForkName
-    ) -> List[Tuple[VersionTuple, Path]]:
+    ) -> list[tuple[VersionTuple, Path]]:
         """Find all directories that look like Proton builds and parse their versions."""
-        candidates: List[Tuple[VersionTuple, Path]] = []
+        candidates: list[tuple[VersionTuple, Path]] = []
         for entry in extract_dir.iterdir():
             if self.file_system_client.is_dir(entry) and not entry.is_symlink():
                 # For Proton-EM, strip the proton- prefix before parsing
-                if fork == "Proton-EM" and entry.name.startswith("proton-"):
+                if fork == ForkName.PROTON_EM and entry.name.startswith("proton-"):
                     tag_name = entry.name[7:]  # Remove "proton-" prefix
                 else:
                     tag_name = entry.name
 
                 # Skip directories that clearly belong to the other fork
-                if fork == "Proton-EM" and tag_name.startswith("GE-Proton"):
+                if fork == ForkName.PROTON_EM and tag_name.startswith("GE-Proton"):
                     # Skip GE-Proton directories when processing Proton-EM
                     continue
-                elif fork == "GE-Proton" and (
+                elif fork == ForkName.GE_PROTON and (
                     tag_name.startswith("EM-")
                     or (tag_name.startswith("proton-") and "EM-" in tag_name)
                 ):
@@ -1350,26 +1535,50 @@ class LinkManager:
                 # This prevents non-Proton directories like "LegacyRuntime" from being included
                 is_valid_proton_dir = False
 
-                if fork == "GE-Proton":
-                    # GE-Proton directories should match pattern: GE-Proton{major}-{minor}
-                    ge_pattern = r"^GE-Proton\d+-\d+$"
-                    if re.match(ge_pattern, entry.name):
-                        is_valid_proton_dir = True
-                elif fork == "Proton-EM":
-                    # Proton-EM directories should match pattern: proton-EM-{major}.{minor}-{patch}
-                    # or EM-{major}.{minor}-{patch}
-                    em_pattern1 = r"^proton-EM-\d+\.\d+-\d+$"
-                    em_pattern2 = r"^EM-\d+\.\d+-\d+$"
-                    if re.match(em_pattern1, entry.name) or re.match(
-                        em_pattern2, entry.name
-                    ):
-                        is_valid_proton_dir = True
+                match fork:
+                    case ForkName.GE_PROTON:
+                        # GE-Proton directories should match pattern: GE-Proton{major}-{minor}
+                        ge_pattern = r"^GE-Proton\d+-\d+$"
+                        if re.match(ge_pattern, entry.name):
+                            is_valid_proton_dir = True
+                    case ForkName.PROTON_EM:
+                        # Proton-EM directories should match pattern: proton-EM-{major}.{minor}-{patch}
+                        # or EM-{major}.{minor}-{patch}
+                        em_pattern1 = r"^proton-EM-\d+\.\d+-\d+$"
+                        em_pattern2 = r"^EM-\d+\.\d+-\d+$"
+                        if re.match(em_pattern1, entry.name) or re.match(
+                            em_pattern2, entry.name
+                        ):
+                            is_valid_proton_dir = True
 
                 # Only add to candidates if it's a valid Proton directory for this fork
                 if is_valid_proton_dir:
                     # use the directory name as tag for comparison
                     candidates.append((parse_version(tag_name, fork), entry))
         return candidates
+
+    def _create_symlink_specs(
+        self, main: Path, fb1: Path, fb2: Path, top_3: List[Tuple[VersionTuple, Path]]
+    ) -> List[SymlinkSpec]:
+        """Create SymlinkSpec objects for the top 3 versions."""
+        specs: List[SymlinkSpec] = []
+
+        if len(top_3) > 0:
+            specs.append(
+                SymlinkSpec(link_path=main, target_path=top_3[0][1], priority=0)
+            )
+
+        if len(top_3) > 1:
+            specs.append(
+                SymlinkSpec(link_path=fb1, target_path=top_3[1][1], priority=1)
+            )
+
+        if len(top_3) > 2:
+            specs.append(
+                SymlinkSpec(link_path=fb2, target_path=top_3[2][1], priority=2)
+            )
+
+        return specs
 
     def create_symlinks(
         self,
@@ -1379,16 +1588,13 @@ class LinkManager:
         top_3: List[Tuple[VersionTuple, Path]],
     ) -> None:
         """Create symlinks pointing to the top 3 versions."""
-        # Build the wants dictionary
-        wants: Dict[Path, Path] = {}
-        if len(top_3) > 0:
-            wants[main] = top_3[0][1]  # Main always gets the newest
+        # Create SymlinkSpec objects for all symlinks we want to create
+        wanted_specs = self._create_symlink_specs(main, fb1, fb2, top_3)
 
-        if len(top_3) > 1:
-            wants[fb1] = top_3[1][1]  # Fallback gets the second newest
-
-        if len(top_3) > 2:
-            wants[fb2] = top_3[2][1]  # Fallback2 gets the third newest
+        # Build a mapping from link path to target path
+        wants: Dict[Path, Path] = {
+            spec.link_path: spec.target_path for spec in wanted_specs
+        }
 
         # First pass: Remove unwanted symlinks and any real directories that conflict with wanted symlinks
         for link in (main, fb1, fb2):
@@ -1449,8 +1655,8 @@ class LinkManager:
                 continue  # Continue to the next link instead of failing the entire function
 
     def list_links(
-        self, extract_dir: Path, fork: ForkName = "GE-Proton"
-    ) -> Dict[str, Optional[str]]:
+        self, extract_dir: Path, fork: ForkName = ForkName.GE_PROTON
+    ) -> dict[str, str | None]:
         """
         List recognized symbolic links and their associated Proton fork folders.
 
@@ -1464,7 +1670,7 @@ class LinkManager:
         # Get symlink names for the fork
         main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
 
-        links_info: Dict[str, Optional[str]] = {}
+        links_info: dict[str, str | None] = {}
 
         # Check each link and get its target
         for link_name in [main, fb1, fb2]:
@@ -1481,7 +1687,7 @@ class LinkManager:
         return links_info
 
     def remove_release(
-        self, extract_dir: Path, tag: str, fork: ForkName = "GE-Proton"
+        self, extract_dir: Path, tag: str, fork: ForkName = ForkName.GE_PROTON
     ) -> bool:
         """
         Remove a specific Proton fork release folder and its associated symbolic links.
@@ -1498,7 +1704,7 @@ class LinkManager:
         release_path = extract_dir / tag
 
         # Also handle Proton-EM format with "proton-" prefix
-        if fork == "Proton-EM":
+        if fork == ForkName.PROTON_EM:
             proton_em_path = extract_dir / f"proton-{tag}"
             if not self.file_system_client.exists(
                 release_path
@@ -1515,7 +1721,7 @@ class LinkManager:
         main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
 
         # Identify links that point to this release directory
-        links_to_remove: List[Path] = []
+        links_to_remove: list[Path] = []
         for link in [main, fb1, fb2]:
             if self.file_system_client.exists(link) and link.is_symlink():
                 try:
@@ -1552,7 +1758,7 @@ class LinkManager:
         self,
         extract_dir: Path,
         tag: str,
-        fork: ForkName = "GE-Proton",
+        fork: ForkName = ForkName.GE_PROTON,
         is_manual_release: bool = False,
     ) -> None:
         """
@@ -1569,7 +1775,7 @@ class LinkManager:
         if is_manual_release and tag_dir is None:
             expected_path = (
                 extract_dir / tag
-                if fork == "GE-Proton"
+                if fork == ForkName.GE_PROTON
                 else extract_dir / f"proton-{tag}"
             )
             logger.warning(
@@ -1586,14 +1792,14 @@ class LinkManager:
 
         # Remove duplicate versions, preferring directories with standard naming over prefixed naming
         # Group candidates by parsed version
-        version_groups: Dict[VersionTuple, List[Path]] = {}
+        version_groups: dict[VersionTuple, list[Path]] = {}
         for parsed_version, directory_path in candidates:
             if parsed_version not in version_groups:
                 version_groups[parsed_version] = []
             version_groups[parsed_version].append(directory_path)
 
         # For each group of directories with the same version, prefer the canonical name
-        unique_candidates: List[Tuple[VersionTuple, Path]] = []
+        unique_candidates: list[tuple[VersionTuple, Path]] = []
         for parsed_version, directories in version_groups.items():
             # Prefer directories without "proton-" prefix for Proton-EM, or standard names in general
             # Sort by directory name to have a consistent preference - shorter/simpler names first
@@ -1618,7 +1824,7 @@ class LinkManager:
             tag_version = parse_version(tag, fork)
 
             # Check if this version is already in candidates to avoid duplicates
-            existing_versions: Set[VersionTuple] = {
+            existing_versions: set[VersionTuple] = {
                 candidate[0] for candidate in candidates
             }
             if tag_version not in existing_versions:
@@ -1628,11 +1834,11 @@ class LinkManager:
             candidates.sort(key=lambda t: t[0], reverse=True)
 
             # Take top 3
-            top_3: List[Tuple[VersionTuple, Path]] = candidates[:3]
+            top_3: list[tuple[VersionTuple, Path]] = candidates[:3]
         else:
             # sort descending by version (newest first)
             candidates.sort(key=lambda t: t[0], reverse=True)
-            top_3: List[Tuple[VersionTuple, Path]] = candidates[:3]
+            top_3: list[tuple[VersionTuple, Path]] = candidates[:3]
 
         # Create the symlinks
         self.create_symlinks(main, fb1, fb2, top_3)
@@ -1704,13 +1910,13 @@ class GitHubReleaseFetcher:
         return self.release_manager.list_recent_releases(repo)
 
     def list_links(
-        self, extract_dir: Path, fork: ForkName = "GE-Proton"
-    ) -> Dict[str, Optional[str]]:
+        self, extract_dir: Path, fork: ForkName = ForkName.GE_PROTON
+    ) -> dict[str, str | None]:
         """List recognized symbolic links and their associated Proton fork folders."""
         return self.link_manager.list_links(extract_dir, fork)
 
     def remove_release(
-        self, extract_dir: Path, tag: str, fork: ForkName = "GE-Proton"
+        self, extract_dir: Path, tag: str, fork: ForkName = ForkName.GE_PROTON
     ) -> bool:
         """Remove a specific Proton fork release folder and its associated symbolic links."""
         return self.link_manager.remove_release(extract_dir, tag, fork)
@@ -1720,8 +1926,8 @@ class GitHubReleaseFetcher:
         repo: str,
         output_dir: Path,
         extract_dir: Path,
-        release_tag: Optional[str] = None,
-        fork: ForkName = "GE-Proton",
+        release_tag: str | None = None,
+        fork: ForkName = ForkName.GE_PROTON,
         show_progress: bool = True,
         show_file_details: bool = True,
     ) -> Path:
@@ -1767,7 +1973,7 @@ class GitHubReleaseFetcher:
         directory_exists = False
         actual_directory = None
 
-        if fork == "Proton-EM":
+        if fork == ForkName.PROTON_EM:
             # For Proton-EM, check both possible names: tag name directly or with "proton-" prefix
             if unpacked_for_em.exists() and unpacked_for_em.is_dir():
                 directory_exists = True
@@ -1793,7 +1999,9 @@ class GitHubReleaseFetcher:
 
         # Download the asset
         archive_path = output_dir / asset_name
-        self.download_asset(repo, release_tag, asset_name, archive_path)
+        self.asset_downloader.download_asset(
+            repo, release_tag, asset_name, archive_path, self.release_manager
+        )
 
         # Check if unpacked directory exists after download (might have been created by another process)
         if unpacked.exists() and unpacked.is_dir():
@@ -1807,7 +2015,7 @@ class GitHubReleaseFetcher:
             return extract_dir
 
         # Extract the archive
-        self.extract_archive(
+        self.archive_extractor.extract_archive(
             archive_path, extract_dir, show_progress, show_file_details
         )
 
@@ -1825,144 +2033,6 @@ class GitHubReleaseFetcher:
         )
 
         return extract_dir
-
-    def fetch_latest_tag(self, repo: str) -> str:
-        """Get the latest release tag by following the redirect from /releases/latest."""
-        return self.release_manager.fetch_latest_tag(repo)
-
-    def find_asset_by_name(
-        self, repo: str, tag: str, fork: ForkName = "GE-Proton"
-    ) -> str:
-        """Find the Proton asset in a GitHub release using the GitHub API first."""
-        return self.release_manager.find_asset_by_name(repo, tag, fork)
-
-    def get_remote_asset_size(self, repo: str, tag: str, asset_name: str) -> int:
-        """Get the size of a remote asset using HEAD request."""
-        return self.release_manager.get_remote_asset_size(repo, tag, asset_name)
-
-    def download_asset(
-        self, repo: str, tag: str, asset_name: str, out_path: Path
-    ) -> Path:
-        """Download a specific asset from a GitHub release with progress bar."""
-        return self.asset_downloader.download_asset(
-            repo, tag, asset_name, out_path, self.release_manager
-        )
-
-    def extract_archive(
-        self,
-        archive_path: Path,
-        target_dir: Path,
-        show_progress: bool = True,
-        show_file_details: bool = True,
-    ) -> None:
-        """Extract archive to the target directory with progress bar."""
-        return self.archive_extractor.extract_archive(
-            archive_path, target_dir, show_progress, show_file_details
-        )
-
-    def get_link_names_for_fork(
-        self, extract_dir: Path, fork: ForkName
-    ) -> Tuple[Path, Path, Path]:
-        """Get the symlink names for a specific fork."""
-        return self.link_manager.get_link_names_for_fork(extract_dir, fork)
-
-    def _get_link_names_for_fork(
-        self, extract_dir: Path, fork: ForkName
-    ) -> Tuple[Path, Path, Path]:
-        """Get the symlink names for a specific fork."""
-        return self.link_manager.get_link_names_for_fork(extract_dir, fork)
-
-    def find_tag_directory(
-        self, extract_dir: Path, tag: str, fork: ForkName, is_manual_release: bool
-    ) -> Optional[Path]:
-        """Find the tag directory for manual releases."""
-        return self.link_manager.find_tag_directory(
-            extract_dir, tag, fork, is_manual_release
-        )
-
-    def _find_tag_directory(
-        self, extract_dir: Path, tag: str, fork: ForkName, is_manual_release: bool
-    ) -> Optional[Path]:
-        """Find the tag directory for manual releases."""
-        return self.link_manager.find_tag_directory(
-            extract_dir, tag, fork, is_manual_release
-        )
-
-    def find_version_candidates(
-        self, extract_dir: Path, fork: ForkName
-    ) -> List[Tuple[VersionTuple, Path]]:
-        """Find all directories that look like Proton builds and parse their versions."""
-        return self.link_manager.find_version_candidates(extract_dir, fork)
-
-    def _find_version_candidates(
-        self, extract_dir: Path, fork: ForkName
-    ) -> List[Tuple[VersionTuple, Path]]:
-        """Find all directories that look like Proton builds and parse their versions."""
-        return self.link_manager.find_version_candidates(extract_dir, fork)
-
-    def create_symlinks(
-        self,
-        main: Path,
-        fb1: Path,
-        fb2: Path,
-        top_3: List[Tuple[VersionTuple, Path]],
-    ) -> None:
-        """Create symlinks pointing to the top 3 versions."""
-        return self.link_manager.create_symlinks(main, fb1, fb2, top_3)
-
-    def _create_symlinks(
-        self,
-        main: Path,
-        fb1: Path,
-        fb2: Path,
-        top_3: List[Tuple[VersionTuple, Path]],
-    ) -> None:
-        """Internal method to create symlinks (private wrapper around link_manager)."""
-        return self.link_manager.create_symlinks(main, fb1, fb2, top_3)
-
-    def manage_proton_links(
-        self,
-        extract_dir: Path,
-        tag: str,
-        fork: ForkName = "GE-Proton",
-        is_manual_release: bool = False,
-    ) -> None:
-        """Ensure the three symlinks always point to the three *newest* extracted versions."""
-        return self.link_manager.manage_proton_links(
-            extract_dir, tag, fork, is_manual_release
-        )
-
-    def _manage_proton_links(
-        self,
-        extract_dir: Path,
-        tag: str,
-        fork: ForkName = "GE-Proton",
-        is_manual_release: bool = False,
-    ) -> None:
-        """Internal method to manage proton links (private wrapper around link_manager)."""
-        return self.link_manager.manage_proton_links(
-            extract_dir, tag, fork, is_manual_release
-        )
-
-    def extract_gz_archive(self, archive_path: Path, target_dir: Path) -> None:
-        """Extract .tar.gz archive using system tar command."""
-        return self.archive_extractor.extract_gz_archive(archive_path, target_dir)
-
-    def _get_archive_info(self, archive_path: Path) -> Tuple[int, int]:
-        """Get information about the archive without fully extracting it."""
-        return self.archive_extractor.get_archive_info(archive_path)
-
-    def _extract_with_tarfile(
-        self,
-        archive_path: Path,
-        target_dir: Path,
-        show_progress: bool = True,
-        show_file_details: bool = True,
-    ) -> None:
-        """Extract archive using tarfile library."""
-        return self.archive_extractor.extract_with_tarfile(
-            archive_path, target_dir, show_progress, show_file_details
-        )
 
 
 def main() -> None:
@@ -1991,8 +2061,8 @@ def main() -> None:
         "--fork",
         "-f",
         default=argparse.SUPPRESS,  # Don't set a default, check for attribute existence
-        choices=list(FORKS.keys()),
-        help=f"ProtonGE fork to download (default: {DEFAULT_FORK}, available: {', '.join(FORKS.keys())})",
+        choices=[fork.value for fork in FORKS.keys()],
+        help=f"ProtonGE fork to download (default: {DEFAULT_FORK.value}, available: {', '.join([fork.value for fork in FORKS.keys()])})",
     )
     parser.add_argument(
         "--list",
@@ -2072,13 +2142,22 @@ def main() -> None:
             if not hasattr(args, "fork") or args.fork is None:
                 forks_to_check = list(FORKS.keys())
             else:
-                # Validate and narrow the type
-                assert args.fork in FORKS, f"Invalid fork: {args.fork}"
-                forks_to_check: List[ForkName] = [args.fork]
+                # Validate and narrow the type - convert string to ForkName if needed
+                if isinstance(args.fork, str):
+                    # Convert string to ForkName enum
+                    try:
+                        fork_enum = ForkName(args.fork)
+                        forks_to_check: list[ForkName] = [fork_enum]
+                    except ValueError:
+                        print(f"Error: Invalid fork '{args.fork}'")
+                        raise SystemExit(1)
+                else:
+                    # It's already a ForkName enum
+                    forks_to_check: list[ForkName] = [args.fork]
 
             for fork in forks_to_check:
                 # fork is now properly typed as ForkName
-                links_info = fetcher.list_links(extract_dir, fork)
+                links_info = fetcher.link_manager.list_links(extract_dir, fork)
                 print(f"Links for {fork}:")
                 for link_name, target_path in links_info.items():
                     if target_path:
@@ -2093,20 +2172,26 @@ def main() -> None:
         if not hasattr(args, "fork"):
             args.fork = DEFAULT_FORK
 
-        # Get the repo based on selected fork
+        # Get the repo based on selected fork - handle string-to-enum conversion
         if hasattr(args, "fork") and args.fork is not None:
-            # Validate and narrow the type
-            assert args.fork in FORKS, f"Invalid fork: {args.fork}"
-            target_fork: ForkName = args.fork
+            if isinstance(args.fork, str):
+                # Convert string to ForkName enum
+                try:
+                    target_fork: ForkName = ForkName(args.fork)
+                except ValueError:
+                    print(f"Error: Invalid fork '{args.fork}'")
+                    raise SystemExit(1)
+            else:
+                target_fork: ForkName = args.fork
         else:
             target_fork = DEFAULT_FORK
-        repo = FORKS[target_fork]["repo"]
+        repo = FORKS[target_fork].repo
         logger.info(f"Using fork: {target_fork} ({repo})")
 
         # Handle --list flag
         if args.list:
             logger.info("Fetching recent releases...")
-            tags = fetcher.list_recent_releases(repo)
+            tags = fetcher.release_manager.list_recent_releases(repo)
             print("Recent releases:")
             for tag in tags:
                 print(f"  {tag}")
@@ -2117,11 +2202,19 @@ def main() -> None:
         if args.rm:
             # Use the provided fork or default to DEFAULT_FORK
             if hasattr(args, "fork") and args.fork is not None:
-                rm_fork = args.fork
+                if isinstance(args.fork, str):
+                    # Convert string to ForkName enum
+                    try:
+                        rm_fork: ForkName = ForkName(args.fork)
+                    except ValueError:
+                        print(f"Error: Invalid fork '{args.fork}'")
+                        raise SystemExit(1)
+                else:
+                    rm_fork: ForkName = args.fork
             else:
                 rm_fork = DEFAULT_FORK
             logger.info(f"Removing release: {args.rm}")
-            fetcher.remove_release(extract_dir, args.rm, rm_fork)
+            fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
             print("Success")
             return
 
@@ -2129,7 +2222,15 @@ def main() -> None:
         if not hasattr(args, "fork") or args.fork is None:
             actual_fork = DEFAULT_FORK
         else:
-            actual_fork = args.fork
+            if isinstance(args.fork, str):
+                # Convert string to ForkName enum
+                try:
+                    actual_fork: ForkName = ForkName(args.fork)
+                except ValueError:
+                    print(f"Error: Invalid fork '{args.fork}'")
+                    raise SystemExit(1)
+            else:
+                actual_fork: ForkName = args.fork
 
         fetcher.fetch_and_extract(
             repo,

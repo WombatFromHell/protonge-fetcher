@@ -11,6 +11,7 @@ import pytest
 from protonfetcher import (  # noqa: E402
     DEFAULT_FORK,
     FORKS,
+    ForkName,
     GitHubReleaseFetcher,
     ProtonFetcherError,
 )
@@ -83,8 +84,8 @@ class TestLinkManagementIntegration:
         )
 
         # Add new version that should become main, pushing others down
-        fetcher._manage_proton_links(
-            extract_dir, new_version, "GE-Proton", is_manual_release=True
+        fetcher.link_manager.manage_proton_links(
+            extract_dir, new_version, ForkName.GE_PROTON, is_manual_release=True
         )
 
         # Verify that the create_symlinks method was called with correct parameters
@@ -137,14 +138,17 @@ class TestLinkManagementIntegration:
 
                 return [
                     (
-                        parse_version(new_version, fork="Proton-EM"),
+                        parse_version(new_version, fork=ForkName.PROTON_EM),
                         extract_dir / new_version,
                     ),
                     (
-                        parse_version(old_fallback, fork="Proton-EM"),
+                        parse_version(old_fallback, fork=ForkName.PROTON_EM),
                         extract_dir / old_fallback,
                     ),
-                    (parse_version(old_main, fork="Proton-EM"), extract_dir / old_main),
+                    (
+                        parse_version(old_main, fork=ForkName.PROTON_EM),
+                        extract_dir / old_main,
+                    ),
                 ]
             return []
 
@@ -155,8 +159,8 @@ class TestLinkManagementIntegration:
         )
 
         # Add new version (tag without prefix) that should become main
-        fetcher._manage_proton_links(
-            extract_dir, "EM-10.0-30", "Proton-EM", is_manual_release=True
+        fetcher.link_manager.manage_proton_links(
+            extract_dir, "EM-10.0-30", ForkName.PROTON_EM, is_manual_release=True
         )
 
         # Verify that the create_symlinks method was called with correct parameters
@@ -224,8 +228,8 @@ class TestLinkManagementIntegration:
         )
 
         # Add new newest version
-        fetcher._manage_proton_links(
-            extract_dir, "GE-Proton10-2", "GE-Proton", is_manual_release=True
+        fetcher.link_manager.manage_proton_links(
+            extract_dir, "GE-Proton10-2", ForkName.GE_PROTON, is_manual_release=True
         )
 
         # Should rotate: newest becomes main, others shift down
@@ -234,8 +238,8 @@ class TestLinkManagementIntegration:
     @pytest.mark.parametrize(
         "fork,version_pattern",
         [
-            ("GE-Proton", "GE-Proton{major}-{minor}"),
-            ("Proton-EM", "proton-EM-{major}.{minor}-{patch}"),
+            (ForkName.GE_PROTON, "GE-Proton{major}-{minor}"),
+            (ForkName.PROTON_EM, "proton-EM-{major}.{minor}-{patch}"),
         ],
     )
     def test_manage_links_comprehensive_forks(
@@ -256,7 +260,7 @@ class TestLinkManagementIntegration:
         extract_dir.mkdir()
 
         # Create version directories based on the fork - need 3 for comprehensive testing
-        if fork == "GE-Proton":
+        if fork == ForkName.GE_PROTON:
             old_main = "GE-Proton8-20"
             old_fallback = (
                 "GE-Proton9-10"  # older than new_version but newer than old_main
@@ -274,7 +278,7 @@ class TestLinkManagementIntegration:
         (extract_dir / new_version).mkdir()
 
         # Create the three expected symlink paths for the fork
-        if fork == "GE-Proton":
+        if fork == ForkName.GE_PROTON:
             main_link = extract_dir / "GE-Proton"
             fallback_link = extract_dir / "GE-Proton-Fallback"
             _fallback2_link = extract_dir / "GE-Proton-Fallback2"
@@ -300,7 +304,7 @@ class TestLinkManagementIntegration:
         def mock_find_candidates(directory, fork_param):
             from protonfetcher import parse_version
 
-            if fork_param == "GE-Proton":
+            if fork_param == ForkName.GE_PROTON:
                 return [
                     (parse_version(new_version), extract_dir / new_version),
                     (parse_version(old_fallback), extract_dir / old_fallback),
@@ -309,14 +313,17 @@ class TestLinkManagementIntegration:
             else:  # Proton-EM
                 return [
                     (
-                        parse_version(new_version, fork="Proton-EM"),
+                        parse_version(new_version, fork=ForkName.PROTON_EM),
                         extract_dir / new_version,
                     ),
                     (
-                        parse_version(old_fallback, fork="Proton-EM"),
+                        parse_version(old_fallback, fork=ForkName.PROTON_EM),
                         extract_dir / old_fallback,
                     ),
-                    (parse_version(old_main, fork="Proton-EM"), extract_dir / old_main),
+                    (
+                        parse_version(old_main, fork=ForkName.PROTON_EM),
+                        extract_dir / old_main,
+                    ),
                 ]
 
         mocker.patch.object(
@@ -328,10 +335,12 @@ class TestLinkManagementIntegration:
         # Add new version that should become main, pushing others down
         # Use the tag without the prefix for Proton-EM (EM-10.0-30 instead of proton-EM-10.0-30)
         tag_for_call = (
-            new_version.replace("proton-", "") if fork == "Proton-EM" else new_version
+            new_version.replace("proton-", "")
+            if fork == ForkName.PROTON_EM
+            else new_version
         )
 
-        fetcher._manage_proton_links(
+        fetcher.link_manager.manage_proton_links(
             extract_dir, tag_for_call, fork, is_manual_release=True
         )
 
@@ -384,7 +393,9 @@ class TestDownloadWorkflowIntegration:
             fetcher.asset_downloader, "curl_download"
         )
 
-        result = fetcher.download_asset(repo, tag, asset_name, output_path)
+        result = fetcher.asset_downloader.download_asset(
+            repo, tag, asset_name, output_path, fetcher.release_manager
+        )
 
         # Should return early without downloading
         assert result == output_path
@@ -432,7 +443,9 @@ class TestDownloadWorkflowIntegration:
         # Mock open for download
         _mock_open = mocker.patch("builtins.open", mocker.mock_open())
 
-        fetcher.download_asset(repo, tag, asset_name, output_path)
+        fetcher.asset_downloader.download_asset(
+            repo, tag, asset_name, output_path, fetcher.release_manager
+        )
 
         # Should proceed with download because sizes are different
         assert mock_spinner_download.called
@@ -476,7 +489,9 @@ class TestDownloadWorkflowIntegration:
             fetcher.release_manager, "get_remote_asset_size", return_value=1024
         )
 
-        fetcher.download_asset(repo, tag, asset_name, output_path)
+        fetcher.asset_downloader.download_asset(
+            repo, tag, asset_name, output_path, fetcher.release_manager
+        )
 
         # Should have called curl download as fallback
         mock_curl_download.assert_called_once()
@@ -514,7 +529,9 @@ class TestDownloadWorkflowIntegration:
         mocker.patch("urllib.request.urlopen", return_value=mock_response)
         mocker.patch("builtins.open", mocker.mock_open())
 
-        fetcher.download_asset(repo, tag, asset_name, nested_path)
+        fetcher.asset_downloader.download_asset(
+            repo, tag, asset_name, nested_path, fetcher.release_manager
+        )
 
         # Should have called mkdir with appropriate parameters
         mock_fs.mkdir.assert_called_with(
@@ -564,10 +581,12 @@ class TestExtractionWorkflowIntegration:
         mocker.patch("protonfetcher.Spinner", return_value=mock_spinner)
 
         # Mock _get_archive_info
-        mocker.patch.object(fetcher, "_get_archive_info", return_value=(2, 300))
+        mocker.patch.object(
+            fetcher.archive_extractor, "get_archive_info", return_value=(2, 300)
+        )
 
         # Should dispatch to extract_with_tarfile for .tar.gz
-        fetcher.extract_archive(archive, extract_dir)
+        fetcher.archive_extractor.extract_archive(archive, extract_dir, True, True)
 
         # Verify that tarfile operations were called
         assert mock_tar.__enter__.called
@@ -612,10 +631,12 @@ class TestExtractionWorkflowIntegration:
         mocker.patch("protonfetcher.Spinner", return_value=mock_spinner)
 
         # Mock _get_archive_info
-        mocker.patch.object(fetcher, "_get_archive_info", return_value=(2, 300))
+        mocker.patch.object(
+            fetcher.archive_extractor, "get_archive_info", return_value=(2, 300)
+        )
 
         # Should dispatch to extract_with_tarfile for .tar.xz
-        fetcher.extract_archive(archive, extract_dir)
+        fetcher.archive_extractor.extract_archive(archive, extract_dir, True, True)
 
         # Verify that tarfile operations were called
         assert mock_tar.__enter__.called
@@ -657,10 +678,14 @@ class TestExtractionWorkflowIntegration:
         mocker.patch("protonfetcher.Spinner", return_value=mock_spinner)
 
         # Mock _get_archive_info
-        mocker.patch.object(fetcher, "_get_archive_info", return_value=(1, 1024))
+        mocker.patch.object(
+            fetcher.archive_extractor, "get_archive_info", return_value=(1, 1024)
+        )
 
         # Call with progress enabled
-        fetcher.extract_archive(archive, extract_dir, show_progress=True)
+        fetcher.archive_extractor.extract_archive(
+            archive, extract_dir, show_progress=True, show_file_details=True
+        )
 
         # Verify the extraction completed successfully
         assert extract_dir.exists()
@@ -715,9 +740,9 @@ class TestCompleteWorkflowIntegration:
         archive_path.write_bytes(b"mock archive")
 
         mock_download = mocker.patch.object(
-            fetcher, "download_asset", return_value=archive_path
+            fetcher.asset_downloader, "download_asset", return_value=archive_path
         )
-        mock_extract = mocker.patch.object(fetcher, "extract_archive")
+        mock_extract = mocker.patch.object(fetcher.archive_extractor, "extract_archive")
         mock_manage_links = mocker.patch.object(
             fetcher.link_manager, "manage_proton_links"
         )
@@ -777,9 +802,9 @@ class TestCompleteWorkflowIntegration:
         archive_path.write_bytes(b"mock archive")
 
         mock_download = mocker.patch.object(
-            fetcher, "download_asset", return_value=archive_path
+            fetcher.asset_downloader, "download_asset", return_value=archive_path
         )
-        mock_extract = mocker.patch.object(fetcher, "extract_archive")
+        mock_extract = mocker.patch.object(fetcher.archive_extractor, "extract_archive")
         mock_manage_links = mocker.patch.object(
             fetcher.link_manager, "manage_proton_links"
         )
@@ -870,9 +895,11 @@ class TestCompleteWorkflowIntegration:
             archive_path.write_bytes(b"mock archive")
 
             mock_download = mocker.patch.object(
-                fetcher, "download_asset", return_value=archive_path
+                fetcher.asset_downloader, "download_asset", return_value=archive_path
             )
-            mock_extract = mocker.patch.object(fetcher, "extract_archive")
+            mock_extract = mocker.patch.object(
+                fetcher.archive_extractor, "extract_archive"
+            )
             mock_manage_links = mocker.patch.object(
                 fetcher.link_manager, "manage_proton_links"
             )
@@ -918,7 +945,9 @@ class TestFindAssetByName:
         mock_network_client.get.return_value = mock_result
         fetcher.release_manager.network_client = mock_network_client
 
-        asset_name = fetcher.find_asset_by_name(repo, tag, "GE-Proton")
+        asset_name = fetcher.release_manager.find_asset_by_name(
+            repo, tag, ForkName.GE_PROTON
+        )
 
         assert asset_name == "GE-Proton8-25.tar.gz"
 
@@ -946,7 +975,9 @@ class TestFindAssetByName:
         mock_network_client.get.return_value = mock_result
         fetcher.release_manager.network_client = mock_network_client
 
-        asset_name = fetcher.find_asset_by_name(repo, tag, "GE-Proton")
+        asset_name = fetcher.release_manager.find_asset_by_name(
+            repo, tag, ForkName.GE_PROTON
+        )
 
         # Should return first available asset since no matching extensions found
         assert asset_name == "info.txt"
@@ -973,7 +1004,9 @@ class TestFindAssetByName:
         mock_network_client.get.side_effect = [api_result, html_result]
         fetcher.release_manager.network_client = mock_network_client
 
-        asset_name = fetcher.find_asset_by_name(repo, tag, "GE-Proton")
+        asset_name = fetcher.release_manager.find_asset_by_name(
+            repo, tag, ForkName.GE_PROTON
+        )
 
         # Should fall back to HTML parsing and find the asset
         assert asset_name == "GE-Proton8-25.tar.gz"
@@ -998,7 +1031,7 @@ class TestFindAssetByName:
         fetcher.release_manager.network_client = mock_network_client
 
         with pytest.raises(ProtonFetcherError):
-            fetcher.find_asset_by_name(repo, tag, "GE-Proton")
+            fetcher.release_manager.find_asset_by_name(repo, tag, ForkName.GE_PROTON)
 
 
 class TestGetRemoteAssetSize:
@@ -1022,7 +1055,7 @@ class TestGetRemoteAssetSize:
         mock_network_client.head.return_value = mock_result
         fetcher.release_manager.network_client = mock_network_client
 
-        size = fetcher.get_remote_asset_size(repo, tag, asset_name)
+        size = fetcher.release_manager.get_remote_asset_size(repo, tag, asset_name)
         assert size == 1024
 
     def test_get_remote_asset_size_follows_redirects_to_get_size(
@@ -1051,7 +1084,7 @@ class TestGetRemoteAssetSize:
         mock_network_client.head.side_effect = [redirect_result, content_result]
         fetcher.release_manager.network_client = mock_network_client
 
-        size = fetcher.get_remote_asset_size(repo, tag, asset_name)
+        size = fetcher.release_manager.get_remote_asset_size(repo, tag, asset_name)
         assert size == 2048
 
     def test_get_remote_asset_size_404_error_raises_fetch_error(
@@ -1070,7 +1103,7 @@ class TestGetRemoteAssetSize:
         fetcher.release_manager.network_client = mock_network_client
 
         with pytest.raises(ProtonFetcherError, match="Remote asset not found"):
-            fetcher.get_remote_asset_size(repo, tag, asset_name)
+            fetcher.release_manager.get_remote_asset_size(repo, tag, asset_name)
 
 
 class TestListLinksAndRemoveRelease:
@@ -1099,7 +1132,7 @@ class TestListLinksAndRemoveRelease:
         mock_fs.resolve.return_value = target_dir
 
         # Call the method
-        result = fetcher.list_links(extract_dir, "GE-Proton")
+        result = fetcher.link_manager.list_links(extract_dir, ForkName.GE_PROTON)
 
         # Verify the structure and values of the result
         assert "GE-Proton" in result
@@ -1129,7 +1162,7 @@ class TestListLinksAndRemoveRelease:
         mock_fs.resolve.return_value = target_dir
 
         # Call the method
-        result = fetcher.list_links(extract_dir, "Proton-EM")
+        result = fetcher.link_manager.list_links(extract_dir, ForkName.PROTON_EM)
 
         # Verify the structure and values of the result
         assert "Proton-EM" in result
@@ -1139,8 +1172,8 @@ class TestListLinksAndRemoveRelease:
     @pytest.mark.parametrize(
         "fork,release_dir_name,tag_name",
         [
-            ("GE-Proton", "GE-Proton10-15", "GE-Proton10-15"),
-            ("Proton-EM", "proton-EM-10.0-30", "EM-10.0-30"),
+            (ForkName.GE_PROTON, "GE-Proton10-15", "GE-Proton10-15"),
+            (ForkName.PROTON_EM, "proton-EM-10.0-30", "EM-10.0-30"),
         ],
     )
     def test_remove_release_success_integration(
@@ -1149,9 +1182,9 @@ class TestListLinksAndRemoveRelease:
         mock_network_client,
         mock_filesystem_client,
         tmp_path,
-        fork,
-        release_dir_name,
-        tag_name,
+        fork: ForkName,
+        release_dir_name: str,
+        tag_name: str,
     ):
         """Test remove_release method integration with real filesystem for both Proton forks."""
         fetcher = GitHubReleaseFetcher(
@@ -1164,7 +1197,7 @@ class TestListLinksAndRemoveRelease:
         # Create a release directory to remove
         # For GE-Proton: create directory as tag_name (e.g. GE-Proton10-15)
         # For Proton-EM: create directory as proton-{tag_name} (e.g. proton-EM-10.0-30)
-        if fork == "Proton-EM":
+        if fork == ForkName.PROTON_EM:
             release_dir = extract_dir / f"proton-{tag_name}"  # proton-EM-10.0-30
         else:  # GE-Proton
             release_dir = extract_dir / tag_name  # GE-Proton10-15
@@ -1177,7 +1210,7 @@ class TestListLinksAndRemoveRelease:
         def mock_exists(path):
             path_str = str(path)
             # Define the main path we created for the test
-            if fork == "Proton-EM":
+            if fork == ForkName.PROTON_EM:
                 expected_main_path = str(extract_dir / f"proton-{tag_name}")
                 initial_path = str(extract_dir / tag_name)
 
@@ -1220,12 +1253,8 @@ class TestListLinksAndRemoveRelease:
         # Mock the link-related path operations to return real Path objects
         # Since the implementation calls path.is_symlink() and path.resolve() directly on Path objects,
         main_link_name = "GE-Proton" if fork == "GE-Proton" else "Proton-EM"
-        fallback_link_name = (
-            f"{'GE-Proton' if fork == 'GE-Proton' else 'Proton-EM'}-Fallback"
-        )
-        fallback2_link_name = (
-            f"{'GE-Proton' if fork == 'GE-Proton' else 'Proton-EM'}-Fallback2"
-        )
+        fallback_link_name = f"{ForkName.GE_PROTON if fork == ForkName.GE_PROTON else ForkName.PROTON_EM}-Fallback"
+        fallback2_link_name = f"{ForkName.GE_PROTON if fork == ForkName.GE_PROTON else ForkName.PROTON_EM}-Fallback2"
 
         main_link = extract_dir / main_link_name
         fallback_link = extract_dir / fallback_link_name
@@ -1244,7 +1273,7 @@ class TestListLinksAndRemoveRelease:
         )
 
         # Call the remove method
-        result = fetcher.remove_release(extract_dir, tag_name, fork)
+        result = fetcher.link_manager.remove_release(extract_dir, tag_name, fork)
 
         # Verify the return value
         assert result is True
@@ -1288,7 +1317,9 @@ class TestListLinksAndRemoveRelease:
         with pytest.raises(
             ProtonFetcherError, match="Release directory does not exist"
         ):
-            fetcher.remove_release(extract_dir, non_existent_tag, "GE-Proton")
+            fetcher.link_manager.remove_release(
+                extract_dir, non_existent_tag, ForkName.GE_PROTON
+            )
 
 
 class TestIntegrationWithFixtures:
@@ -1312,10 +1343,12 @@ class TestIntegrationWithFixtures:
         version_dir.mkdir()
 
         # Call link management
-        fetcher.manage_proton_links(extract_dir, tag, fork, is_manual_release=True)
+        fetcher.link_manager.manage_proton_links(
+            extract_dir, tag, fork, is_manual_release=True
+        )
 
         # Verify the links were created appropriately
-        main_link, fb1_link, fb2_link = fetcher.get_link_names_for_fork(
+        main_link, fb1_link, fb2_link = fetcher.link_manager.get_link_names_for_fork(
             extract_dir, fork
         )
 
