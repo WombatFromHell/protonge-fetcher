@@ -1,0 +1,45 @@
+PY = python3
+SRC_DIR = src
+BUILD_DIR = dist
+STAGING = .build
+ENTRY = src.entry:main
+ARTIFACT = protonfetcher.pyz
+OUT = $(BUILD_DIR)/$(ARTIFACT)
+
+build:
+	mkdir -p $(BUILD_DIR)
+	rm -rf $(STAGING)
+	mkdir -p $(STAGING)
+	cp -r $(SRC_DIR) $(STAGING)/
+	$(PY) -m zipapp $(STAGING) -o $(OUT) -m $(ENTRY) -p "/usr/bin/env python3"
+	chmod +x $(OUT)
+
+install: $(OUT)
+	@if [ -d "$$HOME/.local/bin/scripts/" ]; then \
+		INSTALL_DIR="$$HOME/.local/bin/scripts"; \
+	else \
+		mkdir -p "$$HOME/.local/bin"; \
+		INSTALL_DIR="$$HOME/.local/bin"; \
+	fi; \
+	cp $(OUT) "$$INSTALL_DIR/$(ARTIFACT)"; \
+	chmod +x "$$INSTALL_DIR/$(ARTIFACT)"; \
+	ln -sf "$$INSTALL_DIR/$(ARTIFACT)" "$$HOME/.local/bin/protonfetcher"; \
+	echo "Installed to $$INSTALL_DIR/$(ARTIFACT)"
+
+test:
+	uv run pytest -xvs --cov=src --cov-report=term-missing
+
+clean:
+	rm -rf \
+		$(STAGING) \
+		$(BUILD_DIR) \
+		.pytest_cache \
+		.ruff_cache \
+		./src/__pycache__ \
+		./src/protonfetcher/__pycache__ \
+		./tests/__pycache__ \
+		.coverage
+
+all: clean build install
+
+.PHONY: all clean install
