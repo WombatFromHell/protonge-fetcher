@@ -2,16 +2,10 @@
 Integration tests for download workflows in protonfetcher.py
 """
 
-from pathlib import Path
-
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
-    ForkName,
-    NetworkError,
-    ProtonFetcherError,
-)
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import NetworkError, ProtonFetcherError
 
 
 class TestDownloadWorkflow:
@@ -19,7 +13,7 @@ class TestDownloadWorkflow:
 
     def test_download_workflow_success(self, mocker, tmp_path):
         """Test complete download workflow with successful execution."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -55,7 +49,7 @@ class TestDownloadWorkflow:
         # When download_asset is called, it should internally call get_remote_asset_size
         def mock_download_asset(repo, tag, asset_name, out_path, release_manager):
             # Simulate the internal logic that would call get_remote_asset_size
-            remote_size = release_manager.get_remote_asset_size(repo, tag, asset_name)
+            release_manager.get_remote_asset_size(repo, tag, asset_name)
             return tmp_path / "Downloads" / "GE-Proton10-20.tar.gz"
 
         mock_asset_downloader.download_asset.side_effect = mock_download_asset
@@ -87,7 +81,7 @@ class TestDownloadWorkflow:
 
     def test_download_workflow_network_error(self, mocker, tmp_path):
         """Test download workflow with network error during tag fetching."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -121,7 +115,7 @@ class TestDownloadWorkflow:
 
     def test_download_workflow_asset_not_found(self, mocker, tmp_path):
         """Test download workflow when asset is not found."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -167,7 +161,7 @@ class TestDownloadWorkflow:
         self, mocker, tmp_path, fork, repo, tag
     ):
         """Parametrized test for download workflow with different forks."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -230,7 +224,7 @@ class TestDownloadWorkflow:
 
     def test_download_workflow_with_manual_release(self, mocker, tmp_path):
         """Test download workflow with manual release tag specified."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -294,7 +288,7 @@ class TestDownloadWorkflow:
 
     def test_download_workflow_caching_behavior(self, mocker, tmp_path):
         """Test download workflow with caching behavior."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -356,7 +350,7 @@ class TestDownloadWorkflow:
         # When download_asset is called, it should internally call get_remote_asset_size
         def mock_download_asset(repo, tag, asset_name, out_path, release_manager):
             # Simulate the internal logic that would call get_remote_asset_size
-            remote_size = release_manager.get_remote_asset_size(repo, tag, asset_name)
+            release_manager.get_remote_asset_size(repo, tag, asset_name)
             return tmp_path / "Downloads" / "GE-Proton10-20.tar.gz"
 
         mock_asset_downloader.download_asset.side_effect = mock_download_asset

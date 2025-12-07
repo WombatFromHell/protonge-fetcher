@@ -4,9 +4,8 @@ Unit tests for utility functions in protonfetcher.py
 
 import pytest
 
-from protonfetcher import (
-    ForkName,
-    VersionTuple,
+from protonfetcher.common import ForkName, VersionTuple
+from protonfetcher.utils import (
     compare_versions,
     format_bytes,
     get_proton_asset_name,

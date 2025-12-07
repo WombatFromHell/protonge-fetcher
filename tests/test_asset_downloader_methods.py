@@ -6,13 +6,11 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 # Add the project directory to the Python path
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-from protonfetcher import AssetDownloader, ForkName
+from protonfetcher.asset_downloader import AssetDownloader  # noqa: E402
 
 
 class TestAssetDownloader:
@@ -41,7 +39,7 @@ class TestAssetDownloader:
         mock_fs.exists.return_value = False  # File doesn't exist initially
 
         # Mock the spinner progress display
-        mock_spinner_cls = mocker.patch("protonfetcher.Spinner")
+        mock_spinner_cls = mocker.patch("protonfetcher.spinner.Spinner")
         mock_spinner_instance = MagicMock()
         mock_spinner_cls.return_value = mock_spinner_instance
 

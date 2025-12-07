@@ -5,13 +5,11 @@ Tests for Spinner iteration with total in protonfetcher.py
 import sys
 from pathlib import Path
 
-import pytest
-
 # Add the project directory to the Python path
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-from protonfetcher import Spinner
+from protonfetcher.spinner import Spinner  # noqa: E402
 
 
 class TestSpinnerIteration:

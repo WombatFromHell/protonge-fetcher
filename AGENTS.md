@@ -15,13 +15,10 @@ This document establishes guidelines for agentic tools (AI assistants, code gene
 - **Maintain Link Management System**: Preserve the symbolic link management system that provides stable paths to Proton installations.
 
 - Common project tool usage:
-  - The test suite can be run with the command: `uv run pytest -v`
-  - A code coverage report can be generated with the command: `uv run pytest --cov=protonfetcher --cov-branch --cov-report=term-missing --cov-fail-under=95`
-  - Lint checking can be done with the command: `ruff check --select I --fix; ruff format; pyright`
-  - Formatting can be done with the command: `ruff format; prettier --cache -c -w *.md`.
-  - Formatting for markdown files can be done with the command: `prettier --cache -c -w *.md`
-  - Measure Halstead metrics via Radon with the command: `uv run radon hal ./protonfetcher.py`
-  - Measure cyclomatic code complexity via Radon using letter grades with the command: `uv run radon cc ./protonfetcher.py -a`
+  - The test suite can be run with the command: `make test`
+  - Lint checking can be done with the command: `make lint`
+  - Formatting can be done with the command: `make format`
+  - Measure cyclomatic code complexity via Radon using letter grades with the command: `make radon`
 
 - When running into a test that won't pass, only attempt to fix it 3 times before stopping and prompting the user what to do next. Do not make sweeping changes to the logic of the project without express permission granted by the user to do so.
 
@@ -33,29 +30,79 @@ This document establishes guidelines for agentic tools (AI assistants, code gene
 
 ### When Modifying Existing Components
 
-- **NetworkClient**:
+- **NetworkClient** (src/protonfetcher/network.py):
   - Maintain timeout handling for all requests
   - Preserve the curl-based implementation with fallbacks
   - Keep the same method signatures and return types
   - Ensure proper error handling for network operations
 
-- **FileSystemClient**:
+- **FileSystemClient** (src/protonfetcher/filesystem.py):
   - Continue using pathlib for file operations
   - Maintain the abstraction layer for testing purposes
   - Preserve all existing method signatures
   - Ensure consistent error handling across file operations
 
-- **Spinner**:
+- **Spinner** (src/protonfetcher/spinner.py):
   - Keep the FPS limiting functionality to prevent excessive terminal updates
   - Maintain clean terminal handling to avoid leftover characters
   - Preserve support for both simple spinning indicators and detailed progress bars
   - Ensure the spinner works correctly with both download and extraction operations
 
-- **GitHubReleaseFetcher**:
+- **GitHubReleaseFetcher** (src/protonfetcher/github_fetcher.py):
   - Maintain support for multiple Proton forks with different naming conventions
   - Preserve the intelligent caching mechanism (skipping downloads if local file matches)
   - Keep the multiple extraction methods (tarfile library and system tar)
   - Ensure proper handling of different archive formats (.tar.gz, .tar.xz)
+
+- **ReleaseManager** (src/protonfetcher/release_manager.py):
+  - Maintain the GitHub API approach with HTML fallback for asset discovery
+  - Preserve the caching system with XDG cache directory support
+  - Keep redirect handling for GitHub release URLs
+  - Ensure proper error handling for network and API operations
+
+- **AssetDownloader** (src/protonfetcher/asset_downloader.py):
+  - Preserve the intelligent caching system based on file sizes
+  - Maintain fallback mechanisms from spinner-based to curl-based downloads
+  - Keep progress indication with configurable display options
+  - Ensure proper error handling for download operations
+
+- **ArchiveExtractor** (src/protonfetcher/archive_extractor.py):
+  - Maintain multiple extraction methods (tarfile and system tar)
+  - Keep format detection for different archive types (.tar.gz, .tar.xz)
+  - Preserve progress indication with configurable file details
+  - Ensure proper error handling for corrupted archives
+
+- **LinkManager** (src/protonfetcher/link_manager.py):
+  - Maintain the three-tier symlink system (main, fallback, fallback2)
+  - Preserve version sorting and conflict resolution
+  - Keep fork-specific naming conventions
+  - Ensure proper handling of broken symlinks and directory conflicts
+
+### When Adding New Features
+
+- **Module Placement**: New functionality should be placed in the appropriate module based on its responsibility:
+  - Common types and protocols: `src/protonfetcher/common.py`
+  - Exception classes: `src/protonfetcher/exceptions.py`
+  - Utility functions: `src/protonfetcher/utils.py`
+  - Network operations: `src/protonfetcher/network.py`
+  - File system operations: `src/protonfetcher/filesystem.py`
+  - Progress indication: `src/protonfetcher/spinner.py`
+  - Release management: `src/protonfetcher/release_manager.py`
+  - Download functionality: `src/protonfetcher/asset_downloader.py`
+  - Archive processing: `src/protonfetcher/archive_extractor.py`
+  - Link management: `src/protonfetcher/link_manager.py`
+  - Main orchestration: `src/protonfetcher/github_fetcher.py`
+  - CLI logic: `src/protonfetcher/cli.py`
+
+- **Dependency Injection**: Use the existing protocol-based dependency injection for testability:
+  - Network operations: Inject NetworkClientProtocol implementations
+  - File system operations: Inject FileSystemClientProtocol implementations
+  - Maintain the same pattern used throughout the existing codebase
+
+- **Error Handling**: Follow the established error hierarchy:
+  - Use ProtonFetcherError as the base exception
+  - Extend with specific error types (NetworkError, ExtractionError, LinkManagementError)
+  - Include detailed error messages with context
 
 ### When Adding New Features
 

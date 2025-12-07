@@ -3,21 +3,14 @@ Tests for CLI error handling in protonfetcher module.
 Testing error scenarios and exception handling.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 from pytest_mock import MockerFixture
 
-from protonfetcher import ForkName, ProtonFetcherError
-
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher import (  # noqa: E402
-    FORKS,
-    main,
-)
+from protonfetcher.cli import main
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import ProtonFetcherError
 
 
 class TestCLIErrorHandling:
@@ -43,7 +36,10 @@ class TestCLIErrorHandling:
     ):
         """Parametrized test for CLI error handling with different forks."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Configure different error scenarios
         if error_scenario == "fetch_error":
@@ -89,7 +85,10 @@ class TestCLIErrorHandling:
     ):
         """Test CLI error handling when fetch operation fails."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Make fetch_and_extract raise a ProtonFetcherError
         mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
@@ -150,7 +149,10 @@ class TestCLIArgumentValidation:
 
         # Mock the GitHubReleaseFetcher to avoid actual operations
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Set up command line arguments with invalid fork
         test_args = [
@@ -174,7 +176,10 @@ class TestCLIArgumentValidation:
     def test_cli_list_and_release_mutually_exclusive(self, mocker, tmp_path):
         """Test that --list and --release cannot be used together."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Set up command line arguments with both --list and --release
         test_args = [
@@ -199,7 +204,10 @@ class TestCLIArgumentValidation:
     def test_cli_ls_with_release_mutually_exclusive(self, mocker, tmp_path):
         """Test that --ls and --release cannot be used together."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Set up command line arguments with both --ls and --release
         test_args = [
@@ -222,7 +230,10 @@ class TestCLIArgumentValidation:
     def test_cli_ls_with_list_mutually_exclusive(self, mocker, tmp_path):
         """Test that --ls and --list cannot be used together."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Set up command line arguments with both --ls and --list
         test_args = [
@@ -244,7 +255,10 @@ class TestCLIArgumentValidation:
     def test_cli_rm_with_list_mutually_exclusive(self, mocker, tmp_path):
         """Test that --rm and --list cannot be used together."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Set up command line arguments with both --rm and --list
         test_args = [
@@ -267,7 +281,10 @@ class TestCLIArgumentValidation:
     def test_cli_rm_with_release_mutually_exclusive(self, mocker, tmp_path):
         """Test that --rm and --release cannot be used together (both need release tag)."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Even though both use a release tag, they have different meanings and are mutually exclusive
         test_args = [
@@ -291,7 +308,10 @@ class TestCLIArgumentValidation:
     def test_cli_ls_with_ls_and_rm_mutually_exclusive(self, mocker, tmp_path):
         """Test that --ls and --rm cannot be used together."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Set up command line arguments with both --ls and --rm
         test_args = [
@@ -314,7 +334,10 @@ class TestCLIArgumentValidation:
     def test_cli_invalid_release_tag_format(self, mocker, tmp_path):
         """Test CLI with invalid release tag format."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Set up command line arguments with invalid release tag
         test_args = [
@@ -357,10 +380,13 @@ class TestCLIErrorHandlingWithForks:
     ):
         """Test CLI network error handling for different forks."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Make fetch_and_extract raise a network error
-        from protonfetcher import NetworkError
+        from protonfetcher.exceptions import NetworkError
 
         mock_fetcher.fetch_and_extract.side_effect = NetworkError("Connection timeout")
 
@@ -398,10 +424,13 @@ class TestCLIErrorHandlingWithForks:
     ):
         """Test CLI extraction error handling for different forks."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Make fetch_and_extract raise an extraction error
-        from protonfetcher import ExtractionError
+        from protonfetcher.exceptions import ExtractionError
 
         mock_fetcher.fetch_and_extract.side_effect = ExtractionError(
             "Failed to extract archive"
@@ -441,10 +470,13 @@ class TestCLIErrorHandlingWithForks:
     ):
         """Test CLI link management error handling for different forks."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Make fetch_and_extract raise a link management error
-        from protonfetcher import LinkManagementError
+        from protonfetcher.exceptions import LinkManagementError
 
         mock_fetcher.fetch_and_extract.side_effect = LinkManagementError(
             "Failed to create symbolic links"
@@ -479,10 +511,13 @@ class TestCLIErrorHandlingSpecialScenarios:
     def test_cli_directory_not_writable_error(self, mocker, tmp_path, capsys):
         """Test CLI error handling when directories are not writable."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock fetch_and_extract to raise an error during directory validation
-        from protonfetcher import ProtonFetcherError
+        from protonfetcher.exceptions import ProtonFetcherError
 
         mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
             "Directory not writable"
@@ -535,10 +570,13 @@ class TestCLIErrorHandlingSpecialScenarios:
     def test_cli_invalid_path_error(self, mocker, tmp_path, capsys):
         """Test CLI error handling with invalid paths."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock fetch_and_extract to raise an error during path validation
-        from protonfetcher import ProtonFetcherError
+        from protonfetcher.exceptions import ProtonFetcherError
 
         mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
             "Path does not exist"
@@ -569,7 +607,10 @@ class TestCLIErrorHandlingSpecialScenarios:
     ):
         """Test CLI error handling for GitHub API rate limit errors."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the list_recent_releases method to raise a rate limit error
         mock_fetcher.release_manager.list_recent_releases.side_effect = (
@@ -605,10 +646,13 @@ class TestCLIErrorHandlingSpecialScenarios:
     ):
         """Test CLI error handling when requested asset is not found."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock fetch_and_extract to raise an error when asset is not found
-        from protonfetcher import ProtonFetcherError
+        from protonfetcher.exceptions import ProtonFetcherError
 
         mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
             "Asset not found"

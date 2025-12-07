@@ -6,11 +6,11 @@ ProtonFetcher is a Python module designed to fetch and extract the latest Proton
 
 ## Architecture
 
-The module follows a modular design with clear separation of concerns and dependency injection:
+The module follows a modular design with clear separation of concerns and dependency injection, now organized under the `src/protonfetcher/` package:
 
 ```mermaid
 graph TB
-    subgraph "Core Components"
+    subgraph "Core Components (src/protonfetcher/)"
         A[GitHubReleaseFetcher] --> B[ReleaseManager]
         A --> C[AssetDownloader]
         A --> D[ArchiveExtractor]
@@ -23,27 +23,53 @@ graph TB
         H[Spinner]
     end
 
-    subgraph "Protocol Definitions"
+    subgraph "Protocol & Common Types (src/protonfetcher/common.py)"
         I[NetworkClientProtocol]
         J[FileSystemClientProtocol]
+        K[Common Types and Constants]
     end
 
-    subgraph "CLI Interface"
-        K[main function]
-        L[argparse]
+    subgraph "CLI Interface (src/protonfetcher/cli.py)"
+        L[main function]
+        M[argparse]
+        N[CLI Logic]
+    end
+
+    subgraph "Entry Point (src/entry.py)"
+        O[zipapp entry]
+    end
+
+    subgraph "Supporting Modules"
+        P[utils.py]
+        Q[exceptions.py]
+        R[network.py]
+        S[filesystem.py]
+        T[spinner.py]
     end
 
     A --> F
     A --> G
     A --> H
+    A --> K
     B --> F
     B --> G
+    B --> K
     C --> F
     C --> G
+    C --> K
     D --> G
+    D --> K
     E --> G
-    K --> A
-    L --> K
+    E --> K
+    L --> A
+    M --> L
+    N --> A
+    P --> A
+    Q --> A
+    R --> A
+    S --> A
+    T --> A
+    O --> L
 
     style A fill:#4CAF50,stroke:#388E3C,color:#fff
     style B fill:#2196F3,stroke:#0D47A1,color:#fff
@@ -54,15 +80,75 @@ graph TB
     style G fill:#FF9800,stroke:#E65100,color:#fff
     style I fill:#9C27B0,stroke:#7B1FA2,color:#fff
     style J fill:#9C27B0,stroke:#7B1FA2,color:#fff
+    style K fill:#9C27B0,stroke:#7B1FA2,color:#fff
+    style O fill:#607D8B,stroke:#455A64,color:#fff
+    style P fill:#795548,stroke:#5D4037,color:#fff
+    style Q fill:#795548,stroke:#5D4037,color:#fff
+    style R fill:#795548,stroke:#5D4037,color:#fff
+    style S fill:#795548,stroke:#5D4037,color:#fff
+    style T fill:#795548,stroke:#5D4037,color:#fff
 ```
 
 The architecture uses Protocol-based dependency injection to enable easy testing and component substitution. The NetworkClientProtocol and FileSystemClientProtocol define the interfaces that can be implemented by concrete classes or mocked for testing. The GitHubReleaseFetcher serves as the main orchestrator that instantiates and coordinates the specialized managers (ReleaseManager, AssetDownloader, ArchiveExtractor, LinkManager) rather than directly implementing all functionality.
+
+The refactored structure separates concerns into focused modules:
+
+- `src/protonfetcher/common.py` - Contains shared types, enums, protocols, and constants
+- `src/protonfetcher/exceptions.py` - Contains all custom exception classes
+- `src/protonfetcher/utils.py` - Contains utility functions used across components
+- `src/protonfetcher/network.py` - Network client implementation
+- `src/protonfetcher/filesystem.py` - File system client implementation
+- `src/protonfetcher/spinner.py` - Progress indication implementation
+- `src/protonfetcher/release_manager.py` - Release management logic
+- `src/protonfetcher/asset_downloader.py` - Download management logic
+- `src/protonfetcher/archive_extractor.py` - Archive extraction logic
+- `src/protonfetcher/link_manager.py` - Symlink management logic
+- `src/protonfetcher/github_fetcher.py` - Main orchestrator
+- `src/protonfetcher/cli.py` - CLI interface and logic
+- `src/entry.py` - Entry point for zipapp distribution
 
 The current implementation includes enhanced error validation and system tool availability checks, with the GitHubReleaseFetcher performing `_validate_environment` to ensure required tools like curl are available before operations proceed. The infrastructure components (NetworkClient, FileSystemClient) provide concrete implementations of the protocols, while the Spinner provides configurable progress indication with FPS limiting.
 
 ## Core Components
 
-### GitHubReleaseFetcher
+### Module Structure
+
+The application is now organized into a modular architecture under `src/protonfetcher/`:
+
+#### Common Components (`src/protonfetcher/common.py`)
+
+- **ForkConfig**: Dataclass containing repository and archive format for each fork
+- **SymlinkSpec**: Dataclass defining symbolic link specifications
+- **ForkName**: StrEnum containing `GE_PROTON` and `PROTON_EM`
+- **SpinnerConfig**: Configuration dataclass for Spinner parameters
+- **Protocol Definitions**: `NetworkClientProtocol` and `FileSystemClientProtocol`
+- **Type Aliases**: Shared type definitions for better readability
+- **Constants**: `FORKS`, `DEFAULT_FORK`, `GITHUB_URL_PATTERN`, `DEFAULT_TIMEOUT`
+
+#### Exception Classes (`src/protonfetcher/exceptions.py`)
+
+- **ProtonFetcherError**: Base exception for all ProtonFetcher errors (alias: `FetchError` for backward compatibility)
+- **NetworkError**: Network failures including connection errors, timeouts, HTTP errors, and invalid responses
+- **ExtractionError**: Archive extraction failures including corrupt archives, invalid formats, system command failures, and permission issues
+- **LinkManagementError**: Link management failures including invalid paths, permission issues, and conflict resolution failures
+- **MultiLinkManagementError**: Batch operation failures (ExceptionGroup) for multiple link operations
+
+#### Utility Functions (`src/protonfetcher/utils.py`)
+
+- `parse_version`: Parse version tag to extract numeric components for comparison
+- `compare_versions`: Compare two version tags to determine which is newer
+- `get_proton_asset_name`: Generate expected Proton asset name from tag and fork
+- `format_bytes`: Format bytes into a human-readable string
+
+#### Infrastructure Components
+
+- `src/protonfetcher/network.py`: Contains `NetworkClient` implementation and `NetworkClientProtocol`
+- `src/protonfetcher/filesystem.py`: Contains `FileSystemClient` implementation and `FileSystemClientProtocol`
+- `src/protonfetcher/spinner.py`: Contains `Spinner` and `SpinnerConfig` implementations
+
+### Core Logic Components
+
+#### GitHubReleaseFetcher (`src/protonfetcher/github_fetcher.py`)
 
 Main orchestrator that coordinates all operations through specialized managers and dependency injection:
 
@@ -84,7 +170,7 @@ Main orchestrator that coordinates all operations through specialized managers a
 
 The component uses dependency injection to accept NetworkClientProtocol and FileSystemClientProtocol implementations, enabling easy testing with mock objects. It instantiates the specialized managers (ReleaseManager, AssetDownloader, ArchiveExtractor, LinkManager) during initialization rather than implementing all functionality directly. The fetch_and_extract method supports configurable progress indication through show_progress and show_file_details parameters.
 
-### ReleaseManager
+#### ReleaseManager (`src/protonfetcher/release_manager.py`)
 
 Handles release discovery, asset finding, and size retrieval with intelligent caching to XDG cache directory:
 
@@ -108,7 +194,7 @@ Handles release discovery, asset finding, and size retrieval with intelligent ca
 - Intelligent caching system with XDG cache directory support
 - Redirect chain handling for GitHub releases with multiple redirects
 
-### AssetDownloader
+#### AssetDownloader (`src/protonfetcher/asset_downloader.py`)
 
 Manages downloads with progress indication and intelligent caching to avoid re-downloading matching files:
 
@@ -122,7 +208,7 @@ Manages downloads with progress indication and intelligent caching to avoid re-d
 - Fallback mechanism from spinner-based download to curl if urllib fails
 - Integration with ReleaseManager for size comparison
 
-### ArchiveExtractor
+#### ArchiveExtractor (`src/protonfetcher/archive_extractor.py`)
 
 Extracts archives with progress indication and format-specific methods (.tar.gz, .tar.xz):
 
@@ -142,7 +228,7 @@ Extracts archives with progress indication and format-specific methods (.tar.gz,
 - Support for both progress bar and spinner-only modes
 - Configurable file detail display during extraction with show_file_details parameter
 
-### LinkManager
+#### LinkManager (`src/protonfetcher/link_manager.py`)
 
 Manages symbolic links (GE-Proton, Proton-EM) ensuring links always point to newest versions:
 
@@ -186,9 +272,26 @@ Manages symbolic links (GE-Proton, Proton-EM) ensuring links always point to new
 - Broken symlink handling and validation
 - Proton-EM naming convention support with flexible prefix handling
 
+### CLI Interface (`src/protonfetcher/cli.py`)
+
+Contains the main CLI logic and entry point functions:
+
+- `main`: CLI entry point function
+- `parse_arguments`: Parses command-line arguments
+- `setup_logging`: Sets up logging based on debug flag
+- `convert_fork_to_enum`: Converts fork argument to ForkName enum
+- `handle_ls_operation`: Handles the --ls operation to list symbolic links
+- `main` function orchestrates different operations based on provided arguments
+- `_validate_mutually_exclusive_args`: Validates mutually exclusive arguments
+- `_handle_ls_operation_flow`, `_handle_list_operation_flow`, `_handle_rm_operation_flow`, `_handle_default_operation_flow`: Operation-specific workflow handlers
+
+### Entry Point (`src/entry.py`)
+
+Simple entry point for the zipapp distribution that calls the CLI main function.
+
 ## CLI Interface
 
-The CLI provides comprehensive functionality through multiple flags with extensive validation and error handling:
+The CLI provides comprehensive functionality through multiple flags with extensive validation and error handling, now organized under `src/protonfetcher/cli.py`:
 
 ```mermaid
 graph LR
@@ -246,12 +349,12 @@ Default operation (without --ls, --rm, --list) performs complete workflow with c
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant M as main()
-    participant F as GitHubReleaseFetcher
-    participant RM as ReleaseManager
-    participant AD as AssetDownloader
-    participant AE as ArchiveExtractor
-    participant LM as LinkManager
+    participant M as main() [src/protonfetcher/cli.py]
+    participant F as GitHubReleaseFetcher [src/protonfetcher/github_fetcher.py]
+    participant RM as ReleaseManager [src/protonfetcher/release_manager.py]
+    participant AD as AssetDownloader [src/protonfetcher/asset_downloader.py]
+    participant AE as ArchiveExtractor [src/protonfetcher/archive_extractor.py]
+    participant LM as LinkManager [src/protonfetcher/link_manager.py]
 
     U->>M: ./protonfetcher [args]
     M->>F: Initialize fetcher
@@ -284,8 +387,8 @@ List operation to show managed symbolic links with error handling for broken sym
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant M as main()
-    participant LM as LinkManager
+    participant M as main() [src/protonfetcher/cli.py]
+    participant LM as LinkManager [src/protonfetcher/link_manager.py]
 
     U->>M: ./protonfetcher --ls [fork]
     M->>LM: list_links()
@@ -305,8 +408,8 @@ Remove operation to delete specific release and update links with validation and
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant M as main()
-    participant LM as LinkManager
+    participant M as main() [src/protonfetcher/cli.py]
+    participant LM as LinkManager [src/protonfetcher/link_manager.py]
 
     U->>M: ./protonfetcher --rm TAG [fork]
     M->>LM: remove_release(TAG)
@@ -326,8 +429,8 @@ List operation to fetch and display recent releases with API error handling:
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant M as main()
-    participant RM as ReleaseManager
+    participant M as main() [src/protonfetcher/cli.py]
+    participant RM as ReleaseManager [src/protonfetcher/release_manager.py]
 
     U->>M: ./protonfetcher --list [fork]
     M->>RM: list_recent_releases(repo)
@@ -372,16 +475,55 @@ The CLI enforces comprehensive argument validation with these constraints:
   - Built-in generics (dict, list, tuple)
   - `match/case` statements for control flow
   - `typing.Self` for fluent interfaces
-  - Dataclasses for configuration objects (ForkConfig)
+  - Dataclasses for configuration objects (ForkConfig, SymlinkSpec, SpinnerConfig)
   - File-based caching with XDG directory
   - Protocol-based dependency injection for testing
   - ExceptionGroup for batch operation errors
   - Type checking with pyright
-  - Protocol classes for client interfaces
+  - Protocol classes for client interfaces (NetworkClientProtocol, FileSystemClientProtocol)
   - Enhanced error handling with structured exceptions
   - Environment validation via `_validate_environment` to ensure required tools like curl are available
   - Configurable progress indication with show_progress and show_file_details parameters
   - FPS limiting for terminal refresh rates to prevent excessive updates
+
+### Modular Architecture Benefits
+
+The new modular structure under `src/protonfetcher/` provides:
+
+- **Separation of Concerns**: Each module has a focused responsibility
+- **Maintainability**: Easier to locate and modify specific functionality
+- **Testability**: Individual modules can be tested in isolation
+- **Scalability**: New features can be added without affecting existing modules
+- **Distribution**: Maintains zipapp compatibility via `src/entry.py`
+- **Code Reusability**: Shared components in `common.py` and `utils.py`
+- **Type Safety**: Comprehensive type hints across all modules
+- **Protocol-based Design**: Interface segregation allows for easy mocking and testing
+
+## Package Structure
+
+The application is organized as follows:
+
+```
+protonfetcher/
+├── src/
+│   ├── entry.py              # Entry point for zipapp distribution
+│   └── protonfetcher/        # Main package containing all modules
+│       ├── __init__.py
+│       ├── common.py         # Shared types, protocols, and constants
+│       ├── exceptions.py     # Custom exception hierarchy
+│       ├── utils.py          # Utility functions
+│       ├── network.py        # Network client implementation and protocol
+│       ├── filesystem.py     # File system client implementation and protocol
+│       ├── spinner.py        # Progress indication implementation
+│       ├── release_manager.py # Release management logic
+│       ├── asset_downloader.py # Download management logic
+│       ├── archive_extractor.py # Archive extraction logic
+│       ├── link_manager.py   # Symlink management logic
+│       ├── github_fetcher.py # Main orchestrator
+│       └── cli.py           # CLI interface and logic
+├── tests/                   # Test suite (structure unchanged)
+...
+```
 
 ## Fork Configuration System
 

@@ -2,16 +2,9 @@
 Integration tests for extraction workflows in protonfetcher.py
 """
 
-from pathlib import Path
-
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
-    ExtractionError,
-    ForkName,
-    ProtonFetcherError,
-)
+from protonfetcher.exceptions import ExtractionError
 
 
 class TestExtractionWorkflow:
@@ -19,7 +12,7 @@ class TestExtractionWorkflow:
 
     def test_extraction_workflow_success(self, mocker, tmp_path, create_test_archive):
         """Test complete extraction workflow with successful execution."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -80,7 +73,7 @@ class TestExtractionWorkflow:
         self, mocker, tmp_path, create_test_archive
     ):
         """Test extraction workflow with tarfile failure followed by fallback success."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -164,7 +157,7 @@ class TestExtractionWorkflow:
         self, mocker, tmp_path, create_test_archive
     ):
         """Test extraction workflow specifically for .tar.gz format."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -248,7 +241,7 @@ class TestExtractionWorkflow:
         self, mocker, tmp_path, create_test_archive
     ):
         """Test extraction workflow specifically for .tar.xz format."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -330,7 +323,7 @@ class TestExtractionWorkflow:
 
     def test_extraction_workflow_failure_all_methods(self, mocker, tmp_path):
         """Test extraction workflow when all extraction methods fail."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -417,7 +410,8 @@ class TestExtractionWorkflow:
         self, mocker, tmp_path, create_test_archive
     ):
         """Test extraction workflow with progress indication."""
-        from protonfetcher import ArchiveExtractor, GitHubReleaseFetcher
+        from protonfetcher.archive_extractor import ArchiveExtractor
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -430,7 +424,7 @@ class TestExtractionWorkflow:
         mock_spinner_instance = mocker.MagicMock()
         mock_spinner_instance.__enter__.return_value = mock_spinner_instance
         mock_spinner_instance.__exit__.return_value = None
-        mock_spinner_cls = mocker.patch("protonfetcher.Spinner")
+        mock_spinner_cls = mocker.patch("protonfetcher.archive_extractor.Spinner")
         mock_spinner_cls.return_value = mock_spinner_instance
 
         fetcher = GitHubReleaseFetcher(
@@ -464,7 +458,7 @@ class TestExtractionWorkflow:
         mock_tar_member2 = mocker.Mock()
         mock_tar_member2.name = "file2.txt"
         mock_tar_member2.size = 8
-        mock_tarfile = mocker.patch("protonfetcher.tarfile.open")
+        mock_tarfile = mocker.patch("tarfile.open")
         mock_tarfile.return_value.__enter__.return_value.getmembers.return_value = [
             mock_tar_member1,
             mock_tar_member2,
@@ -492,7 +486,7 @@ class TestExtractionWorkflow:
         self, mocker, tmp_path, create_test_archive, archive_format, extract_method
     ):
         """Parametrized test for extraction workflow with different archive formats."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -570,7 +564,7 @@ class TestExtractionWorkflow:
 
     def test_extraction_workflow_empty_archive(self, mocker, tmp_path):
         """Test extraction workflow with empty archive."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -650,7 +644,7 @@ class TestExtractionWorkflow:
         self, mocker, tmp_path, corrupted_archive
     ):
         """Test extraction workflow with corrupted archive."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -732,7 +726,7 @@ class TestExtractionWorkflow:
         self, mocker, tmp_path, create_test_archive
     ):
         """Test extraction workflow when extraction directory has insufficient permissions."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()

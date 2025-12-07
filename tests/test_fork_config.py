@@ -4,7 +4,7 @@ Unit tests for ForkConfig and related functionality in protonfetcher.py
 
 import pytest
 
-from protonfetcher import ForkConfig
+from protonfetcher.common import ForkConfig
 
 
 class TestForkConfig:

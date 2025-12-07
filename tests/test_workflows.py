@@ -9,13 +9,9 @@ import subprocess
 
 import pytest
 
-from protonfetcher import (  # noqa: E402
-    DEFAULT_FORK,
-    FORKS,
-    ForkName,
-    GitHubReleaseFetcher,
-    ProtonFetcherError,
-)
+from protonfetcher.common import DEFAULT_FORK, FORKS, ForkName
+from protonfetcher.exceptions import ProtonFetcherError
+from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
 
 class TestCompleteWorkflowIntegration:

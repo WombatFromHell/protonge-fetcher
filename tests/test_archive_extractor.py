@@ -2,19 +2,10 @@
 Unit tests for ArchiveExtractor in protonfetcher.py
 """
 
-import os
-import tarfile
-import tempfile
-from pathlib import Path
-
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
-    ArchiveExtractor,
-    ExtractionError,
-    FileSystemClientProtocol,
-)
+from protonfetcher.archive_extractor import ArchiveExtractor
+from protonfetcher.exceptions import ExtractionError
 
 
 class TestArchiveExtractor:
@@ -39,7 +30,7 @@ class TestArchiveExtractor:
         extract_path.mkdir()
 
         # Mock the spinner behavior
-        mock_spinner = mocker.patch("protonfetcher.Spinner")
+        mock_spinner = mocker.patch("protonfetcher.archive_extractor.Spinner")
         mock_spinner_instance = mocker.Mock()
         mock_spinner.return_value.__enter__.return_value = mock_spinner_instance
 

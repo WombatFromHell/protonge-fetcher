@@ -27,17 +27,30 @@ install: $(OUT)
 	echo "Installed to $$INSTALL_DIR/$(ARTIFACT)"
 
 test:
-	uv run pytest -xvs --cov=src --cov-report=term-missing
+	uv run pytest -v --cov=src --cov-report=term-missing
+
+prettier:
+	prettier --cache -c -w *.md
+
+lint:
+	ruff check ./src ./tests --fix; \
+		pyright ./src ./tests
+
+format: prettier
+	ruff format ./src ./tests
+
+radon:
+	uv run radon cc ./src -a
+
+quality: lint format
 
 clean:
+	find . -type d -name "__pycache__" -exec rm -rf {} +; \
 	rm -rf \
 		$(STAGING) \
 		$(BUILD_DIR) \
 		.pytest_cache \
 		.ruff_cache \
-		./src/__pycache__ \
-		./src/protonfetcher/__pycache__ \
-		./tests/__pycache__ \
 		.coverage
 
 all: clean build install

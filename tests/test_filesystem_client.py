@@ -5,9 +5,7 @@ Unit tests for FileSystemClient and FileSystemClientProtocol in protonfetcher.py
 import tempfile
 from pathlib import Path
 
-import pytest
-
-from protonfetcher import FileSystemClient, FileSystemClientProtocol
+from protonfetcher.filesystem import FileSystemClient
 
 
 class TestFileSystemClient:

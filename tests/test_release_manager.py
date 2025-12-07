@@ -3,18 +3,12 @@ Unit tests for ReleaseManager in protonfetcher.py
 """
 
 import json
-from pathlib import Path
 
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
-    FORKS,
-    ExtractionError,
-    ForkName,
-    NetworkError,
-    ReleaseManager,
-)
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import NetworkError
+from protonfetcher.release_manager import ReleaseManager
 
 
 class TestReleaseManager:

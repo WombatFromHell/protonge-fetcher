@@ -2,12 +2,9 @@
 Unit tests for NetworkClient and NetworkClientProtocol in protonfetcher.py
 """
 
-import subprocess
 from pathlib import Path
 
-import pytest
-
-from protonfetcher import NetworkClient, NetworkClientProtocol
+from protonfetcher.network import NetworkClient
 
 
 class TestNetworkClient:

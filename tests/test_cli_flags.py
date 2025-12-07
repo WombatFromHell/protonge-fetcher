@@ -9,16 +9,14 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from protonfetcher import ForkName
-
+# Add src to path for testing
 parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
+sys.path.insert(0, str(parent_dir / "src"))
 
-from protonfetcher import (  # noqa: E402
-    FORKS,
-    ProtonFetcherError,
-    main,
-)
+from protonfetcher.cli import main  # noqa: E402
+from protonfetcher.common import ForkName  # noqa: E402
+from protonfetcher.exceptions import ProtonFetcherError  # noqa: E402
+from protonfetcher.release_manager import FORKS  # noqa: E402
 
 
 class TestCLIListFlag:
@@ -56,7 +54,10 @@ class TestCLIListFlag:
     ):
         """Parametrized test for CLI command: ./protonfetcher --list/-l -f [fork]."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the list_recent_releases method
         mock_fetcher.release_manager.list_recent_releases.return_value = (
@@ -98,10 +99,12 @@ class TestCLIListFlag:
     ):
         """Test CLI command handles rate limit errors properly."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the list_recent_releases method to raise a rate limit error
-        from protonfetcher import ProtonFetcherError
 
         mock_fetcher.release_manager.list_recent_releases.side_effect = ProtonFetcherError(
             "API rate limit exceeded. Please wait a few minutes before trying again."
@@ -186,7 +189,10 @@ class TestCLIListLinksFlag:
     ):
         """Parametrized test for CLI command: ./protonfetcher --ls -f [fork]."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Prepare the link information based on the expected links
         mock_link_info = {}
@@ -234,7 +240,10 @@ class TestCLIListLinksFlag:
     ):
         """Test CLI command: ./protonfetcher --ls when no links exist."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the list_links method to return all None values (no links exist)
         mock_fetcher.link_manager.list_links.return_value = {
@@ -289,7 +298,10 @@ class TestCLIRemoveFlag:
     ):
         """Parametrized test for CLI command: ./protonfetcher --rm [tag] -f [fork]."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the remove_release method to return success
         mock_fetcher.link_manager.remove_release.return_value = True
@@ -329,10 +341,12 @@ class TestCLIRemoveFlag:
     ):
         """Test CLI command handles when the specified directory doesn't exist."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the remove_release method to raise a ProtonFetcherError
-        from protonfetcher import ProtonFetcherError
 
         mock_fetcher.link_manager.remove_release.side_effect = ProtonFetcherError(
             "Release directory does not exist: /path/to/nonexistent"
@@ -368,7 +382,10 @@ class TestCLIDefaultFlag:
     ):
         """Test default CLI command: ./protonfetcher (fetch latest GE-Proton)."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
@@ -409,7 +426,10 @@ class TestCLIDefaultFlag:
     ):
         """Test CLI command: ./protonfetcher -f GE-Proton (explicit fork)."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
@@ -437,7 +457,10 @@ class TestCLIDefaultFlag:
     def test_cli_default_with_proton_em(self, mocker: MockerFixture, tmp_path: Path):
         """Test CLI command: ./protonfetcher -f Proton-EM."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
@@ -484,7 +507,10 @@ class TestCLIReleaseFlag:
     ):
         """Parametrized test for CLI command with --release flag."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
@@ -515,7 +541,10 @@ class TestCLIReleaseFlag:
     def test_cli_release_flag_validation(self, mocker: MockerFixture, tmp_path: Path):
         """Test that --release flag validates properly."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
@@ -553,7 +582,10 @@ class TestCLIDebugFlag:
         import logging
 
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
@@ -586,7 +618,10 @@ class TestCLIPathFlags:
     def test_cli_extract_dir_flag(self, mocker: MockerFixture, tmp_path: Path):
         """Test CLI command with custom --extract-dir flag."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         custom_extract_dir = tmp_path / "custom_extract"
         custom_extract_dir.mkdir()
@@ -616,7 +651,10 @@ class TestCLIPathFlags:
     def test_cli_output_dir_flag(self, mocker: MockerFixture, tmp_path: Path):
         """Test CLI command with custom --output flag."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         custom_output_dir = tmp_path / "custom_output"
         custom_output_dir.mkdir()
@@ -644,7 +682,10 @@ class TestCLIPathFlags:
     def test_cli_tilde_expansion(self, mocker: MockerFixture, tmp_path: Path):
         """Test CLI tilde (~) path expansion in directory flags."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 

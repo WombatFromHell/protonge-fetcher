@@ -9,10 +9,11 @@ from typing import Optional
 
 import pytest
 
+# Add src to path for testing
 parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
+sys.path.insert(0, str(parent_dir / "src"))
 
-from protonfetcher import ForkName
+from protonfetcher.common import ForkName  # noqa: E402
 
 
 @pytest.fixture
@@ -119,7 +120,9 @@ def mock_fetcher(mocker, network_client=None, filesystem_client=None):
     Returns:
         GitHubReleaseFetcher with mocked dependencies
     """
-    from protonfetcher import FileSystemClient, GitHubReleaseFetcher, NetworkClient
+    from protonfetcher.filesystem import FileSystemClient
+    from protonfetcher.github_fetcher import GitHubReleaseFetcher
+    from protonfetcher.network import NetworkClient
 
     # Create default mocks if not provided
     mock_network = network_client or mocker.MagicMock(spec=NetworkClient)
@@ -176,7 +179,7 @@ def fork_test_data():
 @pytest.fixture
 def mock_network_client(mocker, standardized_test_data):
     """Create a mocked NetworkClientProtocol instance with standardized responses."""
-    from protonfetcher import NetworkClientProtocol
+    from protonfetcher.common import NetworkClientProtocol
 
     mock = mocker.MagicMock(spec=NetworkClientProtocol)
     mock.timeout = 30
@@ -187,7 +190,7 @@ def mock_network_client(mocker, standardized_test_data):
 @pytest.fixture
 def mock_filesystem_client(mocker, standardized_test_data):
     """Create a mocked FileSystemClientProtocol instance with standardized behavior."""
-    from protonfetcher import FileSystemClientProtocol
+    from protonfetcher.common import FileSystemClientProtocol
 
     mock = mocker.MagicMock(spec=FileSystemClientProtocol)
 
@@ -236,7 +239,7 @@ def mock_clients(mock_network_client, mock_filesystem_client):
 @pytest.fixture
 def mock_release_manager(mocker):
     """Create a mocked ReleaseManager instance."""
-    from protonfetcher import ReleaseManager
+    from protonfetcher.release_manager import ReleaseManager
 
     mock = mocker.MagicMock(spec=ReleaseManager)
     return mock
@@ -245,7 +248,7 @@ def mock_release_manager(mocker):
 @pytest.fixture
 def mock_asset_downloader(mocker):
     """Create a mocked AssetDownloader instance."""
-    from protonfetcher import AssetDownloader
+    from protonfetcher.asset_downloader import AssetDownloader
 
     mock = mocker.MagicMock(spec=AssetDownloader)
     return mock
@@ -254,7 +257,7 @@ def mock_asset_downloader(mocker):
 @pytest.fixture
 def mock_archive_extractor(mocker):
     """Create a mocked ArchiveExtractor instance."""
-    from protonfetcher import ArchiveExtractor
+    from protonfetcher.archive_extractor import ArchiveExtractor
 
     mock = mocker.MagicMock(spec=ArchiveExtractor)
     return mock
@@ -263,7 +266,7 @@ def mock_archive_extractor(mocker):
 @pytest.fixture
 def mock_link_manager(mocker):
     """Create a mocked LinkManager instance."""
-    from protonfetcher import LinkManager
+    from protonfetcher.link_manager import LinkManager
 
     mock = mocker.MagicMock(spec=LinkManager)
     return mock
@@ -519,7 +522,7 @@ def test_directory_structure(tmp_path):
 @pytest.fixture
 def mock_version_candidates():
     """Mock version candidates for link management testing."""
-    from protonfetcher import parse_version
+    from protonfetcher.utils import parse_version
 
     def create_candidates(base_path, fork, versions):
         candidates = []

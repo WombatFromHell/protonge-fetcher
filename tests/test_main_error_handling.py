@@ -2,7 +2,6 @@
 Tests for main function error handling in protonfetcher.py
 """
 
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -13,7 +12,8 @@ import pytest
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-from protonfetcher import GitHubReleaseFetcher, ProtonFetcherError, main
+from protonfetcher.cli import main  # noqa: E402
+from protonfetcher.exceptions import ProtonFetcherError  # noqa: E402
 
 
 class TestMainErrorHandling:
@@ -35,7 +35,7 @@ class TestMainErrorHandling:
             ]
 
             # Mock the GitHubReleaseFetcher to raise an exception during fetch_and_extract
-            with patch("protonfetcher.GitHubReleaseFetcher") as mock_fetcher_class:
+            with patch("protonfetcher.cli.GitHubReleaseFetcher") as mock_fetcher_class:
                 mock_fetcher_instance = MagicMock()
                 mock_fetcher_instance.fetch_and_extract.side_effect = (
                     ProtonFetcherError("Test error")
@@ -71,7 +71,7 @@ class TestMainErrorHandling:
             # Simulate --ls flag
             sys.argv = ["protonfetcher", "--ls", "-x", str(tmp_path / "extract")]
 
-            with patch("protonfetcher.GitHubReleaseFetcher") as mock_fetcher_class:
+            with patch("protonfetcher.cli.GitHubReleaseFetcher") as mock_fetcher_class:
                 mock_fetcher_instance = MagicMock()
                 # Mock list_links to raise an exception
                 mock_fetcher_instance.link_manager.list_links.side_effect = (
@@ -99,7 +99,7 @@ class TestMainErrorHandling:
             # Simulate --list flag
             sys.argv = ["protonfetcher", "--list", "-f", "GE-Proton"]
 
-            with patch("protonfetcher.GitHubReleaseFetcher") as mock_fetcher_class:
+            with patch("protonfetcher.cli.GitHubReleaseFetcher") as mock_fetcher_class:
                 mock_fetcher_instance = MagicMock()
                 # Mock list_recent_releases to raise an exception
                 mock_fetcher_instance.release_manager.list_recent_releases.side_effect = ProtonFetcherError(
@@ -134,7 +134,7 @@ class TestMainErrorHandling:
                 "GE-Proton",
             ]
 
-            with patch("protonfetcher.GitHubReleaseFetcher") as mock_fetcher_class:
+            with patch("protonfetcher.cli.GitHubReleaseFetcher") as mock_fetcher_class:
                 mock_fetcher_instance = MagicMock()
                 # Mock remove_release to raise an exception
                 mock_fetcher_instance.link_manager.remove_release.side_effect = (

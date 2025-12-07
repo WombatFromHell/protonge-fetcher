@@ -2,19 +2,12 @@
 Unit tests for AssetDownloader in protonfetcher.py
 """
 
-import sys
 from pathlib import Path
 
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
-    AssetDownloader,
-    FileSystemClientProtocol,
-    NetworkClientProtocol,
-    NetworkError,
-    ProtonFetcherError,
-)
+from protonfetcher.asset_downloader import AssetDownloader
+from protonfetcher.exceptions import NetworkError
 
 
 class TestAssetDownloader:
@@ -78,7 +71,6 @@ class TestAssetDownloader:
 
     def test_download_with_spinner_success(self, mocker, tmp_path):
         """Test download_with_spinner method with successful download."""
-        import urllib.request
 
         mock_network = mocker.Mock()
         mock_fs = mocker.Mock()
@@ -102,7 +94,6 @@ class TestAssetDownloader:
 
     def test_download_with_spinner_zero_size(self, mocker, tmp_path):
         """Test download_with_spinner with zero size response."""
-        import urllib.request
 
         mock_network = mocker.Mock()
         mock_fs = mocker.Mock()
@@ -270,9 +261,7 @@ class TestAssetDownloader:
         mock_network.download.side_effect = [Exception("Curl failed"), mocker.Mock()]
 
         # Create a mock for the download_with_spinner method
-        mock_download_with_spinner = mocker.patch.object(
-            downloader, "download_with_spinner", return_value=None
-        )
+        mocker.patch.object(downloader, "download_with_spinner", return_value=None)
 
         asset_url = "https://example.com/file.tar.gz"
         output_path = tmp_path / "test.tar.gz"
@@ -280,7 +269,6 @@ class TestAssetDownloader:
 
         # Since the first call failed but the second succeeded, this should work
         # This is actually a complex scenario - let's simplify by checking the urllib path
-        import urllib.request
 
         # Mock urllib to simulate the spinner download working
         mock_urlopen = mocker.patch("urllib.request.urlopen")

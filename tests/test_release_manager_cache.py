@@ -8,13 +8,11 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 # Add the project directory to the Python path
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-from protonfetcher import ReleaseManager
+from protonfetcher.release_manager import ReleaseManager  # noqa: E402
 
 
 class TestReleaseManagerCache:
@@ -256,7 +254,7 @@ class TestReleaseManagerCache:
         # Don't create the cache dir to force an IO error
 
         # Mock logger.debug to verify it gets called
-        mock_logger = mocker.patch("protonfetcher.logger")  # ✅ Remove 'with'
+        mock_logger = mocker.patch("protonfetcher.release_manager.logger")
 
         # This should not raise an exception even if cache write fails
         manager._cache_asset_size("test/repo", "test-tag", "test-asset.tar.gz", 12345)

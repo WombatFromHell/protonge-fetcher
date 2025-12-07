@@ -2,10 +2,7 @@
 Unit tests for the Spinner class in protonfetcher.py
 """
 
-import pytest
-from pytest_mock import MockerFixture
-
-from protonfetcher import Spinner
+from protonfetcher.spinner import Spinner
 
 
 class TestSpinner:

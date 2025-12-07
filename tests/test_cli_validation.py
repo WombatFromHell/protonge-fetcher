@@ -2,9 +2,9 @@
 Tests for CLI argument validation and error handling in protonfetcher.py
 """
 
-import subprocess
 import sys
 from pathlib import Path
+import argparse
 
 import pytest
 
@@ -12,9 +12,8 @@ import pytest
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-import argparse
 
-from protonfetcher import _validate_mutually_exclusive_args
+from protonfetcher.cli import _validate_mutually_exclusive_args  # noqa: E402
 
 
 class TestCLIValidation:

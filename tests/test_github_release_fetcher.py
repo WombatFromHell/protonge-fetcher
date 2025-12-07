@@ -5,16 +5,15 @@ Unit tests for GitHubReleaseFetcher in protonfetcher.py
 from pathlib import Path
 
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import (
     ExtractionError,
-    ForkName,
-    GitHubReleaseFetcher,
     LinkManagementError,
     NetworkError,
     ProtonFetcherError,
 )
+from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
 
 class TestGitHubReleaseFetcher:
@@ -35,7 +34,6 @@ class TestGitHubReleaseFetcher:
 
     def test_fetch_and_extract_success(self, mocker, tmp_path):
         """Test fetch_and_extract method with successful complete workflow."""
-        import shutil
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -124,7 +122,6 @@ class TestGitHubReleaseFetcher:
 
     def test_fetch_and_extract_with_manual_tag(self, mocker, tmp_path):
         """Test fetch_and_extract method with manual release tag."""
-        import shutil
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -293,7 +290,6 @@ class TestGitHubReleaseFetcher:
 
     def test_fetch_and_extract_link_management_error(self, mocker, tmp_path):
         """Test fetch_and_extract method with link management error."""
-        import shutil
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")

@@ -2,14 +2,11 @@
 Integration tests for complete fetch-and-extract workflows in protonfetcher.py
 """
 
-from pathlib import Path
-
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import (
     ExtractionError,
-    ForkName,
     LinkManagementError,
     NetworkError,
     ProtonFetcherError,
@@ -21,9 +18,8 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_success_ge_proton(self, mocker, tmp_path):
         """Test complete workflow for GE-Proton with successful execution."""
-        import shutil
 
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -113,7 +109,7 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_success_proton_em(self, mocker, tmp_path):
         """Test complete workflow for Proton-EM with successful execution."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -202,9 +198,8 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_manual_release_success(self, mocker, tmp_path):
         """Test complete workflow with manual release tag specified."""
-        import shutil
 
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -297,7 +292,7 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_network_failure(self, mocker, tmp_path):
         """Test complete workflow with network failure."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -331,7 +326,7 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_extraction_failure(self, mocker, tmp_path):
         """Test complete workflow with extraction failure."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -382,9 +377,8 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_link_management_failure(self, mocker, tmp_path):
         """Test complete workflow with link management failure."""
-        import shutil
 
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -480,9 +474,8 @@ class TestCompleteWorkflow:
         self, mocker, tmp_path, fork, repo, expected_asset_pattern
     ):
         """Parametrized test for complete workflow with different forks."""
-        import shutil
 
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -576,7 +569,7 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_directory_validation_failure(self, mocker, tmp_path):
         """Test complete workflow with directory validation failure."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -608,9 +601,8 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_with_caching_behavior(self, mocker, tmp_path):
         """Test complete workflow with caching behavior."""
-        import shutil
 
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -715,7 +707,7 @@ class TestCompleteWorkflow:
 
     def test_complete_workflow_asset_not_found(self, mocker, tmp_path):
         """Test complete workflow when asset is not found."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()

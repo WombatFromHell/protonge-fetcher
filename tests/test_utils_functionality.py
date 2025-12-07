@@ -11,13 +11,9 @@ import pytest
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-from protonfetcher import (
-    ForkName,
-    ProtonFetcherError,
-    compare_versions,
-    convert_fork_to_enum,
-    parse_version,
-)
+from protonfetcher.cli import convert_fork_to_enum  # noqa: E402
+from protonfetcher.common import ForkName  # noqa: E402
+from protonfetcher.utils import compare_versions, parse_version  # noqa: E402
 
 
 class TestUtils:
@@ -112,21 +108,18 @@ class TestUtils:
     def test_convert_fork_to_enum_valid_strings(self):
         """Test convert_fork_to_enum with valid string inputs."""
         # Import the function as it might be a local function
-        from protonfetcher import convert_fork_to_enum
 
         assert convert_fork_to_enum("GE-Proton") == ForkName.GE_PROTON
         assert convert_fork_to_enum("Proton-EM") == ForkName.PROTON_EM
 
     def test_convert_fork_to_enum_valid_enum(self):
         """Test convert_fork_to_enum when passed an already valid enum."""
-        from protonfetcher import convert_fork_to_enum
 
         assert convert_fork_to_enum(ForkName.GE_PROTON) == ForkName.GE_PROTON
         assert convert_fork_to_enum(ForkName.PROTON_EM) == ForkName.PROTON_EM
 
     def test_convert_fork_to_enum_invalid(self):
         """Test convert_fork_to_enum with invalid inputs."""
-        from protonfetcher import convert_fork_to_enum
 
         # The function raises SystemExit(1) for invalid forks
         with pytest.raises(SystemExit) as exc_info:
@@ -136,7 +129,6 @@ class TestUtils:
 
     def test_convert_fork_to_enum_none(self):
         """Test convert_fork_to_enum with None input."""
-        from protonfetcher import convert_fork_to_enum
 
         # This should return the default fork
         result = convert_fork_to_enum(None)

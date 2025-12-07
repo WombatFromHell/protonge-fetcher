@@ -12,7 +12,8 @@ import pytest
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
-from protonfetcher import GitHubReleaseFetcher, LinkManagementError, ProtonFetcherError
+from protonfetcher.exceptions import ProtonFetcherError  # noqa: E402
+from protonfetcher.github_fetcher import GitHubReleaseFetcher  # noqa: E402
 
 
 class TestGitHubReleaseFetcherDirectoryValidation:

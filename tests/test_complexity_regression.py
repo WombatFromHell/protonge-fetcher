@@ -237,10 +237,13 @@ class TestComplexityRegression:
         # This is a manual check to ensure key functions don't grow too complex
         # by looking at the structure of the code directly
 
-        # Read the protonfetcher.py file
-        protonfetcher_path = Path(__file__).parent.parent / "protonfetcher.py"
-        with open(protonfetcher_path, "r") as f:
-            content = f.read()
+        # Aggregate content from all protonfetcher module files
+        protonfetcher_dir = Path(__file__).parent.parent / "src" / "protonfetcher"
+        content = ""
+        for py_file in protonfetcher_dir.glob("*.py"):
+            if py_file.name != "__init__.py":  # Skip __init__.py
+                with open(py_file, "r", encoding="utf-8") as f:
+                    content += f.read() + "\n"
 
         # Count function definitions and basic structural elements
         import re
@@ -252,6 +255,6 @@ class TestComplexityRegression:
         assert function_count > 10, f"Expected many functions, got {function_count}"
         assert class_count >= 5, f"Expected at least several classes, got {class_count}"
 
-        # Check for reasonable module length
+        # Check for reasonable module length (across all files)
         lines = content.split("\n")
         assert len(lines) < 3000, f"Module has {len(lines)} lines, which is too long"

@@ -2,16 +2,10 @@
 Integration tests for link management workflows in protonfetcher.py
 """
 
-from pathlib import Path
-
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
-    ForkName,
-    LinkManagementError,
-    ProtonFetcherError,
-)
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import LinkManagementError
 
 
 class TestLinkManagementWorkflow:
@@ -19,7 +13,7 @@ class TestLinkManagementWorkflow:
 
     def test_link_management_workflow_success(self, mocker, tmp_path):
         """Test complete link management workflow with successful execution."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -60,7 +54,7 @@ class TestLinkManagementWorkflow:
 
     def test_link_management_list_links_success(self, mocker, tmp_path):
         """Test link management workflow for listing existing links."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -98,7 +92,7 @@ class TestLinkManagementWorkflow:
 
     def test_link_management_remove_release_success(self, mocker, tmp_path):
         """Test link management workflow for removing a release."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -133,7 +127,8 @@ class TestLinkManagementWorkflow:
 
     def test_link_management_workflow_conflict_resolution(self, mocker, tmp_path):
         """Test link management workflow with symlink conflict resolution."""
-        from protonfetcher import GitHubReleaseFetcher, LinkManager
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
+        from protonfetcher.link_manager import LinkManager
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -164,7 +159,7 @@ class TestLinkManagementWorkflow:
 
         # Setup mock for finding version candidates and managing links
         def mock_find_candidates(extract_dir, fork):
-            from protonfetcher import parse_version
+            from protonfetcher.utils import parse_version
 
             return [
                 (parse_version("GE-Proton10-20", ForkName.GE_PROTON), release1),
@@ -192,7 +187,7 @@ class TestLinkManagementWorkflow:
 
     def test_link_management_workflow_broken_symlinks(self, mocker, tmp_path):
         """Test link management workflow handling broken symlinks."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -245,7 +240,8 @@ class TestLinkManagementWorkflow:
         self, mocker, tmp_path, fork, expected_links
     ):
         """Parametrized test for link management workflow with different forks."""
-        from protonfetcher import GitHubReleaseFetcher, LinkManager
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
+        from protonfetcher.link_manager import LinkManager
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -307,7 +303,7 @@ class TestLinkManagementWorkflow:
 
     def test_link_management_workflow_directory_conflicts(self, mocker, tmp_path):
         """Test link management workflow handling directory conflicts."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -359,7 +355,8 @@ class TestLinkManagementWorkflow:
         self, mocker, tmp_path
     ):
         """Test link management workflow managing multiple releases."""
-        from protonfetcher import GitHubReleaseFetcher, LinkManager
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
+        from protonfetcher.link_manager import LinkManager
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -394,7 +391,7 @@ class TestLinkManagementWorkflow:
 
         # Setup workflow for managing multiple releases
         def mock_find_candidates(extract_dir, fork):
-            from protonfetcher import parse_version
+            from protonfetcher.utils import parse_version
 
             return [
                 (parse_version("GE-Proton10-20", ForkName.GE_PROTON), releases[0]),
@@ -421,7 +418,7 @@ class TestLinkManagementWorkflow:
 
     def test_link_management_workflow_remove_release_not_found(self, mocker, tmp_path):
         """Test link management workflow when trying to remove a non-existent release."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -456,7 +453,7 @@ class TestLinkManagementWorkflow:
         self, mocker, tmp_path
     ):
         """Test link management workflow when target directory doesn't exist."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         # Mock all dependencies
         mock_network = mocker.Mock()

@@ -4,18 +4,20 @@ Consolidating all error scenarios from various test files.
 """
 
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-from protonfetcher import (
-    ArchiveExtractor,
-    ExtractionError,
-    ForkName,
-    GitHubReleaseFetcher,
-    NetworkError,
-    ProtonFetcherError,
-    ReleaseManager,
-)
+# Add src to path for testing
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir / "src"))
+
+from protonfetcher.archive_extractor import ArchiveExtractor  # noqa: E402
+from protonfetcher.common import ForkName  # noqa: E402
+from protonfetcher.exceptions import ExtractionError, NetworkError, ProtonFetcherError  # noqa: E402
+from protonfetcher.github_fetcher import GitHubReleaseFetcher  # noqa: E402
+from protonfetcher.release_manager import ReleaseManager  # noqa: E402
 
 
 class TestNetworkErrors:
@@ -53,10 +55,13 @@ class TestNetworkErrors:
     def test_cli_fetch_error_handling(self, mocker, tmp_path, capsys):
         """Test CLI error handling when fetch operation fails."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Make fetch_and_extract raise a ProtonFetcherError
-        from protonfetcher import ProtonFetcherError
+        from protonfetcher.exceptions import ProtonFetcherError
 
         mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
             "Network error occurred"
@@ -73,7 +78,7 @@ class TestNetworkErrors:
 
         # Capture the SystemExit
         with pytest.raises(SystemExit) as exc_info:
-            from protonfetcher import main
+            from protonfetcher.cli import main
 
             main()
 
@@ -90,7 +95,7 @@ class TestExtractionErrors:
 
     def test_extraction_error_context(self, mocker, tmp_path):
         """Test that extraction errors include appropriate context."""
-        from protonfetcher import FileSystemClient
+        from protonfetcher.filesystem import FileSystemClient
 
         # Create filesystem client
         file_system_client = FileSystemClient()
@@ -121,7 +126,7 @@ class TestExtractionErrors:
         self, mocker, mock_network_client, mock_filesystem_client, tmp_path
     ):
         """Test download workflow when spinner fails and falls back to curl."""
-        from protonfetcher import GitHubReleaseFetcher
+        from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
         fetcher = GitHubReleaseFetcher(
             network_client=mock_network_client,
@@ -193,10 +198,13 @@ class TestLinkManagementErrors:
     def test_cli_rm_flag_directory_not_found(self, mocker, tmp_path, capsys):
         """Test CLI command handles when the specified directory doesn't exist."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the remove_release method to raise a ProtonFetcherError
-        from protonfetcher import ProtonFetcherError
+        from protonfetcher.exceptions import ProtonFetcherError
 
         mock_fetcher.link_manager.remove_release.side_effect = ProtonFetcherError(
             "Release directory does not exist: /path/to/nonexistent"
@@ -215,7 +223,7 @@ class TestLinkManagementErrors:
 
         # Should exit with error code 1 due to the ProtonFetcherError
         with pytest.raises(SystemExit) as exc_info:
-            from protonfetcher import main
+            from protonfetcher.cli import main
 
             main()
 
@@ -273,7 +281,7 @@ class TestValidationErrors:
 
         # Argparse will exit with code 2 for invalid argument
         with pytest.raises(SystemExit) as exc_info:
-            from protonfetcher import main
+            from protonfetcher.cli import main
 
             main()
 
@@ -285,10 +293,13 @@ class TestValidationErrors:
     def test_cli_list_flag_with_rate_limit_error(self, mocker, tmp_path, capsys):
         """Test CLI command handles rate limit errors properly."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the list_recent_releases method to raise a rate limit error
-        from protonfetcher import ProtonFetcherError
+        from protonfetcher.exceptions import ProtonFetcherError
 
         mock_fetcher.release_manager.list_recent_releases.side_effect = ProtonFetcherError(
             "API rate limit exceeded. Please wait a few minutes before trying again."
@@ -308,7 +319,7 @@ class TestValidationErrors:
 
         # Should exit with error code 1 due to the ProtonFetcherError
         with pytest.raises(SystemExit) as exc_info:
-            from protonfetcher import main
+            from protonfetcher.cli import main
 
             main()
 
@@ -321,10 +332,13 @@ class TestValidationErrors:
     def test_cli_list_flag_json_parse_error(self, mocker, tmp_path, capsys):
         """Test CLI handles JSON parsing errors in list functionality."""
         mock_fetcher = mocker.MagicMock()
-        mocker.patch("protonfetcher.GitHubReleaseFetcher", return_value=mock_fetcher)
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher",
+            return_value=mock_fetcher,
+        )
 
         # Mock the list_recent_releases method to raise a JSON parsing error
-        from protonfetcher import ProtonFetcherError
+        from protonfetcher.exceptions import ProtonFetcherError
 
         mock_fetcher.release_manager.list_recent_releases.side_effect = ProtonFetcherError(
             "Failed to parse JSON response: Expecting value: line 1 column 1 (char 0)"
@@ -344,7 +358,7 @@ class TestValidationErrors:
 
         # Should exit with error code 1 due to the JSON parse error
         with pytest.raises(SystemExit) as exc_info:
-            from protonfetcher import main
+            from protonfetcher.cli import main
 
             main()
 
@@ -371,7 +385,7 @@ class TestValidationErrors:
 
         # Should exit with error code 1 due to argument validation
         with pytest.raises(SystemExit) as exc_info:
-            from protonfetcher import main
+            from protonfetcher.cli import main
 
             main()
 

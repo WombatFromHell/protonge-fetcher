@@ -2,19 +2,13 @@
 Unit tests for LinkManager in protonfetcher.py
 """
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
-from pytest_mock import MockerFixture
 
-from protonfetcher import (
-    ForkName,
-    LinkManagementError,
-    LinkManager,
-    parse_version,
-)
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import LinkManagementError
+from protonfetcher.link_manager import LinkManager
 
 
 class TestLinkManager:
