@@ -1,284 +1,216 @@
 """
-Unit tests for AssetDownloader in protonfetcher.py
+Optimized Unit tests for AssetDownloader in protonfetcher.py
 """
 
 from pathlib import Path
+import urllib.error
+from protonfetcher.asset_downloader import AssetDownloader
+from protonfetcher.exceptions import NetworkError
 
 import pytest
 
-from protonfetcher.asset_downloader import AssetDownloader
-from protonfetcher.exceptions import NetworkError
+
+# Fixtures have been centralized to conftest.py:
+# - mock_dependencies fixture is now asset_downloader_dependencies
+# - downloader fixture is now asset_downloader
+
+
+# --- Test Class ---
 
 
 class TestAssetDownloader:
     """Tests for AssetDownloader class."""
 
-    def test_init(self, mocker):
+    def test_init(self, asset_downloader_dependencies):
         """Test AssetDownloader initialization."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs, timeout=60)
+        downloader = AssetDownloader(
+            asset_downloader_dependencies["network"], asset_downloader_dependencies["fs"], timeout=60
+        )
         assert downloader.timeout == 60
-        assert downloader.network_client == mock_network
-        assert downloader.file_system_client == mock_fs
+        assert downloader.network_client == asset_downloader_dependencies["network"]
+        assert downloader.file_system_client == asset_downloader_dependencies["fs"]
 
-    def test_curl_get_method(self, mocker):
-        """Test curl_get method."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
+    def test_curl_methods(self, asset_downloader, asset_downloader_dependencies, mocker):
+        """
+        Combined test for simple curl wrappers (get, head) to reduce test runner overhead.
+        """
+        # Test GET
+        mock_resp = mocker.MagicMock()
+        asset_downloader_dependencies["network"].get.return_value = mock_resp
 
-        mock_response = mocker.Mock()
-        mock_network.get.return_value = mock_response
-
-        result = downloader.curl_get("https://example.com")
-
-        mock_network.get.assert_called_once_with("https://example.com", None, False)
-        assert result == mock_response
-
-    def test_curl_head_method(self, mocker):
-        """Test curl_head method."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
-
-        mock_response = mocker.Mock()
-        mock_network.head.return_value = mock_response
-
-        result = downloader.curl_head("https://example.com")
-
-        mock_network.head.assert_called_once_with("https://example.com", None, False)
-        assert result == mock_response
-
-    def test_curl_download_method(self, mocker):
-        """Test curl_download method."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
-
-        mock_response = mocker.Mock()
-        mock_network.download.return_value = mock_response
-        output_path = Path("/tmp/test.tar.gz")
-
-        result = downloader.curl_download(
-            "https://example.com/file.tar.gz", output_path
+        assert asset_downloader.curl_get("https://example.com") == mock_resp
+        asset_downloader_dependencies["network"].get.assert_called_with(
+            "https://example.com", None, False
         )
 
-        mock_network.download.assert_called_once_with(
-            "https://example.com/file.tar.gz", output_path, None
+        # Test HEAD
+        asset_downloader_dependencies["network"].head.return_value = mock_resp
+        assert asset_downloader.curl_head("https://example.com") == mock_resp
+        asset_downloader_dependencies["network"].head.assert_called_with(
+            "https://example.com", None, False
         )
-        assert result == mock_response
 
-    def test_download_with_spinner_success(self, mocker, tmp_path):
-        """Test download_with_spinner method with successful download."""
+    def test_curl_download_method(self, asset_downloader, asset_downloader_dependencies, mocker):
+        """Test curl_download method passes correct args."""
+        mock_resp = mocker.MagicMock()
+        asset_downloader_dependencies["network"].download.return_value = mock_resp
 
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
+        # Use a dummy path; no real disk I/O needed
+        output_path = Path("/dummy/test.tar.gz")
 
-        # Mock the request and response for urllib
-        mock_request = mocker.patch("urllib.request.urlopen")
+        result = asset_downloader.curl_download("https://example.com/file", output_path)
+
+        asset_downloader_dependencies["network"].download.assert_called_once_with(
+            "https://example.com/file", output_path, None
+        )
+        assert result == mock_resp
+
+    def test_download_with_spinner_success(self, asset_downloader, asset_downloader_dependencies, mocker):
+        """Test download_with_spinner with minimal data allocation."""
+
+        # Performance fix: Use small chunks (64 bytes) instead of 1MB
+        small_chunk = b"x" * 64
+
         mock_response = mocker.MagicMock()
-        mock_response.headers.get.return_value = str(1024 * 1024)  # 1MB
-        mock_response.read.side_effect = [b"chunk1", b"chunk2", b""]
-        mock_request.return_value.__enter__.return_value = mock_response
+        mock_response.headers.get.return_value = "64"
+        # Return data once, then empty bytes to signal EOF
+        mock_response.read.side_effect = [small_chunk, b""]
 
-        output_path = tmp_path / "test.tar.gz"
+        asset_downloader_dependencies["urlopen"].return_value.__enter__.return_value = mock_response
 
-        # This should succeed with mocked response
-        result = downloader.download_with_spinner(
-            "https://example.com/file.tar.gz", output_path
-        )
+        # Use dummy path
+        output_path = Path("/dummy/test.tar.gz")
 
-        assert result is None  # download_with_spinner returns None
-
-    def test_download_with_spinner_zero_size(self, mocker, tmp_path):
-        """Test download_with_spinner with zero size response."""
-
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
-
-        # Mock the request to return zero size
-        mock_request = mocker.patch("urllib.request.urlopen")
-        mock_response = mocker.MagicMock()
-        mock_response.headers.get.return_value = "0"  # Zero bytes
-        mock_response.read.side_effect = [b""]
-        mock_request.return_value.__enter__.return_value = mock_response
-
-        output_path = tmp_path / "test.tar.gz"
-
-        result = downloader.download_with_spinner(
-            "https://example.com/file.tar.gz", output_path
+        result = asset_downloader.download_with_spinner(
+            "https://example.com/file", output_path
         )
 
         assert result is None
+        asset_downloader_dependencies["open"].assert_called_with(output_path, "wb")
 
-    def test_download_with_spinner_network_error(self, mocker, tmp_path):
-        """Test download_with_spinner with network error."""
-        import urllib.error
-        import urllib.request
+        # Verify spinner interaction (optional, but good for correctness)
+        asset_downloader_dependencies["spinner_cls"].return_value.update.assert_called()
 
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
+    def test_download_with_spinner_zero_size(
+        self, asset_downloader, asset_downloader_dependencies, mocker
+    ):
+        """Test download_with_spinner handles zero size headers immediately."""
+        mock_response = mocker.MagicMock()
+        mock_response.headers.get.return_value = "0"
+        mock_response.read.side_effect = [b""]
+        asset_downloader_dependencies["urlopen"].return_value.__enter__.return_value = mock_response
 
-        # Mock the request to raise an exception
-        mock_request = mocker.patch("urllib.request.urlopen")
-        mock_request.side_effect = urllib.error.URLError("Network error")
+        asset_downloader.download_with_spinner("https://example.com/file", Path("/dummy/out"))
 
-        output_path = tmp_path / "test.tar.gz"
+        asset_downloader_dependencies["open"].assert_called()
+
+    def test_download_with_spinner_network_error(self, asset_downloader, asset_downloader_dependencies):
+        """Test that urllib errors are correctly re-raised as NetworkError."""
+        asset_downloader_dependencies["urlopen"].side_effect = urllib.error.URLError("Fail")
 
         with pytest.raises(NetworkError):
-            downloader.download_with_spinner(
-                "https://example.com/file.tar.gz", output_path
-            )
+            asset_downloader.download_with_spinner("https://url", Path("/dummy/out"))
 
-    def test_download_asset_success(self, mocker, tmp_path):
-        """Test download_asset method with successful download."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
+    def test_download_asset_success_flow(self, asset_downloader, asset_downloader_dependencies, mocker):
+        """Test full asset download flow (check exists -> download)."""
 
-        # Mock file system client methods
-        mock_fs.exists.return_value = False  # File doesn't exist initially
+        # Define a dynamic side effect for file existence
+        # Returns False initially, but True if the download method has been called
+        def exists_side_effect(path):
+            if asset_downloader_dependencies["network"].download.called:
+                return True
+            return False
 
-        # Mock the download method to succeed
-        mock_download_response = mocker.Mock()
-        mock_download_response.returncode = 0
-        mock_download_response.stderr = ""
-        mock_network.download.return_value = mock_download_response
+        asset_downloader_dependencies["fs"].exists.side_effect = exists_side_effect
 
-        repo = "test/repo"
-        tag = "test-tag"
-        asset_name = "test-asset.tar.gz"
-        output_path = tmp_path / "test.tar.gz"
-        mock_release_manager = mocker.Mock()
+        # Setup: Network download succeeds (fallback curl method)
+        mock_download_resp = mocker.MagicMock(returncode=0, stderr="")
+        asset_downloader_dependencies["network"].download.return_value = mock_download_resp
 
-        result = downloader.download_asset(
-            repo, tag, asset_name, output_path, mock_release_manager
+        # Mock the download_with_spinner method to raise an exception so it falls back to curl
+        mocker.patch.object(
+            asset_downloader, "download_with_spinner", side_effect=Exception("Spinner failed")
         )
 
-        assert result == output_path
-        mock_network.download.assert_called_once()
-
-    def test_download_asset_file_exists_and_matches(self, mocker, tmp_path):
-        """Test download_asset when file exists and matches expected size."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
-
-        # Create the file so that when out_path.stat() is called, it finds the file
-        output_path = tmp_path / "test.tar.gz"
-        output_path.write_bytes(b"x" * (1024 * 1024))  # Create file with 1MB of data
-
-        # Mock file system client to indicate file exists with matching size
-        mock_fs.exists.return_value = True
-        mock_fs.stat.return_value.st_size = 1024 * 1024  # 1MB
-
         repo = "test/repo"
-        tag = "test-tag"
-        asset_name = "test-asset.tar.gz"
-        mock_release_manager = mocker.Mock()
-        mock_release_manager.get_remote_asset_size.return_value = 1024 * 1024  # 1MB
+        tag = "v1"
+        asset = "file.tar.gz"
+        path = Path("/dummy/file.tar.gz")
 
-        result = downloader.download_asset(
-            repo, tag, asset_name, output_path, mock_release_manager
+        result = asset_downloader.download_asset(
+            repo, tag, asset, path, asset_downloader_dependencies["release_manager"]
         )
 
-        assert result == output_path
-        # Should not call network client since file already exists with correct size
-        mock_network.download.assert_not_called()
+        assert result == path
+        asset_downloader_dependencies["network"].download.assert_called_once()
 
-    def test_download_asset_file_exists_with_wrong_size(self, mocker, tmp_path):
-        """Test download_asset when file exists but size doesn't match."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
+    def test_download_asset_skips_existing(self, asset_downloader, asset_downloader_dependencies):
+        """Test download is skipped if file exists and matches size."""
+        path = Path("/dummy/file.tar.gz")
+        size = 1024
 
-        # Create the file so that when out_path.stat() is called, it finds the file
-        output_path = tmp_path / "test.tar.gz"
-        output_path.write_bytes(b"x" * (512 * 1024))  # Create file with 0.5MB of data
+        # Setup: Local file matches remote size
+        asset_downloader_dependencies["fs"].exists.return_value = True
+        asset_downloader_dependencies["fs"].size.return_value = size
+        asset_downloader_dependencies["release_manager"].get_remote_asset_size.return_value = size
 
-        # Mock file system client to indicate file exists with wrong size
-        mock_fs.exists.return_value = True
-
-        # Mock download to succeed (file will be overwritten in the download process)
-        mock_download_response = mocker.Mock()
-        mock_download_response.returncode = 0
-        mock_download_response.stderr = ""
-        mock_network.download.return_value = mock_download_response
-
-        repo = "test/repo"
-        tag = "test-tag"
-        asset_name = "test-asset.tar.gz"
-        mock_release_manager = mocker.Mock()
-        mock_release_manager.get_remote_asset_size.return_value = (
-            1024 * 1024
-        )  # 1MB (different from local)
-
-        result = downloader.download_asset(
-            repo, tag, asset_name, output_path, mock_release_manager
+        result = asset_downloader.download_asset(
+            "repo", "tag", "asset", path, asset_downloader_dependencies["release_manager"]
         )
 
-        assert result == output_path
-        # The download should proceed since the sizes don't match (no need to unlink separately)
-        mock_network.download.assert_called_once()
+        assert result == path
+        # Crucial: verify network was NOT called
+        asset_downloader_dependencies["network"].download.assert_not_called()
 
-    def test_download_asset_curl_fallback(self, mocker, tmp_path):
-        """Test download_asset with curl fallback when spinner fails."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
+    def test_download_asset_overwrites_wrong_size(
+        self, asset_downloader, asset_downloader_dependencies, mocker
+    ):
+        """Test download proceeds if local file exists but has wrong size."""
+        path = Path("/dummy/file.tar.gz")
 
-        # Mock file system client methods
-        mock_fs.exists.return_value = False  # File doesn't exist initially
+        # Setup: Sizes mismatch
+        asset_downloader_dependencies["fs"].exists.return_value = True
+        asset_downloader_dependencies["fs"].size.return_value = 500
+        asset_downloader_dependencies["release_manager"].get_remote_asset_size.return_value = 1000
 
-        # Mock the download method to raise an exception (triggering fallback)
-        mock_network.download.side_effect = Exception("Curl failed")
+        # Mock the download_with_spinner method to raise an exception so it falls back to curl
+        mocker.patch.object(
+            asset_downloader, "download_with_spinner", side_effect=Exception("Spinner failed")
+        )
 
-        repo = "test/repo"
-        tag = "test-tag"
-        asset_name = "test-asset.tar.gz"
-        output_path = tmp_path / "test.tar.gz"
-        mock_release_manager = mocker.Mock()
+        asset_downloader_dependencies["network"].download.return_value = mocker.MagicMock(
+            returncode=0
+        )
 
-        with pytest.raises(Exception):  # Should raise the original exception
-            downloader.download_asset(
-                repo, tag, asset_name, output_path, mock_release_manager
-            )
+        asset_downloader.download_asset(
+            "repo", "tag", "asset", path, asset_downloader_dependencies["release_manager"]
+        )
 
-    def test_download_asset_spinner_fallback_success(self, mocker, tmp_path):
-        """Test download_asset fallback to spinner when curl fails."""
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        downloader = AssetDownloader(mock_network, mock_fs)
+        # Crucial: verify network WAS called
+        asset_downloader_dependencies["network"].download.assert_called_once()
 
-        # Mock file system client methods
-        mock_fs.exists.return_value = False  # File doesn't exist initially
+    def test_download_asset_spinner_fallback(
+        self, asset_downloader, asset_downloader_dependencies, mocker
+    ):
+        """Test fallback to curl if urllib spinner fails."""
+        path = Path("/dummy/file.tar.gz")
 
-        # Mock the download method to fail initially, then succeed with urllib
-        mock_network.download.side_effect = [Exception("Curl failed"), mocker.Mock()]
+        asset_downloader_dependencies["fs"].exists.return_value = False
 
-        # Create a mock for the download_with_spinner method
-        mocker.patch.object(downloader, "download_with_spinner", return_value=None)
+        # Mock spinner to fail, so it falls back to curl
+        mocker.patch.object(
+            asset_downloader,
+            "download_with_spinner",
+            side_effect=NetworkError("Spinner failed"),
+        )
 
-        asset_url = "https://example.com/file.tar.gz"
-        output_path = tmp_path / "test.tar.gz"
-        expected_size = 1024 * 1024  # 1MB
+        # Setup: curl download succeeds
+        mock_download_resp = mocker.MagicMock(returncode=0, stderr="")
+        asset_downloader_dependencies["network"].download.return_value = mock_download_resp
 
-        # Since the first call failed but the second succeeded, this should work
-        # This is actually a complex scenario - let's simplify by checking the urllib path
+        asset_downloader.download_asset(
+            "repo", "tag", "asset", path, asset_downloader_dependencies["release_manager"]
+        )
 
-        # Mock urllib to simulate the spinner download working
-        mock_urlopen = mocker.patch("urllib.request.urlopen")
-        mock_response = mocker.MagicMock()
-        mock_response.headers.get.return_value = str(expected_size)
-        mock_response.read.side_effect = [b"chunk1", b"chunk2", b""]
-        mock_urlopen.return_value.__enter__.return_value = mock_response
-
-        # Create a new downloader instance for the urllib test
-        downloader2 = AssetDownloader(mock_network, mock_fs)
-        result = downloader2.download_with_spinner(asset_url, output_path)
-
-        assert result is None
+        # Verify fallback flow: spinner tried first, then curl succeeded
+        asset_downloader_dependencies["network"].download.assert_called_once()

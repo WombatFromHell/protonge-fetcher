@@ -49,6 +49,9 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Mock the filesystem client to return False for exists and appropriate values for other methods
+        mock_fs.exists.return_value = False
+
         manager = ReleaseManager(mock_network, mock_fs)
         # Override cache dir for testing
         manager._cache_dir = tmp_path / "cache"
@@ -61,15 +64,19 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Mock the filesystem client to return appropriate values
+        mock_fs.exists.return_value = True
+        # Mock mtime to return a recent time (not expired)
+        current_time = time.time()
+        mock_fs.mtime.return_value = (
+            current_time - 100
+        )  # 100 seconds ago, well within 3600s default
+
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"
-        manager._cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create a cache file
-        cache_file = manager._cache_dir / "test_cache"
-        cache_file.write_text("test content")
-
-        # File should be valid with default max_age (3600 seconds)
+        # Create a cache file path
+        cache_file = tmp_path / "cache" / "test_cache"
         assert manager._is_cache_valid(cache_file)
 
     def test_is_cache_valid_file_exists_expired(self, tmp_path):
@@ -77,20 +84,19 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Mock the filesystem client to return appropriate values
+        mock_fs.exists.return_value = True
+        # Mock mtime to return an old time (expired)
+        current_time = time.time()
+        mock_fs.mtime.return_value = (
+            current_time - 4000
+        )  # 4000 seconds ago, more than default 3600 and custom 1000
+
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"
-        manager._cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create a cache file
-        cache_file = manager._cache_dir / "test_cache"
-        cache_file.write_text("test content")
-
-        # Modify the file's modification time to be in the past
-        import os
-
-        old_time = time.time() - 4000  # 4000 seconds ago (more than default 3600)
-        os.utime(cache_file, (old_time, old_time))
-
+        # Create a cache file path
+        cache_file = tmp_path / "cache" / "test_cache"
         # File should be invalid with default max_age (3600 seconds) and short custom max_age
         assert not manager._is_cache_valid(cache_file, max_age=1000)
 
@@ -99,23 +105,36 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Calculate the actual cache key that will be generated
+        import hashlib
+
+        expected_cache_key = hashlib.md5(
+            b"test/repo_test-tag_test-asset.tar.gz_size"
+        ).hexdigest()
+        cache_file_path = tmp_path / "cache" / expected_cache_key
+
+        def exists_side_effect(path):
+            return path == cache_file_path
+
+        def mtime_side_effect(path):
+            return time.time() - 100  # Not expired
+
+        def read_side_effect(path):
+            cache_data = {
+                "size": 12345,
+                "timestamp": time.time(),
+                "repo": "test/repo",
+                "tag": "test-tag",
+                "asset_name": "test-asset.tar.gz",
+            }
+            return json.dumps(cache_data).encode()
+
+        mock_fs.exists.side_effect = exists_side_effect
+        mock_fs.mtime.side_effect = mtime_side_effect
+        mock_fs.read.side_effect = read_side_effect
+
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"
-        manager._cache_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create a cache file with valid data
-        cache_key = manager._get_cache_key("test/repo", "test-tag", "test-asset.tar.gz")
-        cache_path = manager._get_cache_path(cache_key)
-
-        cache_data = {
-            "size": 12345,
-            "timestamp": time.time(),
-            "repo": "test/repo",
-            "tag": "test-tag",
-            "asset_name": "test-asset.tar.gz",
-        }
-        with open(cache_path, "w") as f:
-            json.dump(cache_data, f)
 
         size = manager._get_cached_asset_size(
             "test/repo", "test-tag", "test-asset.tar.gz"
@@ -127,16 +146,29 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Calculate the actual cache key that will be generated
+        import hashlib
+
+        expected_cache_key = hashlib.md5(
+            b"test/repo_test-tag_test-asset.tar.gz_size"
+        ).hexdigest()
+        cache_file_path = tmp_path / "cache" / expected_cache_key
+
+        def exists_side_effect(path):
+            return path == cache_file_path
+
+        def mtime_side_effect(path):
+            return time.time() - 100  # Not expired
+
+        def read_side_effect(path):
+            return b"invalid json"
+
+        mock_fs.exists.side_effect = exists_side_effect
+        mock_fs.mtime.side_effect = mtime_side_effect
+        mock_fs.read.side_effect = read_side_effect
+
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"
-        manager._cache_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create a cache file with invalid JSON
-        cache_key = manager._get_cache_key("test/repo", "test-tag", "test-asset.tar.gz")
-        cache_path = manager._get_cache_path(cache_key)
-
-        with open(cache_path, "w") as f:
-            f.write("invalid json")
 
         size = manager._get_cached_asset_size(
             "test/repo", "test-tag", "test-asset.tar.gz"
@@ -148,29 +180,36 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Calculate the actual cache key that will be generated
+        import hashlib
+
+        expected_cache_key = hashlib.md5(
+            b"test/repo_test-tag_test-asset.tar.gz_size"
+        ).hexdigest()
+        cache_file_path = tmp_path / "cache" / expected_cache_key
+
+        def exists_side_effect(path):
+            return path == cache_file_path
+
+        def mtime_side_effect(path):
+            return time.time() - 4000  # Expired (older than default 3600 seconds)
+
+        def read_side_effect(path):
+            cache_data = {
+                "size": 12345,
+                "timestamp": time.time(),
+                "repo": "test/repo",
+                "tag": "test-tag",
+                "asset_name": "test-asset.tar.gz",
+            }
+            return json.dumps(cache_data).encode()
+
+        mock_fs.exists.side_effect = exists_side_effect
+        mock_fs.mtime.side_effect = mtime_side_effect
+        mock_fs.read.side_effect = read_side_effect
+
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"
-        manager._cache_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create a cache file with valid data but set mtime to be expired
-        cache_key = manager._get_cache_key("test/repo", "test-tag", "test-asset.tar.gz")
-        cache_path = manager._get_cache_path(cache_key)
-
-        cache_data = {
-            "size": 12345,
-            "timestamp": time.time(),
-            "repo": "test/repo",
-            "tag": "test-tag",
-            "asset_name": "test-asset.tar.gz",
-        }
-        with open(cache_path, "w") as f:
-            json.dump(cache_data, f)
-
-        # Modify the file's modification time to be expired
-        import os
-
-        old_time = time.time() - 4000  # 4000 seconds ago
-        os.utime(cache_path, (old_time, old_time))
 
         # Should return None because cache is expired
         size = manager._get_cached_asset_size(
@@ -183,22 +222,35 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Calculate the actual cache key that will be generated
+        import hashlib
+
+        expected_cache_key = hashlib.md5(
+            b"test/repo_test-tag_test-asset.tar.gz_size"
+        ).hexdigest()
+        cache_file_path = tmp_path / "cache" / expected_cache_key
+
+        def exists_side_effect(path):
+            return path == cache_file_path
+
+        def mtime_side_effect(path):
+            return time.time() - 100  # Not expired
+
+        def read_side_effect(path):
+            cache_data = {
+                "timestamp": time.time(),
+                "repo": "test/repo",
+                "tag": "test-tag",
+                "asset_name": "test-asset.tar.gz",
+            }
+            return json.dumps(cache_data).encode()
+
+        mock_fs.exists.side_effect = exists_side_effect
+        mock_fs.mtime.side_effect = mtime_side_effect
+        mock_fs.read.side_effect = read_side_effect
+
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"
-        manager._cache_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create a cache file without size field
-        cache_key = manager._get_cache_key("test/repo", "test-tag", "test-asset.tar.gz")
-        cache_path = manager._get_cache_path(cache_key)
-
-        cache_data = {
-            "timestamp": time.time(),
-            "repo": "test/repo",
-            "tag": "test-tag",
-            "asset_name": "test-asset.tar.gz",
-        }
-        with open(cache_path, "w") as f:
-            json.dump(cache_data, f)
 
         size = manager._get_cached_asset_size(
             "test/repo", "test-tag", "test-asset.tar.gz"
@@ -210,9 +262,17 @@ class TestReleaseManagerCache:
         mock_network = MagicMock()
         mock_fs = MagicMock()
 
+        # Mock filesystem client to track write calls
+        written_files = {}
+
+        def write_side_effect(path, data):
+            written_files[path] = data
+            return None  # write method returns None
+
+        mock_fs.write.side_effect = write_side_effect
+
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"
-        manager._cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Cache an asset size
         repo, tag, asset_name, size = (
@@ -225,23 +285,31 @@ class TestReleaseManagerCache:
 
         # Verify the cache file was created with correct data
         cache_key = manager._get_cache_key(repo, tag, asset_name)
-        cache_path = manager._get_cache_path(cache_key)
+        expected_path = manager._get_cache_path(cache_key)
 
-        assert cache_path.exists()
+        # Check that write was called exactly once
+        assert mock_fs.write.call_count == 1
 
-        with open(cache_path) as f:
-            cached_data = json.load(f)
+        # Check that it was called with the correct path
+        call_args = mock_fs.write.call_args
+        written_path, written_data = call_args[0]  # Extract path and data from the call
 
-        assert cached_data["size"] == size
-        assert cached_data["repo"] == repo
-        assert cached_data["tag"] == tag
-        assert cached_data["asset_name"] == asset_name
-        assert "timestamp" in cached_data
+        assert written_path == expected_path
+        written_data_dict = json.loads(written_data.decode())
+
+        assert written_data_dict["size"] == size
+        assert written_data_dict["repo"] == repo
+        assert written_data_dict["tag"] == tag
+        assert written_data_dict["asset_name"] == asset_name
+        assert "timestamp" in written_data_dict
 
     def test_cache_asset_size_io_error(self, tmp_path, mocker):
         """Test _cache_asset_size handles IO errors gracefully."""
         mock_network = MagicMock()
         mock_fs = MagicMock()
+
+        # Mock the write method to raise an exception
+        mock_fs.write.side_effect = OSError("Permission denied")
 
         manager = ReleaseManager(mock_network, mock_fs)
         manager._cache_dir = tmp_path / "cache"

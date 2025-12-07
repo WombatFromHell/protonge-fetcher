@@ -48,7 +48,7 @@ class ReleaseManager:
             self._cache_dir = Path.home() / ".cache" / "protonfetcher"
 
         # Create cache directory if it doesn't exist
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self.file_system_client.mkdir(self._cache_dir, parents=True, exist_ok=True)
 
     def fetch_latest_tag(self, repo: str) -> str:
         """Get the latest release tag by following the redirect from /releases/latest.
@@ -116,10 +116,10 @@ class ReleaseManager:
 
     def _is_cache_valid(self, cache_path: Path, max_age: int = 3600) -> bool:
         """Check if cached data is still valid (not expired)."""
-        if not cache_path.exists():
+        if not self.file_system_client.exists(cache_path):
             return False
 
-        age = time.time() - cache_path.stat().st_mtime
+        age = time.time() - self.file_system_client.mtime(cache_path)
         return age < max_age
 
     def _get_cached_asset_size(
@@ -131,9 +131,9 @@ class ReleaseManager:
 
         if self._is_cache_valid(cache_path):
             try:
-                with open(cache_path, "r") as f:
-                    cached_data = json.load(f)
-                    return cached_data.get("size")
+                cached_data_bytes = self.file_system_client.read(cache_path)
+                cached_data = json.loads(cached_data_bytes.decode("utf-8"))
+                return cached_data.get("size")
             except (json.JSONDecodeError, KeyError, IOError):
                 # If cache file is invalid, return None to force a fresh fetch
                 pass
@@ -154,8 +154,8 @@ class ReleaseManager:
                 "tag": tag,
                 "asset_name": asset_name,
             }
-            with open(cache_path, "w") as f:
-                json.dump(cache_data, f)
+            cache_data_bytes = json.dumps(cache_data).encode("utf-8")
+            self.file_system_client.write(cache_path, cache_data_bytes)
         except IOError as e:
             logger.debug(f"Failed to write to cache: {e}")
 

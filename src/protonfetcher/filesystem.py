@@ -28,6 +28,12 @@ class FileSystemClient:
         with open(path, "rb") as f:
             return f.read()
 
+    def size(self, path: Path) -> int:
+        return path.stat().st_size
+
+    def mtime(self, path: Path) -> float:
+        return path.stat().st_mtime
+
     def symlink_to(
         self, link_path: Path, target_path: Path, target_is_directory: bool = True
     ) -> None:

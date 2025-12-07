@@ -123,9 +123,7 @@ class AssetDownloader:
 
         # Check if local file already exists and has the same size as remote
         if self.file_system_client.exists(out_path):
-            local_size = (
-                out_path.stat().st_size
-            )  # Note: .stat() is still a Path method; we can't fully abstract this
+            local_size = self.file_system_client.size(out_path)
             remote_size = release_manager.get_remote_asset_size(repo, tag, asset_name)
 
             if local_size == remote_size:

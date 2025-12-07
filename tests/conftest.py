@@ -4,6 +4,7 @@ Shared pytest configuration and fixtures for protonfetcher tests.
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,7 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir / "src"))
 
 from protonfetcher.common import ForkName  # noqa: E402
+from protonfetcher.asset_downloader import AssetDownloader  # noqa: E402
 
 
 @pytest.fixture
@@ -221,11 +223,21 @@ def mock_filesystem_client(mocker, standardized_test_data):
         """Standard iterator for directory contents - return empty by default."""
         return iter([])
 
+    def standard_size(path):
+        """Standard file size - return 1MB by default."""
+        return 1024 * 1024
+
+    def standard_mtime(path):
+        """Standard modification time - return current time by default."""
+        return time.time()
+
     mock.exists.side_effect = standard_exists
     mock.is_dir.side_effect = standard_is_dir
     mock.is_symlink.side_effect = standard_is_symlink
     mock.resolve.side_effect = standard_resolve
     mock.iterdir.side_effect = standard_iterdir
+    mock.size.side_effect = standard_size
+    mock.mtime.side_effect = standard_mtime
 
     return mock
 
@@ -546,3 +558,41 @@ def test_data_by_fork(standardized_test_data):
             (fork, data["example_tag"], data["example_asset"], data["repo"])
         )
     return forks_data
+
+
+@pytest.fixture
+def asset_downloader_dependencies(mocker):
+    """
+    Creates a context with all necessary mocks pre-configured for AssetDownloader.
+    This reduces setup boilerplate and object creation overhead.
+    """
+    # Create a spinner mock instance with context manager support
+    spinner_mock = mocker.patch("protonfetcher.asset_downloader.Spinner")
+    # Create the spinner instance that will be returned by Spinner(...)
+    spinner_instance = mocker.MagicMock()
+    # Setup context manager protocol for the spinner instance
+    spinner_instance.__enter__.return_value = spinner_instance
+    spinner_instance.__exit__.return_value = None
+    # Set the mock's return value to be our instance
+    spinner_mock.return_value = spinner_instance
+
+    return {
+        "network": mocker.Mock(),
+        "fs": mocker.Mock(),
+        "release_manager": mocker.Mock(),
+        "spinner_cls": spinner_mock,
+        "open": mocker.patch("builtins.open", mocker.mock_open()),
+        "time": mocker.patch("time.time", return_value=0),
+        "sleep": mocker.patch("time.sleep"),  # strictly prevent sleeping
+        "urlopen": mocker.patch("urllib.request.urlopen"),
+    }
+
+
+@pytest.fixture
+def asset_downloader(asset_downloader_dependencies):
+    """Returns an initialized AssetDownloader with mocked clients."""
+    return AssetDownloader(
+        asset_downloader_dependencies["network"],
+        asset_downloader_dependencies["fs"],
+        timeout=60
+    )
