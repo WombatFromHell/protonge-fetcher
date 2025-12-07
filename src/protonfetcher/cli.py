@@ -132,13 +132,13 @@ def convert_fork_to_enum(fork_arg: Union[str, ForkName, None]) -> ForkName:
 
 
 def handle_ls_operation(
-    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path
+    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path, list_all_forks: bool = False
 ) -> None:
     """Handle the --ls operation to list symbolic links."""
-    logger.info("Listing recognized links and their associated Proton fork folders...")
+    print("Listing recognized links and their associated Proton fork folders...")
 
-    # If no fork specified, list links for all forks
-    if not hasattr(args, "fork") or args.fork is None:
+    # If list_all_forks is True, or if no fork specified, list links for all forks
+    if list_all_forks or (not hasattr(args, "fork") or args.fork is None):
         forks_to_check = [ForkName.GE_PROTON, ForkName.PROTON_EM]
     else:
         # Validate and narrow the type - convert string to ForkName if needed
@@ -157,10 +157,10 @@ def handle_ls_operation(
 
 
 def _handle_ls_operation_flow(
-    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path
+    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path, list_all_forks: bool = False
 ) -> None:
     """Handle the --ls operation flow."""
-    handle_ls_operation(fetcher, args, extract_dir)
+    handle_ls_operation(fetcher, args, extract_dir, list_all_forks)
     print("Success")
 
 
@@ -212,6 +212,21 @@ def _handle_default_operation_flow(
 
 def main() -> None:
     """CLI entry point."""
+    import sys
+
+    # Check for explicit flags in sys.argv before full parsing to determine default behavior
+    argv_list = sys.argv[1:]
+
+    # Check if operation flags were explicitly provided in sys.argv
+    has_explicit_ls = any(arg in ['--ls'] for arg in argv_list)
+    has_explicit_list = any(arg in ['--list', '-l'] for arg in argv_list)
+    has_explicit_rm = any(arg in ['--rm'] for arg in argv_list) or any(arg.startswith('--rm=') for arg in argv_list)
+
+    # Check if functional flags were explicitly provided in sys.argv
+    has_explicit_fork = any(arg in ['--fork', '-f'] for arg in argv_list) or any(arg.startswith('--fork=') or arg.startswith('-f=') for arg in argv_list)
+    has_explicit_release = any(arg in ['--release', '-r'] for arg in argv_list) or any(arg.startswith('--release=') or arg.startswith('-r=') for arg in argv_list)
+
+    # Parse the arguments
     args = parse_arguments()
 
     # Expand user home directory (~) in paths
@@ -224,24 +239,30 @@ def main() -> None:
     try:
         fetcher = GitHubReleaseFetcher()
 
-        # Handle --ls flag first to avoid setting default fork prematurely
+        # Check if any explicit operation flag is provided
+        has_operation_flag = has_explicit_ls or has_explicit_list or has_explicit_rm
+
+        # Check if functional flags were provided originally (before _set_default_fork)
+        has_functional_flags = has_explicit_fork or has_explicit_release
+
+        # Handle --ls flag (explicitly set)
         if args.ls:
-            _handle_ls_operation_flow(fetcher, args, extract_dir)
+            # For explicit --ls flag, list all forks if no specific fork was provided in the command
+            _handle_ls_operation_flow(fetcher, args, extract_dir, list_all_forks=not has_explicit_fork)
             return
-
-        # Set default fork if not provided (for non --ls operations)
-        if not hasattr(args, "fork"):
-            args.fork = DEFAULT_FORK
-
-        # Get the repo based on selected fork - handle string-to-enum conversion
-        target_fork: ForkName = convert_fork_to_enum(args.fork)
-        from .common import FORKS
-
-        repo = FORKS[target_fork].repo
-        logger.info(f"Using fork: {target_fork} ({repo})")
 
         # Handle --list flag
         if args.list:
+            # Set default fork if not provided
+            if not hasattr(args, "fork") or args.fork is None:
+                args.fork = DEFAULT_FORK
+
+            # Get the repo based on selected fork - handle string-to-enum conversion
+            target_fork: ForkName = convert_fork_to_enum(args.fork)
+            from .common import FORKS
+            repo = FORKS[target_fork].repo
+            logger.info(f"Using fork: {target_fork} ({repo})")
+
             _handle_list_operation_flow(fetcher, repo)
             return
 
@@ -250,7 +271,34 @@ def main() -> None:
             _handle_rm_operation_flow(fetcher, args, extract_dir)
             return
 
-        # Handle default operation (fetch and extract)
+        # If no explicit operation flags (not --ls, --list, --rm), default to either ls or fetch based on presence of functional flags
+        if not has_operation_flag:
+            # If functional flags were provided (--fork or --release), proceed with fetch operation
+            if has_functional_flags:
+                # Use the fork specified by the user or default if not specified
+                actual_fork = convert_fork_to_enum(
+                    args.fork if hasattr(args, "fork") and args.fork is not None else None
+                )
+                from .common import FORKS
+                repo = FORKS[actual_fork].repo
+                logger.info(f"Using fork: {actual_fork} ({repo})")
+
+                _handle_default_operation_flow(fetcher, repo, output_dir, extract_dir, args)
+                return
+            else:
+                # No operation flags and no functional flags - default to listing all links
+                _handle_ls_operation_flow(fetcher, args, extract_dir, list_all_forks=True)
+                return
+
+        # Handle default operation (fetch and extract) - fallback, though shouldn't reach here due to operation flag logic
+        # This fallback is here to make sure we handle any remaining cases
+        actual_fork = convert_fork_to_enum(
+            args.fork if hasattr(args, "fork") and args.fork is not None else None
+        )
+        from .common import FORKS
+        repo = FORKS[actual_fork].repo
+        logger.info(f"Using fork: {actual_fork} ({repo})")
+
         _handle_default_operation_flow(fetcher, repo, output_dir, extract_dir, args)
 
     except ProtonFetcherError as e:

@@ -63,6 +63,8 @@ class TestNetworkErrors:
 
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",

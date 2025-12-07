@@ -24,13 +24,17 @@ class TestAssetDownloader:
     def test_init(self, asset_downloader_dependencies):
         """Test AssetDownloader initialization."""
         downloader = AssetDownloader(
-            asset_downloader_dependencies["network"], asset_downloader_dependencies["fs"], timeout=60
+            asset_downloader_dependencies["network"],
+            asset_downloader_dependencies["fs"],
+            timeout=60,
         )
         assert downloader.timeout == 60
         assert downloader.network_client == asset_downloader_dependencies["network"]
         assert downloader.file_system_client == asset_downloader_dependencies["fs"]
 
-    def test_curl_methods(self, asset_downloader, asset_downloader_dependencies, mocker):
+    def test_curl_methods(
+        self, asset_downloader, asset_downloader_dependencies, mocker
+    ):
         """
         Combined test for simple curl wrappers (get, head) to reduce test runner overhead.
         """
@@ -50,7 +54,9 @@ class TestAssetDownloader:
             "https://example.com", None, False
         )
 
-    def test_curl_download_method(self, asset_downloader, asset_downloader_dependencies, mocker):
+    def test_curl_download_method(
+        self, asset_downloader, asset_downloader_dependencies, mocker
+    ):
         """Test curl_download method passes correct args."""
         mock_resp = mocker.MagicMock()
         asset_downloader_dependencies["network"].download.return_value = mock_resp
@@ -65,7 +71,9 @@ class TestAssetDownloader:
         )
         assert result == mock_resp
 
-    def test_download_with_spinner_success(self, asset_downloader, asset_downloader_dependencies, mocker):
+    def test_download_with_spinner_success(
+        self, asset_downloader, asset_downloader_dependencies, mocker
+    ):
         """Test download_with_spinner with minimal data allocation."""
 
         # Performance fix: Use small chunks (64 bytes) instead of 1MB
@@ -76,7 +84,9 @@ class TestAssetDownloader:
         # Return data once, then empty bytes to signal EOF
         mock_response.read.side_effect = [small_chunk, b""]
 
-        asset_downloader_dependencies["urlopen"].return_value.__enter__.return_value = mock_response
+        asset_downloader_dependencies[
+            "urlopen"
+        ].return_value.__enter__.return_value = mock_response
 
         # Use dummy path
         output_path = Path("/dummy/test.tar.gz")
@@ -98,20 +108,30 @@ class TestAssetDownloader:
         mock_response = mocker.MagicMock()
         mock_response.headers.get.return_value = "0"
         mock_response.read.side_effect = [b""]
-        asset_downloader_dependencies["urlopen"].return_value.__enter__.return_value = mock_response
+        asset_downloader_dependencies[
+            "urlopen"
+        ].return_value.__enter__.return_value = mock_response
 
-        asset_downloader.download_with_spinner("https://example.com/file", Path("/dummy/out"))
+        asset_downloader.download_with_spinner(
+            "https://example.com/file", Path("/dummy/out")
+        )
 
         asset_downloader_dependencies["open"].assert_called()
 
-    def test_download_with_spinner_network_error(self, asset_downloader, asset_downloader_dependencies):
+    def test_download_with_spinner_network_error(
+        self, asset_downloader, asset_downloader_dependencies
+    ):
         """Test that urllib errors are correctly re-raised as NetworkError."""
-        asset_downloader_dependencies["urlopen"].side_effect = urllib.error.URLError("Fail")
+        asset_downloader_dependencies["urlopen"].side_effect = urllib.error.URLError(
+            "Fail"
+        )
 
         with pytest.raises(NetworkError):
             asset_downloader.download_with_spinner("https://url", Path("/dummy/out"))
 
-    def test_download_asset_success_flow(self, asset_downloader, asset_downloader_dependencies, mocker):
+    def test_download_asset_success_flow(
+        self, asset_downloader, asset_downloader_dependencies, mocker
+    ):
         """Test full asset download flow (check exists -> download)."""
 
         # Define a dynamic side effect for file existence
@@ -125,11 +145,15 @@ class TestAssetDownloader:
 
         # Setup: Network download succeeds (fallback curl method)
         mock_download_resp = mocker.MagicMock(returncode=0, stderr="")
-        asset_downloader_dependencies["network"].download.return_value = mock_download_resp
+        asset_downloader_dependencies[
+            "network"
+        ].download.return_value = mock_download_resp
 
         # Mock the download_with_spinner method to raise an exception so it falls back to curl
         mocker.patch.object(
-            asset_downloader, "download_with_spinner", side_effect=Exception("Spinner failed")
+            asset_downloader,
+            "download_with_spinner",
+            side_effect=Exception("Spinner failed"),
         )
 
         repo = "test/repo"
@@ -144,7 +168,9 @@ class TestAssetDownloader:
         assert result == path
         asset_downloader_dependencies["network"].download.assert_called_once()
 
-    def test_download_asset_skips_existing(self, asset_downloader, asset_downloader_dependencies):
+    def test_download_asset_skips_existing(
+        self, asset_downloader, asset_downloader_dependencies
+    ):
         """Test download is skipped if file exists and matches size."""
         path = Path("/dummy/file.tar.gz")
         size = 1024
@@ -152,10 +178,16 @@ class TestAssetDownloader:
         # Setup: Local file matches remote size
         asset_downloader_dependencies["fs"].exists.return_value = True
         asset_downloader_dependencies["fs"].size.return_value = size
-        asset_downloader_dependencies["release_manager"].get_remote_asset_size.return_value = size
+        asset_downloader_dependencies[
+            "release_manager"
+        ].get_remote_asset_size.return_value = size
 
         result = asset_downloader.download_asset(
-            "repo", "tag", "asset", path, asset_downloader_dependencies["release_manager"]
+            "repo",
+            "tag",
+            "asset",
+            path,
+            asset_downloader_dependencies["release_manager"],
         )
 
         assert result == path
@@ -171,19 +203,27 @@ class TestAssetDownloader:
         # Setup: Sizes mismatch
         asset_downloader_dependencies["fs"].exists.return_value = True
         asset_downloader_dependencies["fs"].size.return_value = 500
-        asset_downloader_dependencies["release_manager"].get_remote_asset_size.return_value = 1000
+        asset_downloader_dependencies[
+            "release_manager"
+        ].get_remote_asset_size.return_value = 1000
 
         # Mock the download_with_spinner method to raise an exception so it falls back to curl
         mocker.patch.object(
-            asset_downloader, "download_with_spinner", side_effect=Exception("Spinner failed")
+            asset_downloader,
+            "download_with_spinner",
+            side_effect=Exception("Spinner failed"),
         )
 
-        asset_downloader_dependencies["network"].download.return_value = mocker.MagicMock(
-            returncode=0
-        )
+        asset_downloader_dependencies[
+            "network"
+        ].download.return_value = mocker.MagicMock(returncode=0)
 
         asset_downloader.download_asset(
-            "repo", "tag", "asset", path, asset_downloader_dependencies["release_manager"]
+            "repo",
+            "tag",
+            "asset",
+            path,
+            asset_downloader_dependencies["release_manager"],
         )
 
         # Crucial: verify network WAS called
@@ -206,10 +246,16 @@ class TestAssetDownloader:
 
         # Setup: curl download succeeds
         mock_download_resp = mocker.MagicMock(returncode=0, stderr="")
-        asset_downloader_dependencies["network"].download.return_value = mock_download_resp
+        asset_downloader_dependencies[
+            "network"
+        ].download.return_value = mock_download_resp
 
         asset_downloader.download_asset(
-            "repo", "tag", "asset", path, asset_downloader_dependencies["release_manager"]
+            "repo",
+            "tag",
+            "asset",
+            path,
+            asset_downloader_dependencies["release_manager"],
         )
 
         # Verify fallback flow: spinner tried first, then curl succeeded

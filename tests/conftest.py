@@ -594,5 +594,5 @@ def asset_downloader(asset_downloader_dependencies):
     return AssetDownloader(
         asset_downloader_dependencies["network"],
         asset_downloader_dependencies["fs"],
-        timeout=60
+        timeout=60,
     )

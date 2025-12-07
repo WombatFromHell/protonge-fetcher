@@ -192,7 +192,9 @@ class LinkManager:
         """Find all directories that look like Proton builds and parse their versions."""
         candidates: list[tuple[VersionTuple, Path]] = []
         for entry in self.file_system_client.iterdir(extract_dir):
-            if self.file_system_client.is_dir(entry) and not self.file_system_client.is_symlink(entry):
+            if self.file_system_client.is_dir(
+                entry
+            ) and not self.file_system_client.is_symlink(entry):
                 tag_name = self._get_tag_name(entry, fork)
 
                 # Skip directories that clearly belong to the other fork
@@ -238,7 +240,9 @@ class LinkManager:
                 self.file_system_client.unlink(link)
             # If link exists but is a real directory, remove it (regardless of whether it's wanted)
             # This handles the case where a real directory has the same name as a symlink that needs to be created
-            elif self.file_system_client.exists(link) and not self.file_system_client.is_symlink(link):
+            elif self.file_system_client.exists(
+                link
+            ) and not self.file_system_client.is_symlink(link):
                 self.file_system_client.rmtree(link)
 
     def _compare_targets(self, current_target: Path, expected_target: Path) -> bool:
@@ -273,7 +277,9 @@ class LinkManager:
     ) -> None:
         """Clean up existing path before creating a symlink."""
         # Double check: If link exists as a real directory, remove it before creating symlink
-        if self.file_system_client.exists(link) and not self.file_system_client.is_symlink(link):
+        if self.file_system_client.exists(
+            link
+        ) and not self.file_system_client.is_symlink(link):
             self.file_system_client.rmtree(link)
         # If link is a symlink, check if it points to the correct target
         elif self.file_system_client.is_symlink(link):
@@ -476,7 +482,9 @@ class LinkManager:
         # Identify links that point to this release directory
         links_to_remove: list[Path] = []
         for link in [main, fb1, fb2]:
-            if self.file_system_client.exists(link) and self.file_system_client.is_symlink(link):
+            if self.file_system_client.exists(
+                link
+            ) and self.file_system_client.is_symlink(link):
                 try:
                     target_path = self.file_system_client.resolve(link)
                     if target_path == release_path:

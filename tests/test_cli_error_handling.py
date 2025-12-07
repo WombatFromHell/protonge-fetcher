@@ -97,6 +97,8 @@ class TestCLIErrorHandling:
 
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",
@@ -525,6 +527,8 @@ class TestCLIErrorHandlingSpecialScenarios:
 
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation
             "--extract-dir",
             str(tmp_path / "non_writable_dir"),
             "--output",
@@ -552,6 +556,8 @@ class TestCLIErrorHandlingSpecialScenarios:
 
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation (which will use subprocess)
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",
@@ -585,6 +591,8 @@ class TestCLIErrorHandlingSpecialScenarios:
         invalid_path = Path("/invalid/path/that/does/not/exist")
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation
             "--extract-dir",
             str(invalid_path),
             "--output",

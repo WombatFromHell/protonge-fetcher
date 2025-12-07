@@ -29,12 +29,12 @@ install: $(OUT)
 test:
 	uv run pytest -v --cov=src --cov-report=term-missing
 
+lint:
+	ruff check --select I ./src ./tests --fix; \
+		pyright ./src ./tests
+
 prettier:
 	prettier --cache -c -w *.md
-
-lint:
-	ruff check ./src ./tests --fix; \
-		pyright ./src ./tests
 
 format: prettier
 	ruff format ./src ./tests
@@ -55,4 +55,4 @@ clean:
 
 all: clean build install
 
-.PHONY: all clean install
+.PHONY: build install test lint prettier format radon quality clean all

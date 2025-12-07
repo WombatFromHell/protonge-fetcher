@@ -158,10 +158,13 @@ Provides command-line functionality:
 ### Operation Flows
 
 The CLI supports multiple distinct operation modes:
-- **Default (fetch and extract)**: Downloads and extracts the latest or specified release
+
+- **Default (`--ls` behavior)**: Lists managed symbolic links and their targets (now the default when no operation flags provided)
 - **List releases (`--list`)**: Fetches and displays recent releases from GitHub API
 - **List links (`--ls`)**: Displays managed symbolic links and their targets
 - **Remove release (`--rm`)**: Removes specified release directory and updates symlinks
+
+The default behavior changed to improve user experience: when no operation flags (`--list`, `--ls`, `--rm`) are provided, the application now defaults to the `--ls` behavior instead of attempting to fetch and extract. This means running `./protonfetcher.pyz` with no arguments is equivalent to `./protonfetcher.pyz --ls`, showing the current installed versions.
 
 ## Fork Configuration System
 
@@ -190,6 +193,7 @@ Comprehensive error hierarchy with specific exception types for different failur
 - `MultiLinkManagementError`: Batch operation failures (ExceptionGroup) for handling multiple link management errors simultaneously
 
 Each component raises appropriate exceptions with detailed error messages that include:
+
 - Context-specific information (URLs, file paths, fork names)
 - Specific error causes when available
 - Actionable guidance for troubleshooting

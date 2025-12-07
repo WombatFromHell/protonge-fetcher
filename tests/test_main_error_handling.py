@@ -23,6 +23,8 @@ class TestMainErrorHandling:
             # Simulate command line arguments that would trigger the default operation
             sys.argv = [
                 "protonfetcher",
+                "-f",
+                "GE-Proton",  # Add fork to trigger fetch operation
                 "-x",
                 str(tmp_path / "extract"),
                 "-o",

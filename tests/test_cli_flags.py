@@ -369,19 +369,26 @@ class TestCLIRemoveFlag:
 
 
 class TestCLIDefaultFlag:
-    """Tests for the default CLI behavior (fetch latest)."""
+    """Tests for the default CLI behavior (list links)."""
 
-    def test_cli_default_fetch_latest_ge_proton(
-        self, mocker: MockerFixture, tmp_path: Path
+    def test_cli_default_lists_links(
+        self, mocker: MockerFixture, tmp_path: Path, capsys
     ):
-        """Test default CLI command: ./protonfetcher (fetch latest GE-Proton)."""
+        """Test default CLI command: ./protonfetcher (list all links)."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher",
             return_value=mock_fetcher,
         )
 
-        mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
+        # Prepare the link information
+        mock_link_info = {
+            "GE-Proton": str(tmp_path / "GE-Proton10-15"),
+            "GE-Proton-Fallback": str(tmp_path / "GE-Proton10-12"),
+            "GE-Proton-Fallback2": None,
+        }
+
+        mock_fetcher.link_manager.list_links.return_value = mock_link_info
 
         test_args = [
             "protonfetcher",  # sys.argv[0]
@@ -392,33 +399,29 @@ class TestCLIDefaultFlag:
         ]
         mocker.patch("sys.argv", test_args)
 
-        # Mock the directory validation to succeed
-        mocker.patch.object(
-            mock_fetcher,
-            "_ensure_directory_is_writable",
-        )
-
         # Run main function
         try:
             main()
         except SystemExit:
             pass
 
-        # Verify that fetch_and_extract was called with the right parameters
-        assert mock_fetcher.fetch_and_extract.called
-        call_args = mock_fetcher.fetch_and_extract.call_args
+        # Verify that list_links was called for both forks when no specific fork was specified
+        expected_calls = [
+            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), ForkName.GE_PROTON),
+            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), ForkName.PROTON_EM),
+        ]
+        assert mock_fetcher.link_manager.list_links.call_count == 2
+        mock_fetcher.link_manager.list_links.assert_has_calls(expected_calls)
 
-        # Verify parameters: (repo, output_dir, extract_dir, release_tag, fork)
-        assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]  # repo
-        assert call_args[1]["fork"] == ForkName.GE_PROTON  # fork
-        assert (
-            call_args[1]["release_tag"] is None
-        )  # Should fetch latest (not a specific tag)
+        # Capture output to verify it contains list output
+        captured = capsys.readouterr()
+        assert "Listing recognized links" in captured.out
+        assert "Success" in captured.out
 
-    def test_cli_default_with_explicit_ge_proton(
+    def test_cli_default_with_explicit_fork_still_fetches(
         self, mocker: MockerFixture, tmp_path: Path
     ):
-        """Test CLI command: ./protonfetcher -f GE-Proton (explicit fork)."""
+        """Test CLI command: ./protonfetcher -f GE-Proton (explicit fork with no operation flags should fetch)."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher",
@@ -430,7 +433,7 @@ class TestCLIDefaultFlag:
         test_args = [
             "protonfetcher",
             "-f",
-            "GE-Proton",
+            "GE-Proton",  # With explicit fork, this should trigger fetch behavior
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",
@@ -443,13 +446,19 @@ class TestCLIDefaultFlag:
         except SystemExit:
             pass
 
-        # Verify that GE-Proton fork was used explicitly
+        # Verify that fetch_and_extract was called since fork was explicitly provided
+        assert mock_fetcher.fetch_and_extract.called
         call_args = mock_fetcher.fetch_and_extract.call_args
-        assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]
-        assert call_args[1]["fork"] == ForkName.GE_PROTON
 
-    def test_cli_default_with_proton_em(self, mocker: MockerFixture, tmp_path: Path):
-        """Test CLI command: ./protonfetcher -f Proton-EM."""
+        # Verify parameters: (repo, output_dir, extract_dir, release_tag, fork)
+        assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]  # repo
+        assert call_args[1]["fork"] == ForkName.GE_PROTON  # fork
+        assert (
+            call_args[1]["release_tag"] is None
+        )  # Should fetch latest (not a specific tag)
+
+    def test_cli_default_with_explicit_release_still_fetches(self, mocker: MockerFixture, tmp_path: Path):
+        """Test CLI command: ./protonfetcher -r GE-Proton10-11 (explicit release with no operation flags should fetch)."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher",
@@ -459,9 +468,9 @@ class TestCLIDefaultFlag:
         mock_fetcher.fetch_and_extract.return_value = tmp_path / "extract"
 
         test_args = [
-            "protonfetcher.py",
-            "-f",
-            "Proton-EM",
+            "protonfetcher",
+            "-r",
+            "GE-Proton10-11",  # With explicit release, this should trigger fetch behavior
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",
@@ -474,11 +483,14 @@ class TestCLIDefaultFlag:
         except SystemExit:
             pass
 
-        # Verify that Proton-EM fork was used
+        # Verify that fetch_and_extract was called since release was explicitly provided
+        assert mock_fetcher.fetch_and_extract.called
         call_args = mock_fetcher.fetch_and_extract.call_args
-        assert call_args[0][0] == FORKS[ForkName.PROTON_EM]["repo"]
-        assert call_args[1]["fork"] == ForkName.PROTON_EM
-        assert call_args[1]["release_tag"] is None  # Should fetch latest
+
+        # Verify parameters: (repo, output_dir, extract_dir, release_tag, fork)
+        assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]  # repo
+        assert call_args[1]["fork"] == ForkName.GE_PROTON  # fork
+        assert call_args[1]["release_tag"] == "GE-Proton10-11"  # Should fetch specific tag
 
 
 class TestCLIReleaseFlag:
@@ -624,6 +636,8 @@ class TestCLIPathFlags:
 
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation
             "--extract-dir",
             str(custom_extract_dir),
             "--output",
@@ -657,6 +671,8 @@ class TestCLIPathFlags:
 
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation
             "--extract-dir",
             str(tmp_path / "extract"),
             "--output",
@@ -686,6 +702,8 @@ class TestCLIPathFlags:
         # Use tilde paths in arguments
         test_args = [
             "protonfetcher",
+            "-f",
+            "GE-Proton",  # Add fork to trigger fetch operation
             "--extract-dir",
             "~/custom/compatibilitytools.d",
             "--output",
