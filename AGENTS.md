@@ -14,6 +14,7 @@ Actionable guidelines for agentic tools when working with the ProtonFetcher code
 ## Workflow Guidelines
 
 ### Module Placement
+
 - Common types/protocols: `src/protonfetcher/common.py`
 - Exceptions: `src/protonfetcher/exceptions.py`
 - Utilities: `src/protonfetcher/utils.py`
@@ -21,12 +22,14 @@ Actionable guidelines for agentic tools when working with the ProtonFetcher code
 - Core logic: Corresponding specialized modules
 
 ### Refactoring Safeguards
+
 - Maintain existing method signatures; extend with optional parameters if needed
 - Preserve protocol contracts and dependency injection patterns
 - Keep single-responsibility principle intact
 - Use established error hierarchy: `ProtonFetcherError` → specific types
 
 ### Testing Approach
+
 - Mock protocols for isolated testing
 - Parametrize fork tests: `@pytest.mark.parametrize` for GE-Proton/Proton-EM
 - Test error scenarios and caching behavior
@@ -49,6 +52,7 @@ Actionable guidelines for agentic tools when working with the ProtonFetcher code
 ## Error Handling
 
 Use established hierarchy:
+
 ```python
 from protonfetcher.exceptions import ProtonFetcherError, NetworkError, ExtractionError, LinkManagementError
 ```

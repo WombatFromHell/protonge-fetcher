@@ -3,20 +3,14 @@ CLI tests for protonfetcher module.
 Testing the actual user-facing commands and their expected behavior.
 """
 
-import sys
-from pathlib import Path
-
 import pytest
+from pathlib import Path
 from pytest_mock import MockerFixture
 
-# Add src to path for testing
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir / "src"))
-
-from protonfetcher.cli import main  # noqa: E402
-from protonfetcher.common import ForkName  # noqa: E402
-from protonfetcher.exceptions import ProtonFetcherError  # noqa: E402
-from protonfetcher.release_manager import FORKS  # noqa: E402
+from protonfetcher.cli import main
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import ProtonFetcherError
+from protonfetcher.release_manager import FORKS
 
 # For backward compatibility in tests
 ProtonFetcherError = ProtonFetcherError

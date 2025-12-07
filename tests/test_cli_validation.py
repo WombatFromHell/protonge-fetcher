@@ -2,18 +2,11 @@
 Tests for CLI argument validation and error handling in protonfetcher.py
 """
 
-import sys
-from pathlib import Path
 import argparse
 
 import pytest
 
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-
-from protonfetcher.cli import _validate_mutually_exclusive_args  # noqa: E402
+from protonfetcher.cli import _validate_mutually_exclusive_args
 
 
 class TestCLIValidation:

@@ -2,18 +2,13 @@
 Tests for GitHubReleaseFetcher _ensure_directory_is_writable functionality in protonfetcher.py
 """
 
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher.exceptions import ProtonFetcherError  # noqa: E402
-from protonfetcher.github_fetcher import GitHubReleaseFetcher  # noqa: E402
+from protonfetcher.exceptions import ProtonFetcherError
+from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
 
 class TestGitHubReleaseFetcherDirectoryValidation:

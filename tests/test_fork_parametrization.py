@@ -2,19 +2,13 @@
 Parametrized tests for fork-specific functionality in protonfetcher.py
 """
 
-import sys
-from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher.common import ForkName  # noqa: E402
-from protonfetcher.github_fetcher import GitHubReleaseFetcher  # noqa: E402
+from protonfetcher.common import ForkName
+from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
 
 class TestForkParametrization:

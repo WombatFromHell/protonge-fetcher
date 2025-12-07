@@ -2,18 +2,11 @@
 Tests for utility functions and managers in protonfetcher.py
 """
 
-import sys
-from pathlib import Path
-
 import pytest
 
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher.cli import convert_fork_to_enum  # noqa: E402
-from protonfetcher.common import ForkName  # noqa: E402
-from protonfetcher.utils import compare_versions, parse_version  # noqa: E402
+from protonfetcher.cli import convert_fork_to_enum
+from protonfetcher.common import ForkName
+from protonfetcher.utils import compare_versions, parse_version
 
 
 class TestUtils:

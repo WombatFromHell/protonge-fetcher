@@ -3,17 +3,12 @@ Tests for main function error handling in protonfetcher.py
 """
 
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher.cli import main  # noqa: E402
-from protonfetcher.exceptions import ProtonFetcherError  # noqa: E402
+from protonfetcher.cli import main
+from protonfetcher.exceptions import ProtonFetcherError
 
 
 class TestMainErrorHandling:

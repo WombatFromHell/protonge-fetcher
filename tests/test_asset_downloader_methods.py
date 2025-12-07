@@ -2,15 +2,10 @@
 Tests for AssetDownloader methods in protonfetcher.py
 """
 
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher.asset_downloader import AssetDownloader  # noqa: E402
+from protonfetcher.asset_downloader import AssetDownloader
 
 
 class TestAssetDownloader:

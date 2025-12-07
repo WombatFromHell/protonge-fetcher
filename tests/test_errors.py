@@ -4,20 +4,14 @@ Consolidating all error scenarios from various test files.
 """
 
 import subprocess
-import sys
-from pathlib import Path
 
 import pytest
 
-# Add src to path for testing
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir / "src"))
-
-from protonfetcher.archive_extractor import ArchiveExtractor  # noqa: E402
-from protonfetcher.common import ForkName  # noqa: E402
-from protonfetcher.exceptions import ExtractionError, NetworkError, ProtonFetcherError  # noqa: E402
-from protonfetcher.github_fetcher import GitHubReleaseFetcher  # noqa: E402
-from protonfetcher.release_manager import ReleaseManager  # noqa: E402
+from protonfetcher.archive_extractor import ArchiveExtractor
+from protonfetcher.common import ForkName
+from protonfetcher.exceptions import ExtractionError, NetworkError, ProtonFetcherError
+from protonfetcher.github_fetcher import GitHubReleaseFetcher
+from protonfetcher.release_manager import ReleaseManager
 
 
 class TestNetworkErrors:

@@ -3,16 +3,10 @@ Tests for ReleaseManager cache functionality in protonfetcher.py
 """
 
 import json
-import sys
 import time
-from pathlib import Path
 from unittest.mock import MagicMock
 
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher.release_manager import ReleaseManager  # noqa: E402
+from protonfetcher.release_manager import ReleaseManager
 
 
 class TestReleaseManagerCache:

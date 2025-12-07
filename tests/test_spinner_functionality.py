@@ -2,14 +2,7 @@
 Tests for Spinner class functionality in protonfetcher.py
 """
 
-import sys
-from pathlib import Path
-
-# Add the project directory to the Python path
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
-
-from protonfetcher.spinner import Spinner  # noqa: E402
+from protonfetcher.spinner import Spinner
 
 
 class TestSpinnerFunctionality:
