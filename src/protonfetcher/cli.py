@@ -132,7 +132,10 @@ def convert_fork_to_enum(fork_arg: Union[str, ForkName, None]) -> ForkName:
 
 
 def handle_ls_operation(
-    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path, list_all_forks: bool = False
+    fetcher: GitHubReleaseFetcher,
+    args: argparse.Namespace,
+    extract_dir: Path,
+    list_all_forks: bool = False,
 ) -> None:
     """Handle the --ls operation to list symbolic links."""
     print("Listing recognized links and their associated Proton fork folders...")
@@ -157,7 +160,10 @@ def handle_ls_operation(
 
 
 def _handle_ls_operation_flow(
-    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path, list_all_forks: bool = False
+    fetcher: GitHubReleaseFetcher,
+    args: argparse.Namespace,
+    extract_dir: Path,
+    list_all_forks: bool = False,
 ) -> None:
     """Handle the --ls operation flow."""
     handle_ls_operation(fetcher, args, extract_dir, list_all_forks)
@@ -218,13 +224,19 @@ def main() -> None:
     argv_list = sys.argv[1:]
 
     # Check if operation flags were explicitly provided in sys.argv
-    has_explicit_ls = any(arg in ['--ls'] for arg in argv_list)
-    has_explicit_list = any(arg in ['--list', '-l'] for arg in argv_list)
-    has_explicit_rm = any(arg in ['--rm'] for arg in argv_list) or any(arg.startswith('--rm=') for arg in argv_list)
+    has_explicit_ls = any(arg in ["--ls"] for arg in argv_list)
+    has_explicit_list = any(arg in ["--list", "-l"] for arg in argv_list)
+    has_explicit_rm = any(arg in ["--rm"] for arg in argv_list) or any(
+        arg.startswith("--rm=") for arg in argv_list
+    )
 
     # Check if functional flags were explicitly provided in sys.argv
-    has_explicit_fork = any(arg in ['--fork', '-f'] for arg in argv_list) or any(arg.startswith('--fork=') or arg.startswith('-f=') for arg in argv_list)
-    has_explicit_release = any(arg in ['--release', '-r'] for arg in argv_list) or any(arg.startswith('--release=') or arg.startswith('-r=') for arg in argv_list)
+    has_explicit_fork = any(arg in ["--fork", "-f"] for arg in argv_list) or any(
+        arg.startswith("--fork=") or arg.startswith("-f=") for arg in argv_list
+    )
+    has_explicit_release = any(arg in ["--release", "-r"] for arg in argv_list) or any(
+        arg.startswith("--release=") or arg.startswith("-r=") for arg in argv_list
+    )
 
     # Parse the arguments
     args = parse_arguments()
@@ -248,7 +260,9 @@ def main() -> None:
         # Handle --ls flag (explicitly set)
         if args.ls:
             # For explicit --ls flag, list all forks if no specific fork was provided in the command
-            _handle_ls_operation_flow(fetcher, args, extract_dir, list_all_forks=not has_explicit_fork)
+            _handle_ls_operation_flow(
+                fetcher, args, extract_dir, list_all_forks=not has_explicit_fork
+            )
             return
 
         # Handle --list flag
@@ -260,6 +274,7 @@ def main() -> None:
             # Get the repo based on selected fork - handle string-to-enum conversion
             target_fork: ForkName = convert_fork_to_enum(args.fork)
             from .common import FORKS
+
             repo = FORKS[target_fork].repo
             logger.info(f"Using fork: {target_fork} ({repo})")
 
@@ -277,17 +292,24 @@ def main() -> None:
             if has_functional_flags:
                 # Use the fork specified by the user or default if not specified
                 actual_fork = convert_fork_to_enum(
-                    args.fork if hasattr(args, "fork") and args.fork is not None else None
+                    args.fork
+                    if hasattr(args, "fork") and args.fork is not None
+                    else None
                 )
                 from .common import FORKS
+
                 repo = FORKS[actual_fork].repo
                 logger.info(f"Using fork: {actual_fork} ({repo})")
 
-                _handle_default_operation_flow(fetcher, repo, output_dir, extract_dir, args)
+                _handle_default_operation_flow(
+                    fetcher, repo, output_dir, extract_dir, args
+                )
                 return
             else:
                 # No operation flags and no functional flags - default to listing all links
-                _handle_ls_operation_flow(fetcher, args, extract_dir, list_all_forks=True)
+                _handle_ls_operation_flow(
+                    fetcher, args, extract_dir, list_all_forks=True
+                )
                 return
 
         # Handle default operation (fetch and extract) - fallback, though shouldn't reach here due to operation flag logic
@@ -296,6 +318,7 @@ def main() -> None:
             args.fork if hasattr(args, "fork") and args.fork is not None else None
         )
         from .common import FORKS
+
         repo = FORKS[actual_fork].repo
         logger.info(f"Using fork: {actual_fork} ({repo})")
 

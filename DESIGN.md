@@ -215,6 +215,42 @@ The test suite employs multiple testing strategies to ensure comprehensive cover
 - **Cache Behavior Tests**: Tests for asset size caching, XDG cache compliance, and cache invalidation scenarios
 - **Symbolic Link Tests**: Tests for link creation, management, removal, and version sorting functionality
 
+### Complexity Regression Test Thresholds
+
+The complexity regression tests enforce the following thresholds to maintain code quality:
+
+- **Cyclomatic Complexity**:
+  - Maximum per function: 10 (function remains manageable)
+  - Maximum average: 5.0 (overall code remains simple)
+
+- **ABC Metrics**:
+  - Maximum assignments per function: 15
+  - Maximum branches per function: 10
+  - Maximum conditions per function: 10
+  - Maximum ABC score: 25.0
+
+- **Cognitive Complexity**:
+  - Maximum per function: 15 (function remains easy to understand)
+
+- **Raw Metrics**:
+  - Maximum lines of code (LOC): 3000 per project
+  - Maximum source lines of code (SLOC): 2500 per project
+
+- **Maintainability**:
+  - Minimum maintainability index: 15.0
+
+- **Code Duplication**:
+  - Maximum duplication blocks: 5
+  - Maximum duplication lines: 100
+
+- **File-Level Complexity**:
+  - Maximum functions per file: 30
+  - Maximum total complexity per file: 200
+  - Maximum average complexity per file: 10.0
+
+- **Dependency Analysis**:
+  - Maximum imports per file: 20 (reduces coupling)
+
 ## Dependencies and Features
 
 - **Standard library**: argparse, dataclasses, hashlib, json, logging, os, re, shutil, subprocess, sys, tarfile, time, urllib, pathlib, enum, typing

@@ -179,7 +179,7 @@ class ArchiveExtractor:
         spinner = Spinner(
             desc=f"Extracting {archive_path.name}",
             disable=False,
-            fps_limit=30.0,  # Match your existing FPS limit
+            fps_limit=10.0,  # Reduced FPS to prevent excessive terminal updates
             show_progress=show_progress,
         )
 

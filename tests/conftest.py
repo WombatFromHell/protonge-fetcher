@@ -14,8 +14,8 @@ import pytest
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir / "src"))
 
-from protonfetcher.common import ForkName  # noqa: E402
 from protonfetcher.asset_downloader import AssetDownloader  # noqa: E402
+from protonfetcher.common import ForkName  # noqa: E402
 
 
 @pytest.fixture
@@ -596,3 +596,44 @@ def asset_downloader(asset_downloader_dependencies):
         asset_downloader_dependencies["fs"],
         timeout=60,
     )
+
+
+@pytest.fixture
+def mock_fetcher_components(mocker):
+    """Fixture to create mock components for GitHubReleaseFetcher."""
+    mock_network = mocker.Mock()
+    mock_fs = mocker.Mock()
+    mock_spinner = mocker.Mock()
+    mock_release_manager = mocker.Mock()
+    mock_asset_downloader = mocker.Mock()
+    mock_archive_extractor = mocker.Mock()
+    mock_link_manager = mocker.Mock()
+
+    return {
+        "network": mock_network,
+        "fs": mock_fs,
+        "spinner": mock_spinner,
+        "release_manager": mock_release_manager,
+        "asset_downloader": mock_asset_downloader,
+        "archive_extractor": mock_archive_extractor,
+        "link_manager": mock_link_manager,
+    }
+
+
+def create_fetcher_with_mocks(mocker, components):
+    """Helper function to create a fetcher with mocked components."""
+    from protonfetcher.github_fetcher import GitHubReleaseFetcher
+
+    fetcher = GitHubReleaseFetcher(
+        network_client=components["network"],
+        file_system_client=components["fs"],
+        spinner_cls=components["spinner"],
+        timeout=60,
+    )
+
+    fetcher.release_manager = components["release_manager"]
+    fetcher.asset_downloader = components["asset_downloader"]
+    fetcher.archive_extractor = components["archive_extractor"]
+    fetcher.link_manager = components["link_manager"]
+
+    return fetcher

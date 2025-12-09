@@ -189,15 +189,23 @@ class TestLinkManager:
         with pytest.raises(LinkManagementError):
             manager.remove_release(extract_dir, "GE-Proton10-20", ForkName.GE_PROTON)
 
-    def test_find_version_candidates_ge_proton(self, mocker, tmp_path):
-        """Test find_version_candidates method with GE-Proton format."""
+    @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
+    def test_find_version_candidates(self, mocker, tmp_path, fork):
+        """Test find_version_candidates method with both GE-Proton and Proton-EM formats."""
         mock_fs = mocker.Mock()
         manager = LinkManager(mock_fs)
 
-        # Create test directories
-        release1 = tmp_path / "GE-Proton10-20"
+        # Create test directories based on fork
+        if fork == ForkName.GE_PROTON:
+            release1 = tmp_path / "GE-Proton10-20"
+            release2 = tmp_path / "GE-Proton9-15"
+            expected_tag_part = "GE-Proton"
+        else:  # ForkName.PROTON_EM
+            release1 = tmp_path / "proton-EM-10.0-30"
+            release2 = tmp_path / "proton-EM-9.5-25"
+            expected_tag_part = "EM"
+
         release1.mkdir()
-        release2 = tmp_path / "GE-Proton9-15"
         release2.mkdir()
         release3 = tmp_path / "Other-Dir"
         release3.mkdir()
@@ -221,78 +229,41 @@ class TestLinkManager:
         mock_fs.is_symlink.side_effect = mock_is_symlink
         mock_fs.iterdir.side_effect = mock_iterdir
 
-        candidates = manager.find_version_candidates(extract_dir, ForkName.GE_PROTON)
+        candidates = manager.find_version_candidates(extract_dir, fork)
 
-        # Should find 2 GE-Proton releases
+        # Should find 2 releases for the specific fork
         assert len(candidates) == 2
         # Check that they are properly parsed and sorted
         tags = [c[0][0] for c in candidates]  # Get the tag names from the VersionTuple
-        assert "GE-Proton" in tags[0] or "GE-Proton" in tags[1]
+        assert expected_tag_part in tags[0] or expected_tag_part in tags[1]
 
-    def test_find_version_candidates_proton_em(self, mocker, tmp_path):
-        """Test find_version_candidates method with Proton-EM format."""
+    @pytest.mark.parametrize(
+        "fork,expected",
+        [
+            (
+                ForkName.GE_PROTON,
+                (
+                    Path("GE-Proton"),
+                    Path("GE-Proton-Fallback"),
+                    Path("GE-Proton-Fallback2"),
+                ),
+            ),
+            (
+                ForkName.PROTON_EM,
+                (
+                    Path("Proton-EM"),
+                    Path("Proton-EM-Fallback"),
+                    Path("Proton-EM-Fallback2"),
+                ),
+            ),
+        ],
+    )
+    def test_get_link_names_for_fork(self, mocker, fork, expected):
+        """Test get_link_names_for_fork method with both fork types."""
         mock_fs = mocker.Mock()
         manager = LinkManager(mock_fs)
 
-        # Create test directories
-        release1 = tmp_path / "proton-EM-10.0-30"
-        release1.mkdir()
-        release2 = tmp_path / "proton-EM-9.5-25"
-        release2.mkdir()
-        release3 = tmp_path / "Other-Dir"
-        release3.mkdir()
-
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Mock file system operations
-        def mock_is_dir(path):
-            return path in [release1, release2, release3, extract_dir]
-
-        def mock_is_symlink(path):
-            return False  # None of these test directories are symlinks
-
-        def mock_iterdir(path):
-            if path == extract_dir:
-                return [release1, release2, release3]
-            return []
-
-        mock_fs.is_dir.side_effect = mock_is_dir
-        mock_fs.is_symlink.side_effect = mock_is_symlink
-        mock_fs.iterdir.side_effect = mock_iterdir
-
-        candidates = manager.find_version_candidates(extract_dir, ForkName.PROTON_EM)
-
-        # Should find 2 Proton-EM releases
-        assert len(candidates) == 2
-        # Check that they are properly parsed and sorted
-        tags = [c[0][0] for c in candidates]  # Get the tag names from the VersionTuple
-        assert "EM" in tags[0] or "EM" in tags[1]
-
-    def test_get_link_names_for_fork_ge_proton(self, mocker):
-        """Test get_link_names_for_fork method with GE-Proton."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        link_names = manager.get_link_names_for_fork(ForkName.GE_PROTON)
-        expected = (
-            Path("GE-Proton"),
-            Path("GE-Proton-Fallback"),
-            Path("GE-Proton-Fallback2"),
-        )
-        assert link_names == expected
-
-    def test_get_link_names_for_fork_proton_em(self, mocker):
-        """Test get_link_names_for_fork method with Proton-EM."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        link_names = manager.get_link_names_for_fork(ForkName.PROTON_EM)
-        expected = (
-            Path("Proton-EM"),
-            Path("Proton-EM-Fallback"),
-            Path("Proton-EM-Fallback2"),
-        )
+        link_names = manager.get_link_names_for_fork(fork)
         assert link_names == expected
 
     def test_find_tag_directory_manual_release(self, mocker, tmp_path):
@@ -343,8 +314,8 @@ class TestLinkManager:
                 extract_dir, "GE-Proton10-20", ForkName.GE_PROTON
             )
 
-    def test_manage_proton_links_success(self, mocker, tmp_path):
-        """Test manage_proton_links method with successful link management."""
+    def test_manage_proton_links_success_ge_proton(self, mocker, tmp_path):
+        """Test manage_proton_links method with successful link management for GE-Proton."""
         mock_fs = mocker.Mock()
         manager = LinkManager(mock_fs)
 
@@ -388,8 +359,56 @@ class TestLinkManager:
         # Should have created symlinks for the top 3 versions
         assert mock_fs.symlink_to.call_count >= 1  # At least one symlink created
 
-    def test_manage_proton_links_no_versions_found(self, mocker, tmp_path):
-        """Test manage_proton_links when no versions are found."""
+    def test_manage_proton_links_success_proton_em(self, mocker, tmp_path):
+        """Test manage_proton_links method with successful link management for Proton-EM."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        # Create test directories - for Proton-EM, use the format that's expected
+        release1 = tmp_path / "proton-EM-10.0-30"
+        release1.mkdir()
+        release2 = tmp_path / "proton-EM-9.5-25"
+        release2.mkdir()
+        release3 = tmp_path / "proton-EM-8.2-20"
+        release3.mkdir()
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Mock file system operations
+        def mock_is_dir(path):
+            return path in [release1, release2, release3, extract_dir]
+
+        def mock_is_symlink(path):
+            return False  # None of the release directories are symlinks
+
+        def mock_iterdir(path):
+            if path == extract_dir:
+                return [release1, release2, release3]
+            return []
+
+        def mock_exists(path):
+            # Simulate that some symlinks exist and some don't
+            return "Fallback2" not in str(path)
+
+        mock_fs.is_dir.side_effect = mock_is_dir
+        mock_fs.is_symlink.side_effect = mock_is_symlink
+        mock_fs.iterdir.side_effect = mock_iterdir
+        mock_fs.exists.side_effect = mock_exists
+        mock_fs.unlink.return_value = None
+        mock_fs.symlink_to.return_value = None
+
+        result = manager.manage_proton_links(
+            extract_dir, "EM-10.0-30", ForkName.PROTON_EM
+        )
+
+        assert result is True
+        # Should have created symlinks for the top 3 versions
+        assert mock_fs.symlink_to.call_count >= 1  # At least one symlink created
+
+    @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
+    def test_manage_proton_links_no_versions_found(self, mocker, tmp_path, fork):
+        """Test manage_proton_links when no versions are found for both forks."""
         mock_fs = mocker.Mock()
         manager = LinkManager(mock_fs)
 
@@ -402,7 +421,7 @@ class TestLinkManager:
 
         mock_fs.iterdir.side_effect = mock_iterdir
 
-        result = manager.manage_proton_links(extract_dir, ForkName.GE_PROTON)
+        result = manager.manage_proton_links(extract_dir, fork)
 
         assert result is True  # Should succeed even with no versions to link
 
@@ -424,80 +443,63 @@ class TestLinkManager:
         tag_name = manager._get_tag_name(entry, ForkName.PROTON_EM)
         assert tag_name == "EM-10.0-30"
 
-    def test_should_skip_directory_ge_proton_when_processing_proton_em(self, mocker):
-        """Test _should_skip_directory method - skip GE-Proton when processing Proton-EM."""
+    @pytest.mark.parametrize(
+        "directory,fork,expected",
+        [
+            (
+                "GE-Proton10-20",
+                ForkName.PROTON_EM,
+                True,
+            ),  # Skip GE-Proton when processing Proton-EM
+            (
+                "EM-10.0-30",
+                ForkName.GE_PROTON,
+                True,
+            ),  # Skip Proton-EM when processing GE-Proton
+            (
+                "proton-EM-10.0-30",
+                ForkName.GE_PROTON,
+                True,
+            ),  # Skip proton-EM with prefix when processing GE-Proton
+        ],
+    )
+    def test_should_skip_directory(self, mocker, directory, fork, expected):
+        """Test _should_skip_directory method with various combinations."""
         mock_fs = mocker.Mock()
         manager = LinkManager(mock_fs)
 
-        should_skip = manager._should_skip_directory(
-            "GE-Proton10-20", ForkName.PROTON_EM
-        )
-        assert should_skip is True
+        should_skip = manager._should_skip_directory(directory, fork)
+        assert should_skip is expected
 
-    def test_should_skip_directory_proton_em_when_processing_ge_proton(self, mocker):
-        """Test _should_skip_directory method - skip Proton-EM when processing GE-Proton."""
+    @pytest.mark.parametrize(
+        "fork,entry,expected",
+        [
+            (ForkName.GE_PROTON, Path("GE-Proton10-20"), True),  # Valid GE-Proton
+            (ForkName.GE_PROTON, Path("Invalid-Directory"), False),  # Invalid GE-Proton
+            (
+                ForkName.GE_PROTON,
+                Path("GE-Proton10-20-Extra"),
+                False,
+            ),  # Extra characters
+            (ForkName.GE_PROTON, Path("ge-proton10-20"), False),  # Wrong case
+            (
+                ForkName.PROTON_EM,
+                Path("proton-EM-10.0-30"),
+                True,
+            ),  # Valid Proton-EM format 1
+            (ForkName.PROTON_EM, Path("EM-10.0-30"), True),  # Valid Proton-EM format 2
+            (ForkName.PROTON_EM, Path("proton-EM-10.0"), False),  # Missing build number
+            (ForkName.PROTON_EM, Path("Invalid-Directory"), False),  # Invalid Proton-EM
+            (ForkName.PROTON_EM, Path("proton-em-10.0-30"), False),  # Wrong case
+        ],
+    )
+    def test_is_valid_proton_directory(self, mocker, fork, entry, expected):
+        """Test _is_valid_proton_directory method with various formats and forks."""
         mock_fs = mocker.Mock()
         manager = LinkManager(mock_fs)
 
-        should_skip = manager._should_skip_directory("EM-10.0-30", ForkName.GE_PROTON)
-        assert should_skip is True
-
-    def test_should_skip_directory_proton_em_with_prefix_when_processing_ge_proton(
-        self, mocker
-    ):
-        """Test _should_skip_directory method - skip proton-EM with prefix when processing GE-Proton."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        should_skip = manager._should_skip_directory(
-            "proton-EM-10.0-30", ForkName.GE_PROTON
-        )
-        assert should_skip is True
-
-    def test_is_valid_proton_directory_ge_proton_valid(self, mocker):
-        """Test _is_valid_proton_directory method for valid GE-Proton directory."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        entry = Path("GE-Proton10-20")
-        is_valid = manager._is_valid_proton_directory(entry, ForkName.GE_PROTON)
-        assert is_valid is True
-
-    def test_is_valid_proton_directory_ge_proton_invalid(self, mocker):
-        """Test _is_valid_proton_directory method for invalid GE-Proton directory."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        entry = Path("Invalid-Directory")
-        is_valid = manager._is_valid_proton_directory(entry, ForkName.GE_PROTON)
-        assert is_valid is False
-
-    def test_is_valid_proton_directory_proton_em_format1_valid(self, mocker):
-        """Test _is_valid_proton_directory method for valid Proton-EM format 1."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        entry = Path("proton-EM-10.0-30")
-        is_valid = manager._is_valid_proton_directory(entry, ForkName.PROTON_EM)
-        assert is_valid is True
-
-    def test_is_valid_proton_directory_proton_em_format2_valid(self, mocker):
-        """Test _is_valid_proton_directory method for valid Proton-EM format 2."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        entry = Path("EM-10.0-30")
-        is_valid = manager._is_valid_proton_directory(entry, ForkName.PROTON_EM)
-        assert is_valid is True
-
-    def test_is_valid_proton_directory_proton_em_invalid(self, mocker):
-        """Test _is_valid_proton_directory method for invalid Proton-EM directory."""
-        mock_fs = mocker.Mock()
-        manager = LinkManager(mock_fs)
-
-        entry = Path("Invalid-Directory")
-        is_valid = manager._is_valid_proton_directory(entry, ForkName.PROTON_EM)
-        assert is_valid is False
+        is_valid = manager._is_valid_proton_directory(entry, fork)
+        assert is_valid is expected
 
     def test_compare_targets_same_paths(self, mocker):
         """Test _compare_targets method when paths are the same."""
@@ -644,7 +646,7 @@ class TestLinkManager:
         target_path = tmp_path / "GE-Proton10-20"
         target_path.mkdir()
 
-        top_3 = [((10, 20, 0, "GE-Proton10-20"), target_path)]
+        top_3 = [(("GE-Proton", 10, 20, 0), target_path)]
 
         result = manager.create_symlinks(main, fb1, fb2, top_3)
 
@@ -1042,3 +1044,253 @@ class TestLinkManager:
 
         # Test that the default case is handled, but ForkName is an enum so this is hard to trigger
         # The code handles this via pattern matching, and since ForkName is StrEnum, all cases are covered
+
+    @pytest.mark.parametrize(
+        "fork,expected_links",
+        [
+            (
+                ForkName.GE_PROTON,
+                ("GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"),
+            ),
+            (
+                ForkName.PROTON_EM,
+                ("Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"),
+            ),
+        ],
+    )
+    def test_create_symlinks_parametrized_forks(
+        self, mocker, tmp_path, fork, expected_links
+    ):
+        """Parametrized test for create_symlinks with different forks."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        # Create test release directory based on fork
+        if fork == ForkName.GE_PROTON:
+            release_dir = tmp_path / "GE-Proton10-20"
+        else:
+            release_dir = tmp_path / "proton-EM-10.0-30"
+        release_dir.mkdir()
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Mock file system operations to handle the target directory correctly
+        def mock_exists(path):
+            path_str = str(path)
+            release_dir_str = str(release_dir)
+            extract_dir_str = str(extract_dir)
+            # Return True for the target path and extract dir
+            return release_dir_str in path_str or extract_dir_str in path_str
+
+        def mock_is_dir(path):
+            # Return True for the target path
+            return str(path) == str(release_dir)
+
+        mock_fs.exists.side_effect = mock_exists
+        mock_fs.is_dir.side_effect = mock_is_dir
+
+        result = manager.create_symlinks(extract_dir, release_dir, fork)
+
+        assert result is True
+        # Should create 3 symlinks for the fork
+        if fork == ForkName.GE_PROTON:
+            expected_symlink_calls = (
+                3  # GE-Proton, GE-Proton-Fallback, GE-Proton-Fallback2
+            )
+        else:
+            expected_symlink_calls = (
+                3  # Proton-EM, Proton-EM-Fallback, Proton-EM-Fallback2
+            )
+        assert mock_fs.symlink_to.call_count == expected_symlink_calls
+
+    def test_find_tag_directory_proton_em_not_found_error(self, mocker, tmp_path):
+        """Test find_tag_directory that raises LinkManagementError in Proton-EM case."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Mock file system operations - directory doesn't exist
+        mock_fs.exists.return_value = False
+        mock_fs.is_dir.return_value = False
+
+        # This should raise LinkManagementError for Proton-EM case
+        with pytest.raises(LinkManagementError):
+            manager.find_tag_directory(
+                extract_dir, "EM-10.0-30", ForkName.PROTON_EM, is_manual_release=True
+            )
+
+    def test_find_tag_directory_ge_proton_not_found_error(self, mocker, tmp_path):
+        """Test find_tag_directory that raises LinkManagementError in GE-Proton case."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Mock file system operations - directory doesn't exist
+        mock_fs.exists.return_value = False
+        mock_fs.is_dir.return_value = False
+
+        # This should raise LinkManagementError for GE-Proton case
+        with pytest.raises(LinkManagementError):
+            manager.find_tag_directory(
+                extract_dir,
+                "GE-Proton10-20",
+                ForkName.GE_PROTON,
+                is_manual_release=True,
+            )
+
+    def test_create_symlinks_internal_oserror(self, mocker, tmp_path):
+        """Test _create_symlinks_internal when symlink creation fails with OSError."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        main = tmp_path / "GE-Proton"
+        fb1 = tmp_path / "GE-Proton-Fallback"
+        fb2 = tmp_path / "GE-Proton-Fallback2"
+
+        target_path = tmp_path / "GE-Proton10-20"
+        target_path.mkdir()
+
+        top_3 = [(("GE-Proton", 10, 20, 0), target_path)]
+
+        # Make symlink_to raise an OSError
+        mock_fs.symlink_to.side_effect = OSError("Permission denied")
+
+        # This should complete without raising an exception but log errors
+        result = manager._create_symlinks_internal(main, fb1, fb2, top_3)
+
+        assert result is True  # Function returns True even if symlinks fail
+        # Should have attempted to create all symlinks despite the error
+        assert mock_fs.symlink_to.call_count >= 1  # Called but continues
+
+    def test_cleanup_unwanted_links_real_directory_removal(self, mocker, tmp_path):
+        """Test _cleanup_unwanted_links when removing a real directory."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        main = tmp_path / "GE-Proton"
+        fb1 = tmp_path / "GE-Proton-Fallback"
+        fb2 = tmp_path / "GE-Proton-Fallback2"
+
+        # Mock the 'wants' mapping to not include one of the links
+        wants = {fb1: tmp_path / "target1", fb2: tmp_path / "target2"}
+
+        # Mock exists to return True and is_symlink to return False for main
+        def mock_exists(path):
+            return path == main
+
+        def mock_is_symlink(path):
+            return False  # main is a real directory, not a symlink
+
+        mock_fs.exists.side_effect = mock_exists
+        mock_fs.is_symlink.side_effect = mock_is_symlink
+
+        # Call the cleanup method
+        manager._cleanup_unwanted_links(main, fb1, fb2, wants)
+
+        # Should have called rmtree to remove the real directory at 'main'
+        mock_fs.rmtree.assert_called_once_with(main)
+
+    def test_remove_release_directory_removal_error(self, mocker, tmp_path):
+        """Test remove_release when directory removal fails."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Create test directory structure INSIDE the extract directory
+        release_dir = extract_dir / "GE-Proton10-20"
+        release_dir.mkdir()
+
+        # Mock file system operations
+        def mock_exists(path):
+            path_str = str(path)
+            release_dir_str = str(release_dir)
+            extract_dir_str = str(extract_dir)
+            return path_str == release_dir_str or path_str == extract_dir_str
+
+        mock_fs.exists.side_effect = mock_exists
+        mock_fs.is_dir.return_value = True
+        mock_fs.is_symlink.return_value = False
+
+        def mock_iterdir(path):
+            if path == extract_dir:
+                return [release_dir]
+            return []
+
+        mock_fs.iterdir.side_effect = mock_iterdir
+
+        # Make rmtree raise an exception
+        mock_fs.rmtree.side_effect = Exception("Cannot remove directory")
+
+        # This should raise a LinkManagementError due to the rmtree exception
+        with pytest.raises(LinkManagementError):
+            manager.remove_release(extract_dir, "GE-Proton10-20", ForkName.GE_PROTON)
+
+    def test_determine_release_path_proton_em_alternative(self, mocker, tmp_path):
+        """Test _determine_release_path with Proton-EM alternative path."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+        tag = "EM-10.0-30"
+
+        # Create the alternative path (with "proton-" prefix)
+        proton_em_path = extract_dir / f"proton-{tag}"
+        proton_em_path.mkdir()
+
+        # Only the alternative path exists, not the regular one
+        def mock_exists(path):
+            return str(path) == str(proton_em_path)
+
+        mock_fs.exists.side_effect = mock_exists
+
+        result = manager._determine_release_path(extract_dir, tag, ForkName.PROTON_EM)
+
+        # Should return the alternative path with "proton-" prefix
+        assert result == proton_em_path
+
+    def test_handle_manual_release_directory_warning(self, mocker, tmp_path):
+        """Test _handle_manual_release_directory when directory doesn't exist."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+        tag = "GE-Proton10-20"
+        fork = ForkName.GE_PROTON
+
+        # Mock file_system_client.exists to return False
+        mock_fs.exists.return_value = False
+
+        # This should return None since no directory is found
+        result = manager._handle_manual_release_directory(
+            extract_dir, tag, fork, is_manual_release=True
+        )
+
+        assert result is None
+
+    def test_manage_proton_links_empty_extract_dir(self, mocker, tmp_path):
+        """Test manage_proton_links when extract directory is empty."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Mock iterdir to return no entries (empty directory)
+        def mock_iterdir(path):
+            return []
+
+        mock_fs.iterdir.side_effect = mock_iterdir
+
+        # This should succeed without creating any symlinks
+        result = manager.manage_proton_links(extract_dir, "test", ForkName.GE_PROTON)
+
+        assert result is True

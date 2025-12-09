@@ -3,8 +3,9 @@ Tests for individual CLI flags in protonfetcher module.
 Testing each CLI flag functionality separately.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 from pytest_mock import MockerFixture
 
 from protonfetcher.cli import main
@@ -407,8 +408,12 @@ class TestCLIDefaultFlag:
 
         # Verify that list_links was called for both forks when no specific fork was specified
         expected_calls = [
-            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), ForkName.GE_PROTON),
-            mocker.call((tmp_path / "compatibilitytools.d").expanduser(), ForkName.PROTON_EM),
+            mocker.call(
+                (tmp_path / "compatibilitytools.d").expanduser(), ForkName.GE_PROTON
+            ),
+            mocker.call(
+                (tmp_path / "compatibilitytools.d").expanduser(), ForkName.PROTON_EM
+            ),
         ]
         assert mock_fetcher.link_manager.list_links.call_count == 2
         mock_fetcher.link_manager.list_links.assert_has_calls(expected_calls)
@@ -457,7 +462,9 @@ class TestCLIDefaultFlag:
             call_args[1]["release_tag"] is None
         )  # Should fetch latest (not a specific tag)
 
-    def test_cli_default_with_explicit_release_still_fetches(self, mocker: MockerFixture, tmp_path: Path):
+    def test_cli_default_with_explicit_release_still_fetches(
+        self, mocker: MockerFixture, tmp_path: Path
+    ):
         """Test CLI command: ./protonfetcher -r GE-Proton10-11 (explicit release with no operation flags should fetch)."""
         mock_fetcher = mocker.MagicMock()
         mocker.patch(
@@ -490,7 +497,9 @@ class TestCLIDefaultFlag:
         # Verify parameters: (repo, output_dir, extract_dir, release_tag, fork)
         assert call_args[0][0] == FORKS[ForkName.GE_PROTON]["repo"]  # repo
         assert call_args[1]["fork"] == ForkName.GE_PROTON  # fork
-        assert call_args[1]["release_tag"] == "GE-Proton10-11"  # Should fetch specific tag
+        assert (
+            call_args[1]["release_tag"] == "GE-Proton10-11"
+        )  # Should fetch specific tag
 
 
 class TestCLIReleaseFlag:

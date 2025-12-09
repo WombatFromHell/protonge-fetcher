@@ -17,14 +17,32 @@ class TestArchiveExtractor:
         extractor = ArchiveExtractor(mock_fs)
         assert extractor.file_system_client == mock_fs
 
-    def test_extract_with_tarfile_success(self, mocker, tmp_path, create_test_archive):
-        """Test extract_with_tarfile method with successful extraction."""
+    @pytest.mark.parametrize(
+        "extension,files",
+        [
+            (".tar.gz", {"test.txt": b"test content"}),
+            (".tar.xz", {"test.txt": b"test content"}),
+            (".tar.gz", {"file1.txt": b"content1", "file2.txt": b"content2"}),
+            (
+                ".tar.xz",
+                {
+                    "file1.txt": b"content1",
+                    "file2.txt": b"content2",
+                    "subdir/file3.txt": b"content3",
+                },
+            ),
+        ],
+    )
+    def test_extract_with_tarfile_success(
+        self, mocker, tmp_path, create_test_archive, extension, files
+    ):
+        """Test extract_with_tarfile method with successful extraction for both formats and various file contents."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
-        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+        # Create a test archive with appropriate extension and files
+        archive_path = tmp_path / f"test{extension}"
+        create_test_archive(archive_path, extension, files)
 
         extract_path = tmp_path / "extracted"
         extract_path.mkdir()
@@ -67,14 +85,17 @@ class TestArchiveExtractor:
         with pytest.raises(ExtractionError):
             extractor.extract_with_tarfile(missing_archive, extract_path)
 
-    def test_extract_gz_archive_success(self, mocker, tmp_path, create_test_archive):
-        """Test extract_gz_archive method with successful extraction."""
+    @pytest.mark.parametrize("extension", [".tar.gz", ".tar.xz"])
+    def test_extract_archive_success(
+        self, mocker, tmp_path, create_test_archive, extension
+    ):
+        """Test extract_gz_archive and extract_xz_archive methods with successful extraction."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
-        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+        # Create a test archive with the appropriate extension
+        archive_path = tmp_path / f"test{extension}"
+        create_test_archive(archive_path, extension, {"test.txt": b"test content"})
 
         extract_path = tmp_path / "extracted"
         extract_path.mkdir()
@@ -87,19 +108,34 @@ class TestArchiveExtractor:
         mock_result.stderr = ""
         mock_subprocess.return_value = mock_result
 
-        result = extractor.extract_gz_archive(archive_path, extract_path)
+        # Call the appropriate method based on the extension
+        if extension == ".tar.gz":
+            result = extractor.extract_gz_archive(archive_path, extract_path)
+        else:  # .tar.xz
+            result = extractor.extract_xz_archive(archive_path, extract_path)
 
         assert result == extract_path
         mock_subprocess.assert_called()
 
-    def test_extract_gz_archive_failure(self, mocker, tmp_path, create_test_archive):
-        """Test extract_gz_archive with extraction failure."""
+    @pytest.mark.parametrize(
+        "extension,error_message",
+        [
+            (".tar.gz", "tar: Error extracting archive"),
+            (".tar.xz", "tar: Error extracting archive"),
+            (".tar.gz", "gzip: parse error"),
+            (".tar.xz", "xz: Compressed data is corrupt"),
+        ],
+    )
+    def test_extract_archive_failure(
+        self, mocker, tmp_path, create_test_archive, extension, error_message
+    ):
+        """Test extract_gz_archive and extract_xz_archive with extraction failure for various error messages."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
-        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+        # Create a test archive with the appropriate extension
+        archive_path = tmp_path / f"test{extension}"
+        create_test_archive(archive_path, extension, {"test.txt": b"test content"})
 
         extract_path = tmp_path / "extracted"
         extract_path.mkdir()
@@ -108,58 +144,16 @@ class TestArchiveExtractor:
         mock_subprocess = mocker.patch("subprocess.run")
         mock_result = mocker.Mock()
         mock_result.returncode = 1
-        mock_result.stderr = "tar: Error extracting archive"
+        mock_result.stderr = error_message
         mock_subprocess.return_value = mock_result
 
-        with pytest.raises(ExtractionError):
-            extractor.extract_gz_archive(archive_path, extract_path)
-
-    def test_extract_xz_archive_success(self, mocker, tmp_path, create_test_archive):
-        """Test extract_xz_archive method with successful extraction."""
-        mock_fs = mocker.Mock()
-        extractor = ArchiveExtractor(mock_fs)
-
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.xz"
-        create_test_archive(archive_path, ".tar.xz", {"test.txt": b"test content"})
-
-        extract_path = tmp_path / "extracted"
-        extract_path.mkdir()
-
-        # Mock subprocess.run to simulate tar command
-        mock_subprocess = mocker.patch("subprocess.run")
-        mock_result = mocker.Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = ""
-        mock_result.stderr = ""
-        mock_subprocess.return_value = mock_result
-
-        result = extractor.extract_xz_archive(archive_path, extract_path)
-
-        assert result == extract_path
-        mock_subprocess.assert_called()
-
-    def test_extract_xz_archive_failure(self, mocker, tmp_path, create_test_archive):
-        """Test extract_xz_archive with extraction failure."""
-        mock_fs = mocker.Mock()
-        extractor = ArchiveExtractor(mock_fs)
-
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.xz"
-        create_test_archive(archive_path, ".tar.xz", {"test.txt": b"test content"})
-
-        extract_path = tmp_path / "extracted"
-        extract_path.mkdir()
-
-        # Mock subprocess.run to simulate tar command failure
-        mock_subprocess = mocker.patch("subprocess.run")
-        mock_result = mocker.Mock()
-        mock_result.returncode = 1
-        mock_result.stderr = "tar: Error extracting archive"
-        mock_subprocess.return_value = mock_result
-
-        with pytest.raises(ExtractionError):
-            extractor.extract_xz_archive(archive_path, extract_path)
+        # Call the appropriate method based on the extension
+        if extension == ".tar.gz":
+            with pytest.raises(ExtractionError):
+                extractor.extract_gz_archive(archive_path, extract_path)
+        else:  # .tar.xz
+            with pytest.raises(ExtractionError):
+                extractor.extract_xz_archive(archive_path, extract_path)
 
     def test_extract_archive_with_tarfile_success(
         self, mocker, tmp_path, create_test_archive
@@ -215,65 +209,39 @@ class TestArchiveExtractor:
         mock_extract_with_tarfile.assert_called_once_with(archive_path, extract_path)
         mock_extract_gz.assert_called_once_with(archive_path, extract_path)
 
-    def test_extract_archive_gz_specific_success(
-        self, mocker, tmp_path, create_test_archive
+    @pytest.mark.parametrize(
+        "extension,extract_method",
+        [(".tar.gz", "extract_gz_archive"), (".tar.xz", "extract_xz_archive")],
+    )
+    def test_extract_archive_format_specific_success(
+        self, mocker, tmp_path, create_test_archive, extension, extract_method
     ):
-        """Test extract_archive fallback to extract_gz_archive when tarfile extraction fails for .tar.gz files."""
+        """Test extract_archive fallback to format-specific method when tarfile extraction fails."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
-        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+        # Create a test archive with appropriate extension
+        archive_path = tmp_path / f"test{extension}"
+        create_test_archive(archive_path, extension, {"test.txt": b"test content"})
 
         extract_path = tmp_path / "extracted"
         extract_path.mkdir()
 
-        # Mock extract_with_tarfile to fail, then extract_gz_archive to succeed
+        # Mock extract_with_tarfile to fail, then format-specific method to succeed
         mock_extract_with_tarfile = mocker.patch.object(
             extractor,
             "extract_with_tarfile",
             side_effect=ExtractionError("tarfile extraction failed"),
         )
-        mock_extract_gz = mocker.patch.object(
-            extractor, "extract_gz_archive", return_value=extract_path
+        mock_extract_format = mocker.patch.object(
+            extractor, extract_method, return_value=extract_path
         )
 
         result = extractor.extract_archive(archive_path, extract_path)
 
         assert result == extract_path
         mock_extract_with_tarfile.assert_called_once_with(archive_path, extract_path)
-        mock_extract_gz.assert_called_once_with(archive_path, extract_path)
-
-    def test_extract_archive_xz_specific_success(
-        self, mocker, tmp_path, create_test_archive
-    ):
-        """Test extract_archive fallback to extract_xz_archive when tarfile extraction fails for .tar.xz files."""
-        mock_fs = mocker.Mock()
-        extractor = ArchiveExtractor(mock_fs)
-
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.xz"
-        create_test_archive(archive_path, ".tar.xz", {"test.txt": b"test content"})
-
-        extract_path = tmp_path / "extracted"
-        extract_path.mkdir()
-
-        # Mock extract_with_tarfile to fail, then extract_xz_archive to succeed
-        mock_extract_with_tarfile = mocker.patch.object(
-            extractor,
-            "extract_with_tarfile",
-            side_effect=ExtractionError("tarfile extraction failed"),
-        )
-        mock_extract_xz = mocker.patch.object(
-            extractor, "extract_xz_archive", return_value=extract_path
-        )
-
-        result = extractor.extract_archive(archive_path, extract_path)
-
-        assert result == extract_path
-        mock_extract_with_tarfile.assert_called_once_with(archive_path, extract_path)
-        mock_extract_xz.assert_called_once_with(archive_path, extract_path)
+        mock_extract_format.assert_called_once_with(archive_path, extract_path)
 
     def test_extract_archive_unsupported_format(self, mocker, tmp_path):
         """Test extract_archive with unsupported archive format."""
@@ -302,16 +270,19 @@ class TestArchiveExtractor:
         with pytest.raises(ExtractionError):
             extractor.extract_archive(archive_path, extract_path)
 
-    def test_get_archive_info_success(self, mocker, tmp_path, create_test_archive):
-        """Test get_archive_info method with successful extraction of metadata."""
+    @pytest.mark.parametrize("extension", [".tar.gz", ".tar.xz"])
+    def test_get_archive_info_success(
+        self, mocker, tmp_path, create_test_archive, extension
+    ):
+        """Test get_archive_info method with successful extraction of metadata for both formats."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
+        # Create a test archive with appropriate extension
+        archive_path = tmp_path / f"test{extension}"
         create_test_archive(
             archive_path,
-            ".tar.gz",
+            extension,
             {
                 "file1.txt": b"content1",
                 "file2.txt": b"content2",
@@ -337,14 +308,15 @@ class TestArchiveExtractor:
         with pytest.raises(ExtractionError):
             extractor.get_archive_info(invalid_archive)
 
-    def test_is_tar_file_true(self, mocker, tmp_path, create_test_archive):
-        """Test is_tar_file method with valid tar file."""
+    @pytest.mark.parametrize("extension", [".tar.gz", ".tar.xz"])
+    def test_is_tar_file_true(self, mocker, tmp_path, create_test_archive, extension):
+        """Test is_tar_file method with valid tar file for both formats."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
-        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+        # Create a test archive with appropriate extension
+        archive_path = tmp_path / f"test{extension}"
+        create_test_archive(archive_path, extension, {"test.txt": b"test content"})
 
         result = extractor.is_tar_file(archive_path)
         assert result is True
@@ -371,16 +343,17 @@ class TestArchiveExtractor:
         result = extractor.is_tar_file(missing_file)
         assert result is False
 
+    @pytest.mark.parametrize("extension", [".tar.gz", ".tar.xz"])
     def test_extract_with_system_tar_success(
-        self, mocker, tmp_path, create_test_archive
+        self, mocker, tmp_path, create_test_archive, extension
     ):
-        """Test _extract_with_system_tar method with successful extraction."""
+        """Test _extract_with_system_tar method with successful extraction for both formats."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
-        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+        # Create a test archive with appropriate extension
+        archive_path = tmp_path / f"test{extension}"
+        create_test_archive(archive_path, extension, {"test.txt": b"test content"})
 
         extract_path = tmp_path / "extracted"
         extract_path.mkdir()
@@ -398,16 +371,17 @@ class TestArchiveExtractor:
         assert result == extract_path
         mock_subprocess.assert_called()
 
+    @pytest.mark.parametrize("extension", [".tar.gz", ".tar.xz"])
     def test_extract_with_system_tar_failure(
-        self, mocker, tmp_path, create_test_archive
+        self, mocker, tmp_path, create_test_archive, extension
     ):
-        """Test _extract_with_system_tar with extraction failure."""
+        """Test _extract_with_system_tar with extraction failure for both formats."""
         mock_fs = mocker.Mock()
         extractor = ArchiveExtractor(mock_fs)
 
-        # Create a test archive
-        archive_path = tmp_path / "test.tar.gz"
-        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+        # Create a test archive with appropriate extension
+        archive_path = tmp_path / f"test{extension}"
+        create_test_archive(archive_path, extension, {"test.txt": b"test content"})
 
         extract_path = tmp_path / "extracted"
         extract_path.mkdir()

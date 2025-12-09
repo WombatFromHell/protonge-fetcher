@@ -133,7 +133,10 @@ class ReleaseManager:
             try:
                 cached_data_bytes = self.file_system_client.read(cache_path)
                 cached_data = json.loads(cached_data_bytes.decode("utf-8"))
-                return cached_data.get("size")
+                size = cached_data.get("size")
+                # Validate that size is an integer
+                if isinstance(size, int):
+                    return size
             except (json.JSONDecodeError, KeyError, IOError):
                 # If cache file is invalid, return None to force a fresh fetch
                 pass
@@ -159,8 +162,15 @@ class ReleaseManager:
         except IOError as e:
             logger.debug(f"Failed to write to cache: {e}")
 
-    def _get_expected_extension(self, fork: ForkName) -> str:
+    def _get_expected_extension(self, fork: ForkName | str) -> str:
         """Get the expected archive extension based on the fork."""
+        # Convert string to ForkName if necessary, then check if it's valid
+        if isinstance(fork, str):
+            try:
+                fork = ForkName(fork)
+            except ValueError:
+                # Invalid fork string, return default extension
+                return ".tar.gz"
         return FORKS[fork].archive_format if fork in FORKS else ".tar.gz"
 
     def _find_matching_assets(

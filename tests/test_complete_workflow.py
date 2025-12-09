@@ -16,13 +16,34 @@ from protonfetcher.exceptions import (
 class TestCompleteWorkflow:
     """Integration tests for full fetch-and-extract workflows with all components."""
 
-    def test_complete_workflow_success_ge_proton(self, mocker, tmp_path):
-        """Test complete workflow for GE-Proton with successful execution."""
-
+    @pytest.mark.parametrize(
+        "fork,expected_tag,expected_asset,expected_size,repo",
+        [
+            (
+                ForkName.GE_PROTON,
+                "GE-Proton10-20",
+                "GE-Proton10-20.tar.gz",
+                1024 * 1024 * 400,
+                "GloriousEggroll/proton-ge-custom",
+            ),
+            (
+                ForkName.PROTON_EM,
+                "EM-10.0-30",
+                "proton-EM-10.0-30.tar.xz",
+                1024 * 1024 * 350,
+                "Etaash-mathamsetty/Proton",
+            ),
+        ],
+    )
+    def test_complete_workflow_success(
+        self, mocker, tmp_path, fork, expected_tag, expected_asset, expected_size, repo
+    ):
+        """Test complete workflow for both forks with successful execution."""
         from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
-        # Mock shutil.which to return curl path for validation
-        mocker.patch("shutil.which", return_value="/usr/bin/curl")
+        # Mock shutil.which to return curl path for validation (for GE-Proton)
+        if fork == ForkName.GE_PROTON:
+            mocker.patch("shutil.which", return_value="/usr/bin/curl")
 
         # Mock all dependencies
         mock_network = mocker.Mock()
@@ -47,17 +68,15 @@ class TestCompleteWorkflow:
         fetcher.archive_extractor = mock_archive_extractor
         fetcher.link_manager = mock_link_manager
 
-        # Setup complete workflow
-        mock_release_manager.fetch_latest_tag.return_value = "GE-Proton10-20"
-        mock_release_manager.find_asset_by_name.return_value = "GE-Proton10-20.tar.gz"
-        mock_release_manager.get_remote_asset_size.return_value = (
-            1024 * 1024 * 400
-        )  # 400MB
+        # Setup complete workflow based on fork
+        mock_release_manager.fetch_latest_tag.return_value = expected_tag
+        mock_release_manager.find_asset_by_name.return_value = expected_asset
+        mock_release_manager.get_remote_asset_size.return_value = expected_size
         mock_asset_downloader.download_asset.return_value = (
-            tmp_path / "Downloads" / "GE-Proton10-20.tar.gz"
+            tmp_path / "Downloads" / expected_asset
         )
         mock_archive_extractor.extract_archive.return_value = (
-            tmp_path / "extract" / "GE-Proton10-20"
+            tmp_path / "extract" / expected_tag
         )
 
         # Mock the basic filesystem operations needed for directory validation to pass
@@ -92,104 +111,15 @@ class TestCompleteWorkflow:
         (tmp_path / "extract").mkdir(exist_ok=True)
 
         result = fetcher.fetch_and_extract(
-            repo="GloriousEggroll/proton-ge-custom",
+            repo=repo,
             output_dir=tmp_path / "Downloads",
             extract_dir=tmp_path / "extract",
             release_tag=None,
-            fork=ForkName.GE_PROTON,
+            fork=fork,
         )
 
-        assert result == tmp_path / "extract" / "GE-Proton10-20"
+        assert result == tmp_path / "extract" / expected_tag
         # Verify all components were called in the complete workflow
-        mock_release_manager.fetch_latest_tag.assert_called_once()
-        mock_release_manager.find_asset_by_name.assert_called_once()
-        mock_asset_downloader.download_asset.assert_called_once()
-        mock_archive_extractor.extract_archive.assert_called_once()
-        mock_link_manager.manage_proton_links.assert_called_once()
-
-    def test_complete_workflow_success_proton_em(self, mocker, tmp_path):
-        """Test complete workflow for Proton-EM with successful execution."""
-        from protonfetcher.github_fetcher import GitHubReleaseFetcher
-
-        # Mock all dependencies
-        mock_network = mocker.Mock()
-        mock_fs = mocker.Mock()
-        mock_spinner_cls = mocker.Mock()
-
-        fetcher = GitHubReleaseFetcher(
-            network_client=mock_network,
-            file_system_client=mock_fs,
-            spinner_cls=mock_spinner_cls,
-            timeout=60,
-        )
-
-        # Mock all internal managers
-        mock_release_manager = mocker.Mock()
-        mock_asset_downloader = mocker.Mock()
-        mock_archive_extractor = mocker.Mock()
-        mock_link_manager = mocker.Mock()
-
-        fetcher.release_manager = mock_release_manager
-        fetcher.asset_downloader = mock_asset_downloader
-        fetcher.archive_extractor = mock_archive_extractor
-        fetcher.link_manager = mock_link_manager
-
-        # Setup complete workflow for Proton-EM
-        mock_release_manager.fetch_latest_tag.return_value = "EM-10.0-30"
-        mock_release_manager.find_asset_by_name.return_value = (
-            "proton-EM-10.0-30.tar.xz"
-        )
-        mock_release_manager.get_remote_asset_size.return_value = (
-            1024 * 1024 * 350
-        )  # 350MB
-        mock_asset_downloader.download_asset.return_value = (
-            tmp_path / "Downloads" / "proton-EM-10.0-30.tar.xz"
-        )
-        mock_archive_extractor.extract_archive.return_value = (
-            tmp_path / "extract" / "proton-EM-10.0-30"
-        )
-
-        # Mock the basic filesystem operations needed for directory validation to pass
-        def mock_fs_exists(path):
-            # Return True for download and extract directories to pass validation
-            return str(path) in [str(tmp_path / "Downloads"), str(tmp_path / "extract")]
-
-        def mock_fs_is_dir(path):
-            # Return True for download and extract directories to pass validation
-            return str(path) in [str(tmp_path / "Downloads"), str(tmp_path / "extract")]
-
-        def mock_fs_mkdir(path, parents=False, exist_ok=False):
-            # Mock mkdir to prevent errors
-            pass
-
-        def mock_fs_write(path, data):
-            # Mock write to allow directory write test to pass
-            pass
-
-        def mock_fs_unlink(path):
-            # Mock unlink to allow directory write test to pass
-            pass
-
-        mock_fs.exists.side_effect = mock_fs_exists
-        mock_fs.is_dir.side_effect = mock_fs_is_dir
-        mock_fs.mkdir.side_effect = mock_fs_mkdir
-        mock_fs.write.side_effect = mock_fs_write
-        mock_fs.unlink.side_effect = mock_fs_unlink
-
-        # Create required directories
-        (tmp_path / "Downloads").mkdir(exist_ok=True)
-        (tmp_path / "extract").mkdir(exist_ok=True)
-
-        result = fetcher.fetch_and_extract(
-            repo="Etaash-mathamsetty/Proton",
-            output_dir=tmp_path / "Downloads",
-            extract_dir=tmp_path / "extract",
-            release_tag=None,
-            fork=ForkName.PROTON_EM,
-        )
-
-        assert result == tmp_path / "extract" / "EM-10.0-30"
-        # Verify all components were called in the complete workflow for Proton-EM
         mock_release_manager.fetch_latest_tag.assert_called_once()
         mock_release_manager.find_asset_by_name.assert_called_once()
         mock_asset_downloader.download_asset.assert_called_once()
@@ -662,9 +592,7 @@ class TestCompleteWorkflow:
             pass
 
         def mock_fs_stat(path):
-            import unittest.mock
-
-            stat_result = unittest.mock.Mock()
+            stat_result = mocker.Mock()
             if "GE-Proton10-20.tar.gz" in str(path):
                 stat_result.st_size = (
                     1024 * 1024 * 400

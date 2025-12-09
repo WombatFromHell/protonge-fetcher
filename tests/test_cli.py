@@ -3,8 +3,9 @@ CLI tests for protonfetcher module.
 Testing the actual user-facing commands and their expected behavior.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 from pytest_mock import MockerFixture
 
 from protonfetcher.cli import main
@@ -602,82 +603,22 @@ class TestCLIListAndRemove:
         assert "Error: --ls cannot be used with --release or --list" in captured.out
 
 
-class TestCLIErrorHandling:
-    """Tests for CLI error handling with different forks."""
-
-    @pytest.mark.parametrize(
-        "fork, error_scenario, expected_error_message",
-        [
-            (ForkName.GE_PROTON, "fetch_error", "Network error occurred"),
-            (ForkName.PROTON_EM, "fetch_error", "Network error occurred"),
-            (ForkName.GE_PROTON, "rate_limit", "API rate limit exceeded"),
-            (ForkName.PROTON_EM, "rate_limit", "API rate limit exceeded"),
-        ],
-    )
-    def test_cli_error_handling_parametrized(
-        self,
-        mocker: MockerFixture,
-        tmp_path: Path,
-        capsys,
-        fork,
-        error_scenario,
-        expected_error_message,
-    ):
-        """Parametrized test for CLI error handling with different forks."""
-        mock_fetcher = mocker.MagicMock()
-        mocker.patch(
-            "protonfetcher.cli.GitHubReleaseFetcher",
-            return_value=mock_fetcher,
-        )
-
-        # Configure different error scenarios
-        if error_scenario == "fetch_error":
-            from protonfetcher.exceptions import ProtonFetcherError
-
-            mock_fetcher.fetch_and_extract.side_effect = ProtonFetcherError(
-                expected_error_message
-            )
-        elif error_scenario == "rate_limit":
-            from protonfetcher.exceptions import ProtonFetcherError
-
-            mock_fetcher.release_manager.list_recent_releases.side_effect = (
-                ProtonFetcherError(expected_error_message)
-            )
-
-        # Test both fetch_and_extract and list_recent_releases depending on scenario
-        test_args = ["protonfetcher", "-f", fork.value]
-
-        if error_scenario == "rate_limit":
-            test_args.insert(
-                1, "--list"
-            )  # Add list flag to trigger list_recent_releases
-
-        test_args.extend(
-            [
-                "--extract-dir",
-                str(tmp_path / "compatibilitytools.d"),
-                "--output",
-                str(tmp_path / "Downloads"),
-            ]
-        )
-        mocker.patch("sys.argv", test_args)
-
-        # Capture the SystemExit
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-
-        # Verify exit code is 1 for error
-        assert exc_info.value.code == 1
-
-        # Capture output to verify error message was printed
-        captured = capsys.readouterr()
-        assert f"Error: {expected_error_message}" in captured.out
-
-
 class TestCLIArgumentValidation:
     """Tests for CLI argument validation and error handling."""
 
-    def test_cli_invalid_fork_string_conversion(self, mocker, tmp_path, capsys):
+    @pytest.mark.parametrize(
+        "invalid_fork_name",
+        [
+            "InvalidForkName",
+            "nonexistent",
+            "wrong-name",
+            "123invalid",
+            "",
+        ],
+    )
+    def test_cli_invalid_fork_string_conversion(
+        self, mocker, tmp_path, capsys, invalid_fork_name
+    ):
         """Test when args.fork is an invalid string not in ForkName enum."""
 
         # Mock the GitHubReleaseFetcher to avoid actual operations
@@ -691,7 +632,7 @@ class TestCLIArgumentValidation:
         test_args = [
             "protonfetcher",
             "-f",
-            "InvalidForkName",  # Invalid fork name
+            invalid_fork_name,  # Invalid fork name
             "--extract-dir",
             str(tmp_path / "compatibilitytools.d"),
             "--output",

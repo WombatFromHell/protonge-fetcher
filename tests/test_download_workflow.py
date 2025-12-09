@@ -330,9 +330,7 @@ class TestDownloadWorkflow:
             return "Downloads" in path_str or "extract" in path_str
 
         def mock_fs_stat(path):
-            import unittest.mock
-
-            stat_result = unittest.mock.Mock()
+            stat_result = mocker.Mock()
             stat_result.st_size = 1024 * 1024 * 400  # Matches expected size
             return stat_result
 

@@ -27,7 +27,7 @@ install: $(OUT)
 	echo "Installed to $$INSTALL_DIR/$(ARTIFACT)"
 
 test:
-	uv run pytest -v --cov=src --cov-report=term-missing
+	uv run pytest -v --cov=src --cov-report=term-missing --cov-branch
 
 lint:
 	ruff check --select I ./src ./tests --fix; \

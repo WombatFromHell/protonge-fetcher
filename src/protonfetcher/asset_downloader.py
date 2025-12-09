@@ -77,7 +77,7 @@ class AssetDownloader:
                             unit="B",
                             unit_scale=True,
                             disable=False,
-                            fps_limit=30.0,  # Limit to 15 FPS during download to prevent excessive terminal updates
+                            fps_limit=10.0,  # Limit to 10 FPS during download to prevent excessive terminal updates
                             show_progress=True,
                         ) as spinner
                     ):

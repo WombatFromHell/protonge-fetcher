@@ -261,31 +261,6 @@ class TestLinkManagementErrors:
 class TestValidationErrors:
     """Tests for validation error conditions."""
 
-    def test_cli_argument_validation(self, mocker, tmp_path, capsys):
-        """Test CLI argument validation."""
-        # Test with invalid fork choice
-        test_args = [
-            "protonfetcher",
-            "-f",
-            "Invalid-Fork",
-            "--extract-dir",
-            str(tmp_path / "compatibilitytools.d"),
-            "--output",
-            str(tmp_path / "Downloads"),
-        ]
-        mocker.patch("sys.argv", test_args)
-
-        # Argparse will exit with code 2 for invalid argument
-        with pytest.raises(SystemExit) as exc_info:
-            from protonfetcher.cli import main
-
-            main()
-
-        # argparse exits with code 2 for argument errors
-        assert exc_info.value.code == 2
-        capsys.readouterr()
-        # Error message will contain info about invalid choice
-
     def test_cli_list_flag_with_rate_limit_error(self, mocker, tmp_path, capsys):
         """Test CLI command handles rate limit errors properly."""
         mock_fetcher = mocker.MagicMock()

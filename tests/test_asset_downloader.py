@@ -2,13 +2,13 @@
 Optimized Unit tests for AssetDownloader in protonfetcher.py
 """
 
-from pathlib import Path
 import urllib.error
-from protonfetcher.asset_downloader import AssetDownloader
-from protonfetcher.exceptions import NetworkError
+from pathlib import Path
 
 import pytest
 
+from protonfetcher.asset_downloader import AssetDownloader
+from protonfetcher.exceptions import NetworkError
 
 # Fixtures have been centralized to conftest.py:
 # - mock_dependencies fixture is now asset_downloader_dependencies
