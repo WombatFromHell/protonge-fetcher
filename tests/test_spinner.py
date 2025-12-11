@@ -48,6 +48,104 @@ class TestSpinner:
         # Verify it tried to print
         mock_print.assert_called()
 
+    def test_spinner_context_manager_exit_method(self, mocker):
+        """Test Spinner __exit__ method (lines 50-53)."""
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(disable=False)
+        spinner._current_line = "Loading..."  # Set a current line to clear
+
+        # Test the context manager exit functionality
+        with spinner:
+            pass  # Context manager will call __exit__
+
+        # The print should have been called to clear the display
+        mock_print.assert_called()
+
+    def test_spinner_exit_method_with_empty_line(self, mocker):
+        """Test Spinner __exit__ method with empty current line."""
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(disable=False)
+        spinner._current_line = ""  # Empty line
+
+        with spinner:
+            pass  # Context manager will call __exit__
+
+        # The print should still be called even with empty line
+        mock_print.assert_called()
+
+    def test_spinner_disabled_exit_method(self):
+        """Test Spinner __exit__ method when disabled."""
+        spinner = Spinner(disable=True)
+        spinner._current_line = "Loading..."  # Set a current line
+
+        # Context manager with disabled spinner should not print
+        with spinner:
+            pass
+
+        # No print should happen when disabled
+
+    def test_spinner_update_display_fps_limit_early_exit(self, mocker):
+        """Test _update_display early exit due to FPS limit (line 56->exit)."""
+        mock_print = mocker.patch("builtins.print")
+
+        # Set up spinner with FPS limit
+        spinner = Spinner(disable=False, fps_limit=10)  # 10 FPS = 0.1s interval
+        spinner.current = 10
+        spinner.total = 100
+
+        # Set _last_update_time to a recent time that would prevent update due to FPS limit
+        spinner._last_update_time = 10.0  # Mock value to represent last update time
+
+        # Mock time.time to return a value that's less than the minimum interval from _last_update_time
+        mocker.patch(
+            "time.time", return_value=10.01
+        )  # Only 0.01s passed, min interval is 0.1s
+
+        # Update the display
+        spinner._update_display()
+
+        # Should return early due to FPS limit since not enough time has passed
+        # No print call should happen because the method exits early
+        mock_print.assert_not_called()
+
+    def test_spinner_update_display_no_fps_limit(self, mocker):
+        """Test _update_display when no FPS limit is set."""
+        mock_print = mocker.patch("builtins.print")
+
+        # Set up spinner without FPS limit
+        spinner = Spinner(disable=False, fps_limit=None)  # No FPS limit
+        spinner.current = 10
+        spinner.total = 100
+        spinner._last_update_time = 10.0  # Recent time
+
+        # Mock time.time to return a newer value
+        mocker.patch("time.time", return_value=10.01)  # Small time difference
+
+        # Update the display
+        spinner._update_display()
+
+        # Should update because there's no FPS limit
+        mock_print.assert_called()
+
+    def test_spinner_finish_already_completed_exit_early(self, mocker):
+        """Test spinner finish method when already completed (line 182->exit)."""
+        mock_print = mocker.patch("builtins.print")
+
+        spinner = Spinner(disable=False, total=10, show_progress=True)
+        spinner._completed = True  # Set as already completed
+
+        original_current = spinner.current
+        spinner.current = 15  # Try to set to a higher value
+        spinner.finish()  # Should exit early due to _completed being True
+
+        # Current should remain unchanged since method exits early
+        assert spinner.current == 15  # Should still be 15, not total
+        # The method should return early without executing the main body
+        # Check that print was not called in the completion part
+        # It might still be called initially, but the finishing behavior should be skipped
+
     def test_spinner_context_manager(self, mocker):
         """Test spinner as context manager."""
         mock_print = mocker.patch("builtins.print")

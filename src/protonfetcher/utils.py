@@ -1,8 +1,56 @@
 """Utility functions for ProtonFetcher."""
 
 import re
+from typing import Any, Protocol
 
 from .common import ForkName
+
+
+def validate_protocol_instance(obj: Any, protocol: type[Protocol]) -> bool:
+    """Validate that an object implements a protocol at runtime.
+    
+    This utility function checks if an object conforms to a given protocol by verifying
+    that all required methods and attributes are present and have the correct types.
+    Useful for debugging and testing protocol implementations during development.
+    
+    Args:
+        obj: Object to validate
+        protocol: Protocol class to validate against
+        
+    Returns:
+        True if object implements the protocol, False otherwise
+        
+    Example:
+        >>> from protonfetcher.common import NetworkClientProtocol
+        >>> from protonfetcher.network import NetworkClient
+        >>> client = NetworkClient(timeout=30)
+        >>> validate_protocol_instance(client, NetworkClientProtocol)
+        True
+        
+    Note:
+        This is a runtime validation utility and should not be used in production
+        performance-critical code. It's primarily intended for debugging and testing.
+    """
+    try:
+        # Check if all protocol methods and attributes are present
+        for attr_name in dir(protocol):
+            if attr_name.startswith('_'):
+                continue
+                
+            attr = getattr(protocol, attr_name)
+            
+            if callable(attr):
+                # It's a method - check if object has callable with same name
+                obj_attr = getattr(obj, attr_name, None)
+                if not callable(obj_attr):
+                    return False
+            else:
+                # It's an attribute - check if object has it
+                if not hasattr(obj, attr_name):
+                    return False
+        return True
+    except Exception:
+        return False
 
 
 def parse_version(

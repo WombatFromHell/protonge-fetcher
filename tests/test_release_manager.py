@@ -25,6 +25,100 @@ class TestReleaseManager:
         assert manager.network_client == mock_network
         assert manager.file_system_client == mock_fs
 
+    def test_get_expected_extension_with_invalid_fork_string(self, mocker):
+        """Test _get_expected_extension with invalid fork string (lines 168-174)."""
+        mock_network = mocker.Mock()
+        mock_fs = mocker.Mock()
+        manager = ReleaseManager(mock_network, mock_fs)
+
+        # Test with invalid fork string - should return default extension
+        result = manager._get_expected_extension("invalid-fork")
+        assert result == ".tar.gz"  # Default extension for invalid fork string
+
+        # Test with ForkName enum - should return appropriate extension
+        result_ge = manager._get_expected_extension(ForkName.GE_PROTON)
+        assert result_ge == ".tar.gz"
+
+        result_em = manager._get_expected_extension(ForkName.PROTON_EM)
+        assert result_em == ".tar.xz"
+
+        # Test with string that's not valid ForkName - should return default
+        result = manager._get_expected_extension("some-random-string")
+        assert result == ".tar.gz"
+
+    def test_follow_redirect_and_get_size_functionality(self, mocker):
+        """Test _follow_redirect_and_get_size method with various scenarios (lines 387-393)."""
+        mock_network = mocker.Mock()
+        mock_fs = mocker.Mock()
+        manager = ReleaseManager(mock_network, mock_fs)
+
+        # Test successful redirect with content-length
+        initial_result = mocker.Mock()
+        initial_result.stdout = "Location: https://redirected.example.com/file.tar.gz\n"
+
+        redirected_result = mocker.Mock()
+        redirected_result.returncode = 0
+        redirected_result.stdout = "Content-Length: 123456789\nOther-Header: value\n"
+
+        mock_network.head.return_value = redirected_result
+
+        size = manager._follow_redirect_and_get_size(
+            initial_result,
+            "https://original.example.com/file.tar.gz",
+            "test/repo",
+            "GE-Proton10-20",
+            "GE-Proton10-20.tar.gz",
+            in_test=True,  # Skip caching during test
+        )
+
+        assert size == 123456789
+        mock_network.head.assert_called_once_with(
+            "https://redirected.example.com/file.tar.gz", follow_redirects=False
+        )
+
+        # Test when redirect URL is same as original
+        initial_result_same_url = mocker.Mock()
+        initial_result_same_url.stdout = (
+            "Location: https://original.example.com/file.tar.gz\n"
+        )
+
+        size = manager._follow_redirect_and_get_size(
+            initial_result_same_url,
+            "https://original.example.com/file.tar.gz",
+            "test/repo",
+            "GE-Proton10-20",
+            "GE-Proton10-20.tar.gz",
+            in_test=True,
+        )
+
+        assert size is None  # Should return None when URLs are the same
+
+    def test_follow_redirect_and_get_size_with_error_response(self, mocker):
+        """Test _follow_redirect_and_get_size method when redirect response contains error."""
+        mock_network = mocker.Mock()
+        mock_fs = mocker.Mock()
+        manager = ReleaseManager(mock_network, mock_fs)
+
+        # Test redirect with error in response - this should raise NetworkError
+        initial_result = mocker.Mock()
+        initial_result.stdout = "Location: https://redirected.example.com/file.tar.gz\n"
+
+        redirected_result_with_error = mocker.Mock()
+        redirected_result_with_error.returncode = 0
+        redirected_result_with_error.stdout = "404 Not Found"
+
+        mock_network.head.return_value = redirected_result_with_error
+
+        with pytest.raises(NetworkError):
+            manager._follow_redirect_and_get_size(
+                initial_result,
+                "https://original.example.com/file.tar.gz",
+                "test/repo",
+                "GE-Proton10-20",
+                "GE-Proton10-20.tar.gz",
+                in_test=True,
+            )
+
     def test_init_with_xdg_cache_home(self, mocker):
         """Test ReleaseManager initialization with XDG_CACHE_HOME environment variable."""
         # Mock the environment to include XDG_CACHE_HOME

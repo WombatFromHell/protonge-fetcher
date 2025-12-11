@@ -20,6 +20,152 @@ class TestLinkManager:
         manager = LinkManager(mock_fs)
         assert manager.file_system_client == mock_fs
 
+    def test_is_valid_proton_directory_proton_em_specific_paths(self, mocker):
+        """Test Proton-EM specific paths in _is_valid_proton_directory (line 179->exit)."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        # Test valid Proton-EM format 1: proton-EM-{major}.{minor}-{patch}
+        entry = Path("proton-EM-10.0-30")
+        result = manager._is_valid_proton_directory(entry, ForkName.PROTON_EM)
+        assert result is True
+
+        # Test valid Proton-EM format 2: EM-{major}.{minor}-{patch}
+        entry = Path("EM-10.0-30")
+        result = manager._is_valid_proton_directory(entry, ForkName.PROTON_EM)
+        assert result is True
+
+        # Test invalid Proton-EM format (uppercase proton-EM)
+        entry = Path("PROTON-EM-10.0-30")
+        result = manager._is_valid_proton_directory(entry, ForkName.PROTON_EM)
+        assert result is False
+
+        # Test invalid Proton-EM format (no patch number)
+        entry = Path("proton-EM-10.0")
+        result = manager._is_valid_proton_directory(entry, ForkName.PROTON_EM)
+        assert result is False
+
+    def test_create_symlinks_multiple_versions(self, mocker, tmp_path):
+        """Test _create_symlink_specs with multiple version scenarios (lines 217-222)."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        main = tmp_path / "GE-Proton"
+        fb1 = tmp_path / "GE-Proton-Fallback"
+        fb2 = tmp_path / "GE-Proton-Fallback2"
+
+        # Test with only 1 version (should create only main)
+        target1 = tmp_path / "GE-Proton10-20"
+        top_1 = [(("GE-Proton", 10, 20, 0), target1)]
+        specs_1 = manager._create_symlink_specs(main, fb1, fb2, top_1)
+        assert len(specs_1) == 1
+        assert specs_1[0].link_path == main
+        assert specs_1[0].target_path == target1
+        assert specs_1[0].priority == 0
+
+        # Test with 2 versions (should create main and fb1)
+        target2 = tmp_path / "GE-Proton9-15"
+        top_2 = [
+            (("GE-Proton", 10, 20, 0), target1),
+            (("GE-Proton", 9, 15, 0), target2),
+        ]
+        specs_2 = manager._create_symlink_specs(main, fb1, fb2, top_2)
+        assert len(specs_2) == 2
+        assert specs_2[0].link_path == main
+        assert specs_2[1].link_path == fb1
+
+        # Test with 3 versions (should create main, fb1, and fb2)
+        target3 = tmp_path / "GE-Proton8-10"
+        top_3 = [
+            (("GE-Proton", 10, 20, 0), target1),
+            (("GE-Proton", 9, 15, 0), target2),
+            (("GE-Proton", 8, 10, 0), target3),
+        ]
+        specs_3 = manager._create_symlink_specs(main, fb1, fb2, top_3)
+        assert len(specs_3) == 3
+        assert specs_3[0].link_path == main
+        assert specs_3[1].link_path == fb1
+        assert specs_3[2].link_path == fb2
+
+    def test_determine_release_path_with_proton_em_prefix(self, mocker, tmp_path):
+        """Test _determine_release_path for Proton-EM with proton- prefix (lines 461-466)."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+        tag = "EM-10.0-30"
+
+        # Create the alternative path (with "proton-" prefix)
+        proton_em_path = extract_dir / f"proton-{tag}"
+        proton_em_path.mkdir()
+
+        # Only the alternative path exists, not the regular one
+        def mock_exists(path):
+            return str(path) == str(proton_em_path)
+
+        mock_fs.exists.side_effect = mock_exists
+
+        result = manager._determine_release_path(extract_dir, tag, ForkName.PROTON_EM)
+
+        # Should return the alternative path with "proton-" prefix
+        assert result == proton_em_path
+
+    def test_identify_links_to_remove_with_broken_symlinks(self, mocker, tmp_path):
+        """Test _identify_links_to_remove with broken symlinks (line 490->484)."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        main = extract_dir / "GE-Proton"
+        release_path = extract_dir / "GE-Proton10-20"
+
+        def mock_exists(path):
+            return str(path) == str(main)
+
+        def mock_is_symlink(path):
+            return str(path) == str(main)
+
+        def mock_resolve(path):
+            if str(path) == str(main):
+                raise OSError("Broken symlink")
+            return path
+
+        mock_fs.exists.side_effect = mock_exists
+        mock_fs.is_symlink.side_effect = mock_is_symlink
+        mock_fs.resolve.side_effect = mock_resolve
+
+        links_to_remove = manager._identify_links_to_remove(
+            extract_dir, release_path, ForkName.GE_PROTON
+        )
+
+        # Broken symlink should be in the list to remove
+        assert main in links_to_remove
+
+    def test_handle_manual_release_candidates_scenario(self, mocker):
+        """Test _handle_manual_release_candidates with various scenarios (lines 639-643)."""
+        mock_fs = mocker.Mock()
+        manager = LinkManager(mock_fs)
+
+        tag = "GE-Proton10-20"
+        fork = ForkName.GE_PROTON
+        # Create candidates with some existing versions
+        candidates = [(("GE-Proton", 10, 0, 15), Path("GE-Proton10-15"))]
+        tag_dir = Path("GE-Proton10-20")
+
+        result = manager._handle_manual_release_candidates(
+            tag, fork, candidates, tag_dir
+        )
+
+        # Should include both the original candidate and the new manual tag
+        assert len(result) == 2
+        # Should include the manual tag
+        assert any(c[1] == tag_dir for c in result)
+        # Should be sorted with newer version first
+        assert result[0][0][3] == 20  # manual tag version should be first
+
     def test_create_symlinks_success(self, mocker, tmp_path):
         """Test create_symlinks method with successful symlink creation."""
         mock_fs = mocker.Mock()

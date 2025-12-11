@@ -2,267 +2,205 @@
 
 ## Overview
 
-ProtonFetcher is a Python module designed to fetch and extract the latest ProtonGE GitHub release assets. It supports multiple Proton forks (GE-Proton and Proton-EM) and provides functionality to download, verify, extract, and manage symbolic links with progress indication.
+ProtonFetcher is a Python module designed to fetch and extract ProtonGE GitHub release assets. It supports multiple Proton forks (GE-Proton and Proton-EM) with functionality for downloading, verifying, extracting, and managing symbolic links with progress indication.
 
 ## Architecture
 
-The module follows a modular design with clear separation of concerns and dependency injection, organized under the `src/protonfetcher/` package:
+The module follows a modular design with clear separation of concerns and dependency injection, organized under `src/protonfetcher/`.
 
-```mermaid
-graph TB
-    subgraph "Core Components (src/protonfetcher/)"
-        A[GitHubReleaseFetcher] --> B[ReleaseManager]
-        A --> C[AssetDownloader]
-        A --> D[ArchiveExtractor]
-        A --> E[LinkManager]
-    end
+### Core Components
 
-    subgraph "Infrastructure"
-        F[NetworkClientProtocol]
-        G[FileSystemClientProtocol]
-        H[Spinner]
-    end
+- **GitHubReleaseFetcher**: Main orchestrator coordinating workflow, environment validation, and process flow
+- **ReleaseManager**: Handles release discovery, GitHub API interactions, asset resolution, and XDG-compliant caching
+- **AssetDownloader**: Manages downloads with progress indication and file size comparison caching
+- **ArchiveExtractor**: Handles extraction for `.tar.gz` and `.tar.xz` formats with fallback mechanisms
+- **LinkManager**: Manages symbolic links with intelligent version sorting and priority ordering
 
-    A --> F
-    A --> G
-    A --> H
+### Protocol-Based Design
 
-    style A fill:#4CAF50,stroke:#388E3C,color:#fff
-    style B fill:#2196F3,stroke:#0D47A1,color:#fff
-    style C fill:#2196F3,stroke:#0D47A1,color:#fff
-    style D fill:#2196F3,stroke:#0D47A1,color:#fff
-    style E fill:#2196F3,stroke:#0D47A1,color:#fff
-    style F fill:#FF9800,stroke:#E65100,color:#fff
-    style G fill:#FF9800,stroke:#E65100,color:#fff
-```
+The architecture uses Protocol-based dependency injection for easy testing and component substitution:
 
-The architecture uses Protocol-based dependency injection to enable easy testing and component substitution. The GitHubReleaseFetcher serves as the main orchestrator that instantiates and coordinates specialized managers rather than implementing all functionality directly. Each component is responsible for a specific domain:
+- **NetworkClientProtocol**: Abstract interface for network operations
+- **FileSystemClientProtocol**: Abstract interface for filesystem operations
+- **Runtime Validation**: `validate_protocol_instance()` utility for development-time validation
+- **Versioning**: Protocol version constants for future compatibility
 
-- **GitHubReleaseFetcher**: Main orchestration and coordination of the entire workflow, validates environment and directories, and manages the overall process flow
-- **ReleaseManager**: Handles release discovery, GitHub API interactions, asset name resolution, and size caching with XDG-compliant cache storage
-- **AssetDownloader**: Manages download operations with progress indication, caching based on file size comparison, and fallback mechanisms
-- **ArchiveExtractor**: Handles archive extraction with progress indication for both `.tar.gz` and `.tar.xz` formats using both tarfile library and system tar commands
-- **LinkManager**: Manages symbolic links ensuring they point to the latest versions, handles link creation, listing, and removal with intelligent version sorting
+### Key Features
+
+- **Protocol-based architecture** with comprehensive documentation and versioning
+- **XDG-compliant caching** for asset size information
+- **Dual extraction methods** (tarfile library + system tar fallback)
+- **Intelligent version parsing** for proper Proton release sorting
+- **Comprehensive error handling** with specific exception hierarchy
+- **Modern Python 3.11+ features**: StrEnum, protocols, ExceptionGroup, type hints
 
 ## Core Components
 
 ### Module Structure
 
-- `src/protonfetcher/common.py` - Shared types, enums, protocols, and constants
-- `src/protonfetcher/exceptions.py` - Custom exception hierarchy
-- `src/protonfetcher/utils.py` - Utility functions used across components
-- `src/protonfetcher/network.py` - Network client implementation
-- `src/protonfetcher/filesystem.py` - File system client implementation
-- `src/protonfetcher/spinner.py` - Progress indication implementation
-- `src/protonfetcher/release_manager.py` - Release management logic
-- `src/protonfetcher/asset_downloader.py` - Download management logic
-- `src/protonfetcher/archive_extractor.py` - Archive extraction logic
-- `src/protonfetcher/link_manager.py` - Symlink management logic
-- `src/protonfetcher/github_fetcher.py` - Main orchestrator
-- `src/protonfetcher/cli.py` - CLI interface and logic
-- `src/entry.py` - Entry point for zipapp distribution
+- `common.py` - Shared types, enums, protocols, and constants
+- `exceptions.py` - Custom exception hierarchy
+- `utils.py` - Utility functions and protocol validation
+- `network.py` - Network client implementation
+- `filesystem.py` - File system client implementation
+- `spinner.py` - Progress indication with FPS limiting
+- `release_manager.py` - Release discovery and asset management
+- `asset_downloader.py` - Download operations with caching
+- `archive_extractor.py` - Archive extraction with fallbacks
+- `link_manager.py` - Symbolic link management
+- `github_fetcher.py` - Main orchestrator
+- `cli.py` - CLI interface and argument parsing
+- `entry.py` - Entry point for distribution
 
 ### GitHubReleaseFetcher
 
-Main orchestrator coordinating all operations:
-
-- `fetch_and_extract`: Main entry point that coordinates the complete workflow of downloading, extracting, and managing links with progress indication
-- `list_links`: Lists managed symbolic links for a specified fork
-- `remove_release`: Removes specified releases and their associated links
-- `list_recent_releases`: Lists available releases for selection
-- `_validate_environment`: Validates required tools like curl are available
-- `_ensure_directories_writable`: Validates output and extract directories are writable
-- `_determine_release_tag`: Determines the release tag to use (latest or manual)
-- `_download_asset`: Downloads the appropriate asset file for the release
-- `_extract_and_manage_links`: Handles extraction and link management
+Main orchestrator with methods for:
+- Complete workflow coordination (`fetch_and_extract`)
+- Link management (`list_links`, `remove_release`)
+- Release discovery (`list_recent_releases`)
+- Environment validation and process flow management
 
 ### ReleaseManager
 
-Handles release discovery and asset finding with caching:
-
-- `fetch_latest_tag`: Gets latest release tag from GitHub using redirects
-- `find_asset_by_name`: Finds asset files by name with both GitHub API and HTML fallback approaches
-- `get_remote_asset_size`: Retrieves asset size using HEAD requests with persistent cache storage
-- `list_recent_releases`: Fetches list of recent releases from GitHub API
-- `_get_cached_asset_size`: Internal method to retrieve cached asset sizes from XDG-compliant cache
-- `_cache_asset_size`: Internal method to cache asset sizes to XDG-compliant cache
+Handles release discovery and asset management:
+- Tag fetching with GitHub API redirects
+- Asset finding with API and HTML fallbacks
+- Asset size caching with XDG-compliant storage
+- Recent releases listing
 
 ### AssetDownloader
 
-Manages downloads with progress indication and caching:
-
-- `download_asset`: Main download method with file size comparison caching and progress indication
-- `curl_get`, `curl_head`, `curl_download`: Makes requests using curl with performance optimizations
-- `download_with_spinner`: Downloads file with progress spinner using urllib for fallback
+Manages downloads with:
+- File size comparison caching
+- Progress indication
+- Curl-based operations with fallbacks
+- Spinner-based progress display
 
 ### ArchiveExtractor
 
-Extracts archives with progress indication:
-
-- `extract_archive`: Main extraction method with format detection and fallback mechanisms
-- `extract_with_tarfile`: Uses Python's tarfile library with detailed progress indication
-- `extract_gz_archive`, `extract_xz_archive`: Specialized methods for different formats using system tar
-- `_extract_with_system_tar`: Fallback extraction using system tar command
-- `get_archive_info`: Retrieves information about archive without extracting
-- `is_tar_file`: Validates if file is a tar file
-- Configurable progress display with `show_progress` and `show_file_details`
+Handles archive extraction:
+- Format detection and fallback mechanisms
+- Tarfile library and system tar support
+- Progress indication for both formats
+- Archive validation and information retrieval
 
 ### LinkManager
 
-Manages symbolic links ensuring they point to newest versions:
-
-- `create_symlinks`: Creates managed symbolic links with priority ordering
-- `list_links`: Lists existing managed links with target information
-- `remove_release`: Removes specified releases and updates links
-- `manage_proton_links`: Ensures symlinks point to the newest versions with intelligent version sorting
-- `get_link_names_for_fork`: Gets appropriate symlink names based on fork type
-- `find_version_candidates`: Discovers and parses version information from directories
-- `_handle_manual_release_directory`: Special handling for manual release scenarios
-- `_deduplicate_candidates`: Removes duplicate version entries, preferring standard naming
-- `_create_symlink_specs`: Creates specification objects for symlink management
+Manages symbolic links:
+- Creation with priority ordering
+- Listing and removal operations
+- Intelligent version sorting
+- Fork-specific link naming
+- Manual release handling
 
 ### CLI Interface
 
 Provides command-line functionality:
-
-- `main`: CLI entry point function
-- `parse_arguments`: Parses command-line arguments with validation
-- `setup_logging`: Configures logging based on debug flag
-- `convert_fork_to_enum`: Converts fork argument to ForkName enum
-- `_handle_*_operation_flow` methods: Handle different operation flows (ls, list, rm, default)
-- Supports multiple operations: fetch, list, remove, show links
+- Argument parsing with validation
+- Logging configuration
+- Operation flow handling (fetch, list, remove, links)
+- Fork name conversion and validation
 
 ## CLI Interface
 
 ### Features and Options
 
-- `--extract-dir`, `-x`: Directory to extract to (default: `~/.steam/steam/compatibilitytools.d/`)
-- `--output`, `-o`: Directory to download to (default: `~/Downloads/`)
+- `--extract-dir`, `-x`: Extract directory (default: `~/.steam/steam/compatibilitytools.d/`)
+- `--output`, `-o`: Download directory (default: `~/Downloads/`)
 - `--release`, `-r`: Specify release tag instead of latest
 - `--fork`, `-f`: Fork to download (GE-Proton, Proton-EM)
 - `--list`, `-l`: List recent releases
-- `--ls`: List managed symbolic links for all or specified fork
-- `--rm`: Remove specific release and update links accordingly
+- `--ls`: List managed symbolic links (default behavior)
+- `--rm`: Remove specific release and update links
 - `--debug`: Enable debug logging
 
 ### Validation and Constraints
 
-- `--list` and `--release` cannot be used together
-- `--ls` cannot be used with `--release`, `--list`, or `--rm`
-- `--rm` cannot be used with `--release`, `--list`, or `--ls`
+- Mutually exclusive flags: `--list`/`--release`, `--ls`/`--rm`
 - Path validation and directory permission checks
 - Fork name validation using ForkName enum
-- Environment validation to ensure required tools (curl) are available
-- Directory writability validation for both output and extract directories
+- Environment validation for required tools (curl)
+- Directory writability validation
 
 ### Operation Flows
 
-The CLI supports multiple distinct operation modes:
-
-- **Default (`--ls` behavior)**: Lists managed symbolic links and their targets (now the default when no operation flags provided)
+- **Default (`--ls`)**: Lists managed symbolic links and targets
 - **List releases (`--list`)**: Fetches and displays recent releases from GitHub API
-- **List links (`--ls`)**: Displays managed symbolic links and their targets
+- **List links (`--ls`)**: Displays managed symbolic links and targets
 - **Remove release (`--rm`)**: Removes specified release directory and updates symlinks
 
-The default behavior changed to improve user experience: when no operation flags (`--list`, `--ls`, `--rm`) are provided, the application now defaults to the `--ls` behavior instead of attempting to fetch and extract. This means running `./protonfetcher.pyz` with no arguments is equivalent to `./protonfetcher.pyz --ls`, showing the current installed versions.
+Default behavior shows current installed versions when no operation flags are provided.
 
 ## Fork Configuration System
 
-The application supports multiple Proton forks through structured configuration:
+Supports multiple Proton forks with structured configuration:
 
-- `ForkName`: StrEnum containing `GE_PROTON` and `PROTON_EM`
-- `ForkConfig`: Dataclass containing repository and archive format for each fork
-- `FORKS`: Dictionary mapping ForkName enum values to ForkConfig objects
-- Different archive formats: GE-Proton uses `.tar.gz`, Proton-EM uses `.tar.xz`
-- Link management creates appropriate symlink names per fork:
-  - GE-Proton: `GE-Proton`, `GE-Proton-Fallback`, `GE-Proton-Fallback2`
-  - Proton-EM: `Proton-EM`, `Proton-EM-Fallback`, `Proton-EM-Fallback2`
-- Fork-specific version parsing to handle different naming conventions
-- Repository-specific asset naming and detection strategies
-- Different extraction path handling (Proton-EM may use `proton-` prefix in directory names)
-- Separate asset size caching per fork and asset combination
+- `ForkName`: StrEnum with `GE_PROTON` and `PROTON_EM`
+- `ForkConfig`: Dataclass with repository and archive format per fork
+- `FORKS`: Dictionary mapping ForkName enums to ForkConfig objects
+- Archive formats: GE-Proton (`.tar.gz`), Proton-EM (`.tar.xz`)
+- Fork-specific symlink naming and version parsing
+- Repository-specific asset naming and detection
+- Extraction path handling with `proton-` prefix support
 
 ## Error Handling
 
-Comprehensive error hierarchy with specific exception types for different failure scenarios:
+Comprehensive error hierarchy with specific exception types:
 
-- `ProtonFetcherError`: Base exception for all ProtonFetcher operations (backward compatible alias: `FetchError`)
-- `NetworkError`: Network-related failures including HTTP errors, connection timeouts, and API rate limit exceeded
-- `ExtractionError`: Archive extraction failures including corrupted archives, disk space issues, and format incompatibilities
-- `LinkManagementError`: Link management failures including permission errors, broken symlinks, and directory access issues
-- `MultiLinkManagementError`: Batch operation failures (ExceptionGroup) for handling multiple link management errors simultaneously
+- `ProtonFetcherError`: Base exception (backward compatible alias: `FetchError`)
+- `NetworkError`: Network-related failures (HTTP errors, timeouts, rate limits)
+- `ExtractionError`: Archive extraction failures (corrupted archives, disk space, format issues)
+- `LinkManagementError`: Link management failures (permissions, broken symlinks, directory access)
+- `MultiLinkManagementError`: Batch operation failures using ExceptionGroup
 
-Each component raises appropriate exceptions with detailed error messages that include:
-
-- Context-specific information (URLs, file paths, fork names)
-- Specific error causes when available
-- Actionable guidance for troubleshooting
-- Proper exception chaining to preserve error context
+Exceptions include context-specific information, error causes, troubleshooting guidance, and proper exception chaining.
 
 ## Testing Approach
 
-The test suite employs multiple testing strategies to ensure comprehensive coverage:
+The test suite employs multiple testing strategies:
 
-- **Unit Tests**: Component-specific tests with focused responsibility for individual methods and classes
-- **Integration Tests**: Workflow-oriented tests verifying multiple components work together, including complete fetch-and-extract workflows
-- **CLI Tests**: Validation of command-line interface functionality, argument parsing, and operation flows
-- **Quality Tests**: Complexity regression and maintainability checks using tools like Radon
-- **Parametrized Tests**: Fork-specific testing using `@pytest.mark.parametrize` for both GE-Proton and Proton-EM scenarios
-- **Mock-based Testing**: Protocol-based dependency injection enables comprehensive testing of error scenarios and isolated functionality
-- **Error Handling Tests**: Specific tests for each exception type and error recovery scenarios
-- **Fork-Specific Tests**: Dedicated test suites for both GE-Proton (tar.gz) and Proton-EM (tar.xz) fork behaviors
-- **Validation Tests**: Tests for input validation, directory permissions, and environment checks
-- **Cache Behavior Tests**: Tests for asset size caching, XDG cache compliance, and cache invalidation scenarios
-- **Symbolic Link Tests**: Tests for link creation, management, removal, and version sorting functionality
+- **Unit Tests**: Component-specific tests for individual methods and classes
+- **Integration Tests**: Workflow-oriented tests for component interactions
+- **CLI Tests**: Command-line interface functionality and argument parsing validation
+- **Quality Tests**: Complexity regression and maintainability checks
+- **Parametrized Tests**: Fork-specific testing for GE-Proton and Proton-EM scenarios
+- **Mock-based Testing**: Protocol-based dependency injection for isolated testing
+- **Error Handling Tests**: Exception type testing and error recovery scenarios
+- **Coverage Tests**: Integrated into respective module test files
+
+### Test Organization
+
+- **Module-Based Structure**: Tests organized by component being tested
+- **Separation of Concerns**: Clear separation between unit, integration, and workflow tests
+- **Consistent Naming**: `test_<module_name>.py` pattern
+- **Coverage Integration**: Coverage tests integrated into respective module files
+- **Fork Parametrization**: Systematic parametrization across both Proton forks
 
 ### Complexity Regression Test Thresholds
 
-The complexity regression tests enforce the following thresholds to maintain code quality:
+Code quality thresholds enforced by complexity regression tests:
 
-- **Cyclomatic Complexity**:
-  - Maximum per function: 10 (function remains manageable)
-  - Maximum average: 5.0 (overall code remains simple)
-
-- **ABC Metrics**:
-  - Maximum assignments per function: 15
-  - Maximum branches per function: 10
-  - Maximum conditions per function: 10
-  - Maximum ABC score: 25.0
-
-- **Cognitive Complexity**:
-  - Maximum per function: 15 (function remains easy to understand)
-
-- **Raw Metrics**:
-  - Maximum lines of code (LOC): 3000 per project
-  - Maximum source lines of code (SLOC): 2500 per project
-
-- **Maintainability**:
-  - Minimum maintainability index: 15.0
-
-- **Code Duplication**:
-  - Maximum duplication blocks: 5
-  - Maximum duplication lines: 100
-
-- **File-Level Complexity**:
-  - Maximum functions per file: 30
-  - Maximum total complexity per file: 200
-  - Maximum average complexity per file: 10.0
-
-- **Dependency Analysis**:
-  - Maximum imports per file: 20 (reduces coupling)
+- **Cyclomatic Complexity**: Max 10 per function, max 5.0 average
+- **ABC Metrics**: Max 15 assignments, 10 branches, 10 conditions, 25.0 score
+- **Cognitive Complexity**: Max 15 per function
+- **Raw Metrics**: Max 3500 LOC, 2500 SLOC per project
+- **Maintainability**: Minimum index 15.0
+- **Code Duplication**: Max 5 blocks, 100 lines
+- **File-Level Complexity**: Max 30 functions, 200 total, 10.0 average per file
+- **Dependency Analysis**: Max 20 imports per file
 
 ## Dependencies and Features
 
 - **Standard library**: argparse, dataclasses, hashlib, json, logging, os, re, shutil, subprocess, sys, tarfile, time, urllib, pathlib, enum, typing
-- **System dependencies**: curl (for network operations and downloads), tar (for archive extraction)
-- **Modern Python 3.11+ features**: `StrEnum`, built-in generics, `match/case`, dataclasses, protocols, ExceptionGroup, type hints
-- **XDG caching**: File-based caching system using XDG_CACHE_HOME (or ~/.cache) for asset size information with configurable expiration
-- **Configurable progress**: FPS-limited progress indication with detailed file information during extraction
-- **Environment validation**: Tool availability checks (curl) and directory permission validation before operations
-- **Protocol-based architecture**: Abstract protocols for network and filesystem operations enabling comprehensive mocking in tests
-- **Dual extraction methods**: Support for both Python tarfile library and system tar command with fallback mechanisms
-- **Intelligent version parsing**: Sophisticated version comparison for proper sorting of multiple Proton releases
-- **Symlink management**: Automated symlink creation and management with fallback chains (main, fallback, fallback2)
-- **Network resilience**: Multiple fallback strategies for GitHub API access including HTML parsing as backup
-- **Asset verification**: Local file caching based on size comparison to avoid unnecessary downloads
-- **Comprehensive error handling**: Specific exception types for different failure scenarios with detailed context
+- **System dependencies**: curl (network operations), tar (archive extraction)
+- **Modern Python 3.11+**: StrEnum, protocols, ExceptionGroup, type hints, match/case
+- **XDG caching**: File-based caching with configurable expiration
+- **Configurable progress**: FPS-limited progress indication
+- **Environment validation**: Tool availability and directory permission checks
+- **Protocol-based architecture**: Abstract protocols with documentation and versioning
+- **Dual extraction methods**: tarfile library + system tar fallback
+- **Intelligent version parsing**: Sophisticated version comparison
+- **Symlink management**: Automated creation with fallback chains
+- **Network resilience**: GitHub API fallbacks including HTML parsing
+- **Asset verification**: Size-based caching to avoid redundant downloads
+- **Comprehensive error handling**: Specific exceptions with detailed context

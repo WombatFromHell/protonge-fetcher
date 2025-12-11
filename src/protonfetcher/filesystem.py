@@ -6,7 +6,13 @@ from typing import Iterator
 
 
 class FileSystemClient:
-    """Concrete implementation of file system operations using standard pathlib operations."""
+    """Concrete implementation of FileSystemClientProtocol.
+    
+    Provides filesystem operations using standard pathlib operations.
+    Implements all methods defined in FileSystemClientProtocol v1.0.
+    """
+    
+    PROTOCOL_VERSION: str = "1.0"
 
     def exists(self, path: Path) -> bool:
         return path.exists()
