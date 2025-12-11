@@ -55,6 +55,7 @@ The architecture uses Protocol-based dependency injection for easy testing and c
 ### GitHubReleaseFetcher
 
 Main orchestrator with methods for:
+
 - Complete workflow coordination (`fetch_and_extract`)
 - Link management (`list_links`, `remove_release`)
 - Release discovery (`list_recent_releases`)
@@ -63,6 +64,7 @@ Main orchestrator with methods for:
 ### ReleaseManager
 
 Handles release discovery and asset management:
+
 - Tag fetching with GitHub API redirects
 - Asset finding with API and HTML fallbacks
 - Asset size caching with XDG-compliant storage
@@ -71,6 +73,7 @@ Handles release discovery and asset management:
 ### AssetDownloader
 
 Manages downloads with:
+
 - File size comparison caching
 - Progress indication
 - Curl-based operations with fallbacks
@@ -79,6 +82,7 @@ Manages downloads with:
 ### ArchiveExtractor
 
 Handles archive extraction:
+
 - Format detection and fallback mechanisms
 - Tarfile library and system tar support
 - Progress indication for both formats
@@ -87,6 +91,7 @@ Handles archive extraction:
 ### LinkManager
 
 Manages symbolic links:
+
 - Creation with priority ordering
 - Listing and removal operations
 - Intelligent version sorting
@@ -96,6 +101,7 @@ Manages symbolic links:
 ### CLI Interface
 
 Provides command-line functionality:
+
 - Argument parsing with validation
 - Logging configuration
 - Operation flow handling (fetch, list, remove, links)

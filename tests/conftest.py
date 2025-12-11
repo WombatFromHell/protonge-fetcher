@@ -144,19 +144,6 @@ def mock_fetcher(mocker, network_client=None, filesystem_client=None):
 
 
 @pytest.fixture
-def test_constants():
-    """Test constants for consistent test data."""
-    return {
-        "MOCK_REPO": "owner/repo",
-        "MOCK_TAG": "GE-Proton8-25",
-        "MOCK_EM_TAG": "EM-10.0-30",
-        "MOCK_ASSET_NAME": "GE-Proton8-25.tar.gz",
-        "MOCK_EM_ASSET_NAME": "proton-EM-10.0-30.tar.xz",
-        "MOCK_ASSET_SIZE": 1024 * 1024,
-    }
-
-
-@pytest.fixture
 def fork_params():
     """Parameterized data for fork testing."""
     return [
@@ -479,6 +466,27 @@ def get_expected_link_names():
 
 
 @pytest.fixture
+def expected_link_names():
+    """Get the expected link names (without directory) for a given fork."""
+
+    def _expected_link_names(fork: ForkName):
+        if fork == ForkName.PROTON_EM:
+            return (
+                Path("Proton-EM"),
+                Path("Proton-EM-Fallback"),
+                Path("Proton-EM-Fallback2"),
+            )
+        else:  # GE-Proton
+            return (
+                Path("GE-Proton"),
+                Path("GE-Proton-Fallback"),
+                Path("GE-Proton-Fallback2"),
+            )
+
+    return _expected_link_names
+
+
+@pytest.fixture
 def archive_formats():
     """Parameterized test data for different archive formats."""
     return [
@@ -547,17 +555,6 @@ def mock_version_candidates():
         return candidates
 
     return create_candidates
-
-
-@pytest.fixture
-def test_data_by_fork(standardized_test_data):
-    """Return test data organized by fork for parametrized tests."""
-    forks_data = []
-    for fork, data in standardized_test_data["FORKS"].items():
-        forks_data.append(
-            (fork, data["example_tag"], data["example_asset"], data["repo"])
-        )
-    return forks_data
 
 
 @pytest.fixture

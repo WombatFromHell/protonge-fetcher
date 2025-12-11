@@ -565,6 +565,70 @@ class TestReleaseManager:
         mock_logger.debug.assert_called_once()
         # The method should not raise an exception on IO failure
 
+    def test_cache_management_with_fixtures(
+        self, mocker, mock_cache_dir, create_mock_cache_file
+    ):
+        """Test comprehensive cache management using specialized fixtures."""
+        mock_network = mocker.Mock()
+        mock_fs = mocker.Mock()
+
+        # Mock the filesystem methods needed for cache operations
+        mock_fs.exists.side_effect = lambda path: path.exists()
+        mock_fs.mtime.side_effect = lambda path: path.stat().st_mtime
+        mock_fs.read.side_effect = lambda path: path.read_bytes()
+        mock_fs.write.side_effect = lambda path, data: path.write_bytes(data)
+
+        manager = ReleaseManager(mock_network, mock_fs)
+        manager._cache_dir = mock_cache_dir
+
+        # Test cache file creation using the fixture
+        repo = "test/repo"
+        tag = "test-tag"
+        asset_name = "test-asset.tar.gz"
+        size = 123456789
+
+        # Create a mock cache file using the fixture
+        cache_path = create_mock_cache_file(mock_cache_dir, repo, tag, asset_name, size)
+
+        # Verify the cache file was created
+        assert cache_path.exists()
+        assert cache_path.is_file()
+
+        # Test reading the cache file
+        cached_size = manager._get_cached_asset_size(repo, tag, asset_name)
+        assert cached_size == size
+
+        # Test cache expiration by mocking the mtime to return an old timestamp
+        old_mtime = time.time() - 3600 * 25  # 25 hours ago
+        expired_cache_path = create_mock_cache_file(
+            mock_cache_dir, repo, tag, "expired-asset.tar.gz", size
+        )
+
+        # Temporarily override mtime for this specific path
+        original_mtime = mock_fs.mtime
+        mock_fs.mtime = (
+            lambda path: old_mtime
+            if str(path) == str(expired_cache_path)
+            else original_mtime(path)
+        )
+
+        # Verify expired cache is not used
+        expired_cached_size = manager._get_cached_asset_size(
+            repo, tag, "expired-asset.tar.gz"
+        )
+        assert expired_cached_size is None  # Should return None for expired cache
+
+        # Restore original mtime behavior
+        mock_fs.mtime = original_mtime
+
+        # Test cache writing using the fixture
+        new_size = 987654321
+        manager._cache_asset_size(repo, tag, asset_name, new_size)
+
+        # Verify the cache was updated
+        updated_cached_size = manager._get_cached_asset_size(repo, tag, asset_name)
+        assert updated_cached_size == new_size
+
     # Tag fetching tests
     def test_fetch_latest_tag_success(self, mocker):
         """Test successful fetching of latest tag."""
@@ -648,20 +712,17 @@ class TestReleaseManager:
             manager.fetch_latest_tag("test/repo")
 
     # Asset finding tests
-    @pytest.mark.parametrize(
-        "fork,tag,expected_asset,expected_extension",
-        [
-            (ForkName.GE_PROTON, "GE-Proton10-20", "GE-Proton10-20.tar.gz", ".tar.gz"),
-            (ForkName.PROTON_EM, "EM-10.0-30", "proton-EM-10.0-30.tar.xz", ".tar.xz"),
-        ],
-    )
-    def test_find_asset_by_name_api_success_parametrized(
-        self, mocker, fork, tag, expected_asset, expected_extension
-    ):
-        """Test finding asset using API successfully with both GE-Proton and Proton-EM."""
+    @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
+    def test_find_asset_by_name_api_success_parametrized(self, mocker, fork, TEST_DATA):
+        """Test finding asset using API successfully with both GE-Proton and Proton-EM using centralized test data."""
         mock_network = mocker.Mock()
         mock_fs = mocker.Mock()
         manager = ReleaseManager(mock_network, mock_fs)
+
+        # Use centralized test data instead of inline parametrization
+        fork_data = TEST_DATA["FORKS"][fork]
+        tag = fork_data["example_tag"]
+        expected_asset = fork_data["example_asset"]
 
         # Mock successful API response
         mock_response = mocker.Mock()

@@ -351,7 +351,7 @@ class TestAttributeEdgeCases:
         original_client = manager.file_system_client
         # Perform an operation that would use the client
         try:
-            manager.get_link_names_for_fork(ForkName.GE_PROTON)
+            manager.get_link_names_for_fork(Path("/tmp"), ForkName.GE_PROTON)
         except Exception:
             pass  # The operation might fail, but we're testing attribute persistence
 

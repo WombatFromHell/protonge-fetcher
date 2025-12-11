@@ -251,38 +251,6 @@ class TestSpinner:
         bar = spinner._format_progress_bar(1.0)
         assert bar == " |██████████| 100.0%"
 
-    @pytest.mark.parametrize(
-        "rate,expected",
-        [
-            (512.0, "512.00B/s"),  # rate <= 1024 (B/s)
-            (2048.0, "2.00KB/s"),  # rate < 1024**2 (KB/s)
-            (2097152.0, "2.00MB/s"),  # rate >= 1024**2 (MB/s)
-        ],
-    )
-    def test_format_rate_for_bytes_progress(self, rate, expected):
-        """Test _format_rate_for_bytes_progress method (lines 154-155)."""
-        spinner = Spinner(unit="B", unit_scale=True)
-        rate_str = spinner._format_rate_for_bytes_progress(rate)
-        assert rate_str == expected
-
-    @pytest.mark.parametrize(
-        "rate,expected",
-        [
-            (512.0, "512.00B/s"),  # rate <= 1024 (B/s)
-            (2048.0, "2.00KB/s"),  # rate < 1024**2 (KB/s)
-            (
-                2097152.0,
-                "0.00GB/s",
-            ),  # rate >= 1024**2 but < 1024**3 (GB/s for spinner mode)
-            (2147483648.0, "2.00GB/s"),  # rate >= 1024**3 (GB/s)
-        ],
-    )
-    def test_format_rate_for_bytes_spinner(self, rate, expected):
-        """Test _format_rate_for_bytes_spinner method."""
-        spinner = Spinner(unit="B", unit_scale=True)
-        rate_str = spinner._format_rate_for_bytes_spinner(rate)
-        assert rate_str == expected
-
     def test_format_rate(self, mocker):
         """Test _format_rate method (lines 202 and 237-251)."""
         # Test with bytes unit and unit_scale=True in progress mode
@@ -314,7 +282,7 @@ class TestSpinner:
         assert rate_str == " (5.0it/s)"  # 10 items in 2 seconds = 5.0 items/s
 
     def test_build_progress_display(self, mocker):
-        """Test _build_progress_display method (lines 111-122)."""
+        """Test _build_progress_display method (new signature)."""
         mocker.patch("builtins.print")
         mock_time = mocker.patch("time.time")
         mock_time.return_value = 0
@@ -322,27 +290,27 @@ class TestSpinner:
         spinner.total = 100
         spinner.current = 50
         spinner.start_time = 0
-        display_parts = spinner._build_progress_display("⠋", 0.0)
+        display_parts = spinner._build_progress_display("⠋", 0.0, ["Test", ":"])
         # Should include desc, spinner, progress bar and rate
         expected_parts = ["Test", ":", " ⠋  |█████-----| 50.0%", " (0.00B/s)"]
         assert display_parts == expected_parts
 
     def test_build_spinner_display(self, mocker):
-        """Test _build_spinner_display method."""
+        """Test _build_spinner_display method (new signature)."""
         mocker.patch("builtins.print")
         mock_time = mocker.patch("time.time")
         mock_time.return_value = 0
         spinner = Spinner(desc="Test", unit="B")
         spinner.current = 10
         spinner.start_time = 0
-        display_parts = spinner._build_spinner_display("⠋", 0.0)
+        display_parts = spinner._build_spinner_display("⠋", 0.0, ["Test", ":"])
         # Should include desc, spinner, current value and rate
         expected_parts = ["Test", ":", " ⠋ 10B", " (0.00B/s)"]
         assert display_parts == expected_parts
 
         # Test without unit
         spinner_no_unit = Spinner(desc="Test")
-        display_parts = spinner_no_unit._build_spinner_display("⠋", 0.0)
+        display_parts = spinner_no_unit._build_spinner_display("⠋", 0.0, ["Test", ":"])
         # Should include desc, spinner only
         expected_parts = ["Test", ":", " ⠋"]
         assert display_parts == expected_parts

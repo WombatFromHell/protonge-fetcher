@@ -9,11 +9,11 @@ from .common import Headers, ProcessResult
 
 class NetworkClient:
     """Concrete implementation of NetworkClientProtocol.
-    
+
     Provides network operations using subprocess and urllib with curl.
     Implements all methods defined in NetworkClientProtocol v1.0.
     """
-    
+
     PROTOCOL_VERSION: str = "1.0"
 
     def __init__(self, timeout: int = 30) -> None:

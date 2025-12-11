@@ -3,7 +3,7 @@
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from .common import (
     DEFAULT_TIMEOUT,
@@ -35,80 +35,68 @@ class LinkManager:
 
     def get_link_names_for_fork(
         self,
-        extract_dir_or_fork: Path | ForkName,
-        fork: ForkName | None = None,
+        extract_dir: Path,
+        fork: ForkName,
     ) -> tuple[Path, Path, Path]:
-        """Get the symlink names for a specific fork - supports both internal and test usage.
+        """Get the symlink names for a specific fork with extract_dir.
 
-        Internal usage: get_link_names_for_fork(extract_dir, fork)
-        Test usage: get_link_names_for_fork(fork)
+        Args:
+            extract_dir: The directory where symlinks will be created
+            fork: The Proton fork name
+
+        Returns:
+            Tuple of three Path objects: (main, fallback1, fallback2)
         """
-        if isinstance(extract_dir_or_fork, ForkName):
-            # Called as get_link_names_for_fork(fork) - test usage
-            fork = extract_dir_or_fork
-            # Return just the names as Path objects for consistency with return type
-            match fork:
-                case ForkName.PROTON_EM:
-                    return (
-                        Path("Proton-EM"),
-                        Path("Proton-EM-Fallback"),
-                        Path("Proton-EM-Fallback2"),
-                    )
-                case ForkName.GE_PROTON:
-                    return (
-                        Path("GE-Proton"),
-                        Path("GE-Proton-Fallback"),
-                        Path("GE-Proton-Fallback2"),
-                    )
-                case _:  # Handle any unhandled cases
-                    # This shouldn't happen with ForkName, but added for exhaustiveness
-                    return (Path(""), Path(""), Path(""))
-        else:
-            # Called as get_link_names_for_fork(extract_dir, fork) - internal usage
-            extract_dir = extract_dir_or_fork
-            match fork:
-                case ForkName.PROTON_EM:
-                    main, fb1, fb2 = (
-                        extract_dir / "Proton-EM",
-                        extract_dir / "Proton-EM-Fallback",
-                        extract_dir / "Proton-EM-Fallback2",
-                    )
-                case ForkName.GE_PROTON:
-                    main, fb1, fb2 = (
-                        extract_dir / "GE-Proton",
-                        extract_dir / "GE-Proton-Fallback",
-                        extract_dir / "GE-Proton-Fallback2",
-                    )
-                case _:  # Handle any unhandled cases
-                    # This shouldn't happen with ForkName, but added for exhaustiveness
-                    main, fb1, fb2 = (
-                        extract_dir / "",
-                        extract_dir / "",
-                        extract_dir / "",
-                    )
-            return main, fb1, fb2
+        match fork:
+            case ForkName.PROTON_EM:
+                return (
+                    extract_dir / "Proton-EM",
+                    extract_dir / "Proton-EM-Fallback",
+                    extract_dir / "Proton-EM-Fallback2",
+                )
+            case ForkName.GE_PROTON:
+                return (
+                    extract_dir / "GE-Proton",
+                    extract_dir / "GE-Proton-Fallback",
+                    extract_dir / "GE-Proton-Fallback2",
+                )
+            case _:  # Handle any unhandled cases
+                # This shouldn't happen with ForkName, but added for exhaustiveness
+                return (
+                    extract_dir / "",
+                    extract_dir / "",
+                    extract_dir / "",
+                )
 
     def find_tag_directory(
-        self, *args: Any, is_manual_release: Optional[bool] = None
+        self,
+        extract_dir: Path,
+        tag: str,
+        fork: ForkName,
+        is_manual_release: bool = True,
     ) -> Optional[Path]:
-        """Find the tag directory for manual releases - supports both internal and test usage.
+        """Find the tag directory for manual releases.
 
-        Internal usage: find_tag_directory(extract_dir, tag, fork, is_manual_release=True)
-        Test usage: find_tag_directory(extract_dir, tag, fork, is_manual_release=True)
+        Args:
+            extract_dir: Directory to search for the tag directory
+            tag: The release tag to find
+            fork: The Proton fork name
+            is_manual_release: Whether this is a manual release (default: True)
+
+        Returns:
+            Path to the found directory, or None if not found
+
+        Raises:
+            LinkManagementError: If manual release directory is not found when expected
+            ValueError: If fork is not supported
         """
-        if len(args) == 3:  # Usage: extract_dir, tag, fork
-            extract_dir, tag, fork = args
-            # If is_manual_release is not explicitly provided, default based on intended usage
-            # For testing find_tag_directory specifically, we assume manual release behavior
-            if is_manual_release is None:
-                is_manual_release = True  # Default to True to allow directory lookup
-        elif (
-            len(args) == 4
-        ):  # Internal usage: extract_dir, tag, fork, is_manual_release
-            extract_dir, tag, fork, actual_is_manual_release = args
-            is_manual_release = actual_is_manual_release
-        else:
-            raise ValueError(f"Unexpected number of arguments: {len(args)}")
+        # Validate input
+        if not isinstance(extract_dir, Path):
+            raise ValueError(f"extract_dir must be a Path, got {type(extract_dir)}")
+        if not isinstance(tag, str) or not tag:
+            raise ValueError(f"tag must be a non-empty string, got {tag}")
+        if not isinstance(fork, ForkName):
+            raise ValueError(f"fork must be a ForkName, got {type(fork)}")
 
         # Find the correct directory for the manual tag
         if not is_manual_release:
@@ -135,7 +123,7 @@ class LinkManager:
             )
 
         # For GE-Proton, try the tag as-is
-        if fork == ForkName.GE_PROTON:
+        elif fork == ForkName.GE_PROTON:
             tag_dir_path = extract_dir / tag
             if self.file_system_client.exists(
                 tag_dir_path
@@ -147,7 +135,9 @@ class LinkManager:
                 f"Manual release directory not found: {tag_dir_path}"
             )
 
-        return None
+        else:
+            # This should not happen with proper ForkName enum, but added for safety
+            raise ValueError(f"Unsupported fork: {fork}")
 
     def _get_tag_name(self, entry: Path, fork: ForkName) -> str:
         """Get the tag name from the directory entry, handling Proton-EM prefix."""
@@ -293,28 +283,39 @@ class LinkManager:
             else:
                 self.file_system_client.rmtree(link)
 
-    def create_symlinks(self, *args: Any) -> bool:
-        """Create symlinks - supports both internal usage and test usage.
+    def create_symlinks(
+        self, main: Path, fb1: Path, fb2: Path, top_3: VersionCandidateList
+    ) -> bool:
+        """Create symlinks for internal usage.
 
-        Internal usage: create_symlinks(main, fb1, fb2, top_3)
-        Test usage: create_symlinks(extract_dir, target_path, fork)
+        Args:
+            main: Main symlink path
+            fb1: First fallback symlink path
+            fb2: Second fallback symlink path
+            top_3: List of top 3 version candidates to link to
+
+        Returns:
+            True if symlink creation was attempted (even if some failed)
         """
-        # Handle the two forms of usage based on number and types of arguments
-        if len(args) == 4:
-            # Internal usage: create_symlinks(main, fb1, fb2, top_3)
-            main, fb1, fb2, top_3 = args
-            return self._create_symlinks_internal(main, fb1, fb2, top_3)
-        elif (
-            len(args) == 3
-            and isinstance(args[0], Path)
-            and isinstance(args[1], Path)
-            and isinstance(args[2], ForkName)
-        ):
-            # Test usage: create_symlinks(extract_dir, target_path, fork)
-            extract_dir, target_path, fork = args
-            return self._create_symlinks_from_test(extract_dir, target_path, fork)
-        else:
-            raise ValueError(f"Unexpected arguments to create_symlinks: {args}")
+        return self._create_symlinks_internal(main, fb1, fb2, top_3)
+
+    def create_symlinks_for_test(
+        self, extract_dir: Path, target_path: Path, fork: ForkName
+    ) -> bool:
+        """Create symlinks for test usage.
+
+        Args:
+            extract_dir: Directory where symlinks will be created
+            target_path: Target directory to link to
+            fork: The Proton fork name
+
+        Returns:
+            True if symlink creation was attempted
+
+        Raises:
+            LinkManagementError: If target directory doesn't exist
+        """
+        return self._create_symlinks_from_test(extract_dir, target_path, fork)
 
     def _create_symlinks_internal(
         self,

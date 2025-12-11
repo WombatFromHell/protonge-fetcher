@@ -50,8 +50,8 @@ class TestGitHubReleaseFetcher:
             _ = config["invalid_key"]
 
     @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-    def test_fetch_and_extract_success(self, mocker, tmp_path, fork):
-        """Test fetch_and_extract method with successful complete workflow."""
+    def test_fetch_and_extract_success(self, mocker, tmp_path, fork, TEST_DATA):
+        """Test fetch_and_extract method with successful complete workflow using centralized test data."""
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -81,13 +81,11 @@ class TestGitHubReleaseFetcher:
         fetcher.archive_extractor = mock_archive_extractor
         fetcher.link_manager = mock_link_manager
 
-        # Setup mocks for successful workflow - use appropriate tag based on fork
-        if fork == ForkName.GE_PROTON:
-            release_tag = "GE-Proton10-20"
-            asset_name = "GE-Proton10-20.tar.gz"
-        else:
-            release_tag = "EM-10.0-30"
-            asset_name = "EM-10.0-30.tar.xz"
+        # Use centralized test data instead of inline fork-specific data
+        fork_data = TEST_DATA["FORKS"][fork]
+        release_tag = fork_data["example_tag"]
+        asset_name = fork_data["example_asset"]
+        repo = fork_data["repo"]
 
         mock_release_manager.fetch_latest_tag.return_value = release_tag
         mock_release_manager.find_asset_by_name.return_value = asset_name
@@ -129,12 +127,6 @@ class TestGitHubReleaseFetcher:
         (tmp_path / "Downloads").mkdir(exist_ok=True)
         (tmp_path / "extract").mkdir(exist_ok=True)
 
-        repo = (
-            "GloriousEggroll/proton-ge-custom"
-            if fork == ForkName.GE_PROTON
-            else "acobaugh/proton-em"
-        )
-
         result = fetcher.fetch_and_extract(
             repo=repo,
             output_dir=tmp_path / "Downloads",
@@ -152,8 +144,8 @@ class TestGitHubReleaseFetcher:
         mock_link_manager.manage_proton_links.assert_called_once()
 
     @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-    def test_fetch_and_extract_with_manual_tag(self, mocker, tmp_path, fork):
-        """Test fetch_and_extract method with manual release tag."""
+    def test_fetch_and_extract_with_manual_tag(self, mocker, tmp_path, fork, TEST_DATA):
+        """Test fetch_and_extract method with manual release tag using centralized test data."""
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -180,13 +172,10 @@ class TestGitHubReleaseFetcher:
         fetcher.archive_extractor = mock_archive_extractor
         fetcher.link_manager = mock_link_manager
 
-        # Setup mocks for successful workflow with manual tag - use appropriate tag based on fork
-        if fork == ForkName.GE_PROTON:
-            release_tag = "GE-Proton10-20"
-            asset_name = "GE-Proton10-20.tar.gz"
-        else:
-            release_tag = "EM-10.0-30"
-            asset_name = "EM-10.0-30.tar.xz"
+        # Use centralized test data instead of inline fork-specific data
+        fork_data = TEST_DATA["FORKS"][fork]
+        release_tag = fork_data["example_tag"]
+        asset_name = fork_data["example_asset"]
 
         mock_release_manager.find_asset_by_name.return_value = asset_name
         mock_asset_downloader.download_asset.return_value = (
@@ -255,8 +244,8 @@ class TestGitHubReleaseFetcher:
         mock_link_manager.manage_proton_links.assert_called_once()
 
     @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-    def test_fetch_and_extract_network_error(self, mocker, fork):
-        """Test fetch_and_extract method with network error."""
+    def test_fetch_and_extract_network_error(self, mocker, fork, TEST_DATA):
+        """Test fetch_and_extract method with network error using centralized test data."""
         mock_network = mocker.Mock()
         mock_fs = mocker.Mock()
         mock_spinner = mocker.Mock()
@@ -277,11 +266,8 @@ class TestGitHubReleaseFetcher:
             "Connection failed"
         )
 
-        repo = (
-            "GloriousEggroll/proton-ge-custom"
-            if fork == ForkName.GE_PROTON
-            else "Etaash-mathamsetty/Proton"
-        )
+        # Use centralized test data for repository
+        repo = TEST_DATA["FORKS"][fork]["repo"]
 
         with pytest.raises(NetworkError):
             fetcher.fetch_and_extract(
@@ -293,8 +279,10 @@ class TestGitHubReleaseFetcher:
             )
 
     @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-    def test_fetch_and_extract_extraction_error(self, mocker, tmp_path, fork):
-        """Test fetch_and_extract method with extraction error."""
+    def test_fetch_and_extract_extraction_error(
+        self, mocker, tmp_path, fork, TEST_DATA
+    ):
+        """Test fetch_and_extract method with extraction error using centralized test data."""
         mock_network = mocker.Mock()
         mock_fs = mocker.Mock()
         mock_spinner = mocker.Mock()
@@ -315,13 +303,11 @@ class TestGitHubReleaseFetcher:
         fetcher.asset_downloader = mock_asset_downloader
         fetcher.archive_extractor = mock_archive_extractor
 
-        # Setup mocks - everything succeeds until extraction
-        if fork == ForkName.GE_PROTON:
-            release_tag = "GE-Proton10-20"
-            asset_name = "GE-Proton10-20.tar.gz"
-        else:
-            release_tag = "EM-10.0-30"
-            asset_name = "EM-10.0-30.tar.xz"
+        # Use centralized test data instead of inline fork-specific data
+        fork_data = TEST_DATA["FORKS"][fork]
+        release_tag = fork_data["example_tag"]
+        asset_name = fork_data["example_asset"]
+        repo = fork_data["repo"]
 
         mock_release_manager.fetch_latest_tag.return_value = release_tag
         mock_release_manager.find_asset_by_name.return_value = asset_name
@@ -339,12 +325,6 @@ class TestGitHubReleaseFetcher:
         (tmp_path / "Downloads").mkdir(exist_ok=True)
         (tmp_path / "extract").mkdir(exist_ok=True)
 
-        repo = (
-            "GloriousEggroll/proton-ge-custom"
-            if fork == ForkName.GE_PROTON
-            else "Etaash-mathamsetty/Proton"
-        )
-
         with pytest.raises(ExtractionError):
             fetcher.fetch_and_extract(
                 repo=repo,
@@ -355,8 +335,10 @@ class TestGitHubReleaseFetcher:
             )
 
     @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-    def test_fetch_and_extract_link_management_error(self, mocker, tmp_path, fork):
-        """Test fetch_and_extract method with link management error."""
+    def test_fetch_and_extract_link_management_error(
+        self, mocker, tmp_path, fork, TEST_DATA
+    ):
+        """Test fetch_and_extract method with link management error using centralized test data."""
 
         # Mock shutil.which to return curl path for validation
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
@@ -383,13 +365,10 @@ class TestGitHubReleaseFetcher:
         fetcher.archive_extractor = mock_archive_extractor
         fetcher.link_manager = mock_link_manager
 
-        # Setup mocks - everything succeeds until link management
-        if fork == ForkName.GE_PROTON:
-            release_tag = "GE-Proton10-20"
-            asset_name = "GE-Proton10-20.tar.gz"
-        else:
-            release_tag = "EM-10.0-30"
-            asset_name = "EM-10.0-30.tar.xz"
+        # Use centralized test data instead of inline fork-specific data
+        fork_data = TEST_DATA["FORKS"][fork]
+        release_tag = fork_data["example_tag"]
+        asset_name = fork_data["example_asset"]
 
         mock_release_manager.fetch_latest_tag.return_value = release_tag
         mock_release_manager.find_asset_by_name.return_value = asset_name
@@ -435,11 +414,8 @@ class TestGitHubReleaseFetcher:
         (tmp_path / "Downloads").mkdir(exist_ok=True)
         (tmp_path / "extract").mkdir(exist_ok=True)
 
-        repo = (
-            "GloriousEggroll/proton-ge-custom"
-            if fork == ForkName.GE_PROTON
-            else "Etaash-mathamsetty/Proton"
-        )
+        # Use centralized test data for repository
+        repo = TEST_DATA["FORKS"][fork]["repo"]
 
         with pytest.raises(LinkManagementError):
             fetcher.fetch_and_extract(
@@ -451,8 +427,8 @@ class TestGitHubReleaseFetcher:
             )
 
     @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-    def test_list_links_success(self, mocker, tmp_path, fork):
-        """Test list_links method with successful link listing."""
+    def test_list_links_success(self, mocker, tmp_path, fork, TEST_DATA):
+        """Test list_links method with successful link listing using centralized test data."""
         mock_network = mocker.Mock()
         mock_fs = mocker.Mock()
         mock_spinner = mocker.Mock()
@@ -468,19 +444,20 @@ class TestGitHubReleaseFetcher:
         mock_link_manager = mocker.Mock()
         fetcher.link_manager = mock_link_manager
 
-        # Define expected links based on fork
-        if fork == ForkName.GE_PROTON:
-            expected_links = {
-                "GE-Proton": str(tmp_path / "GE-Proton10-20"),
-                "GE-Proton-Fallback": str(tmp_path / "GE-Proton9-15"),
-                "GE-Proton-Fallback2": None,
-            }
-        else:
-            expected_links = {
-                "Proton-EM": str(tmp_path / "EM-10.0-30"),
-                "Proton-EM-Fallback": str(tmp_path / "EM-9.0-20"),
-                "Proton-EM-Fallback2": None,
-            }
+        # Use centralized test data for link names instead of inline fork-specific data
+        fork_data = TEST_DATA["FORKS"][fork]
+        link_names = fork_data["link_names"]
+
+        # Create expected links based on centralized test data
+        expected_links = {
+            link_names[0]: str(tmp_path / fork_data["example_tag"]),
+            link_names[1]: str(
+                tmp_path / "GE-Proton9-15"
+                if fork == ForkName.GE_PROTON
+                else "EM-9.0-20"
+            ),
+            link_names[2]: None,
+        }
 
         mock_link_manager.list_links.return_value = expected_links
 
@@ -493,8 +470,8 @@ class TestGitHubReleaseFetcher:
         mock_link_manager.list_links.assert_called_once_with(extract_dir, fork)
 
     @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-    def test_remove_release_success(self, mocker, tmp_path, fork):
-        """Test remove_release method with successful removal."""
+    def test_remove_release_success(self, mocker, tmp_path, fork, TEST_DATA):
+        """Test remove_release method with successful removal using centralized test data."""
         mock_network = mocker.Mock()
         mock_fs = mocker.Mock()
         mock_spinner = mocker.Mock()
@@ -515,7 +492,8 @@ class TestGitHubReleaseFetcher:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        release_tag = "GE-Proton10-20" if fork == ForkName.GE_PROTON else "EM-10.0-30"
+        # Use centralized test data for release tag
+        release_tag = TEST_DATA["FORKS"][fork]["example_tag"]
 
         result = fetcher.remove_release(extract_dir, release_tag, fork)
 
