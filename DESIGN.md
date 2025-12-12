@@ -47,8 +47,8 @@ The architecture uses Protocol-based dependency injection for easy testing and c
 - `release_manager.py` - Release discovery and asset management
 - `asset_downloader.py` - Download operations with caching
 - `archive_extractor.py` - Archive extraction with fallbacks
-- `link_manager.py` - Symbolic link management
-- `github_fetcher.py` - Main orchestrator
+- `link_manager.py` - Symbolic link management with intelligent status checking
+- `github_fetcher.py` - Main orchestrator with optimized link management
 - `cli.py` - CLI interface and argument parsing
 - `entry.py` - Entry point for distribution
 
@@ -90,13 +90,26 @@ Handles archive extraction:
 
 ### LinkManager
 
-Manages symbolic links:
+Manages symbolic links with intelligent version sorting and optimized link management:
 
-- Creation with priority ordering
-- Listing and removal operations
-- Intelligent version sorting
-- Fork-specific link naming
-- Manual release handling
+- **Creation with priority ordering**: Creates main, fallback1, and fallback2 symlinks
+- **Listing and removal operations**: Comprehensive symlink management
+- **Intelligent version sorting**: Proper version parsing for correct symlink targeting
+- **Fork-specific link naming**: Handles both GE-Proton and Proton-EM conventions
+- **Manual release handling**: Special logic for manually specified releases
+- **Intelligent link status checking**: New `are_links_up_to_date()` method prevents unnecessary symlink recreation
+- **Performance optimization**: Only updates symlinks when targets change or links are broken
+- **Error handling**: Comprehensive error handling for filesystem operations
+
+#### Link Optimization
+
+The LinkManager now includes intelligent link status checking to improve performance:
+
+- **`are_links_up_to_date()` method**: Checks if existing symlinks are already correct
+- **Conditional link management**: Only calls `manage_proton_links()` when links need updating
+- **Reduced I/O operations**: Avoids unnecessary filesystem operations when links are already correct
+- **Better user experience**: Less "noise" in logs when no changes are needed
+- **Backward compatibility**: Existing behavior is preserved, only optimized
 
 ### CLI Interface
 
@@ -118,6 +131,7 @@ Provides command-line functionality:
 - `--list`, `-l`: List recent releases
 - `--ls`: List managed symbolic links (default behavior)
 - `--rm`: Remove specific release and update links
+- `--relink`: Force recreation of symbolic links without downloading or extracting (requires `--fork`)
 - `--debug`: Enable debug logging
 
 ### Validation and Constraints
@@ -134,8 +148,31 @@ Provides command-line functionality:
 - **List releases (`--list`)**: Fetches and displays recent releases from GitHub API
 - **List links (`--ls`)**: Displays managed symbolic links and targets
 - **Remove release (`--rm`)**: Removes specified release directory and updates symlinks
+- **Relink (`--relink`)**: Forces recreation of symbolic links without downloading or extracting
 
 Default behavior shows current installed versions when no operation flags are provided.
+
+#### Relink Operation
+
+The `--relink` flag provides a way to force recreation of symbolic links when needed:
+
+- **Purpose**: Force recreation of symlinks without downloading or extracting releases
+- **Use Case**: When symlinks become corrupted or need to be updated manually
+- **Requirements**: Must be used with `--fork` to specify which fork's links to recreate
+- **Behavior**: Finds all existing versions for the specified fork and recreates symlinks
+- **Mutual Exclusivity**: Cannot be used with `--release`, `--list`, `--ls`, or `--rm`
+
+**Example Usage:**
+
+```bash
+# Force relinking of GE-Proton symlinks
+protonfetcher --relink --fork GE-Proton
+
+# Force relinking of Proton-EM symlinks
+protonfetcher --relink --fork Proton-EM
+```
+
+This provides users with fine-grained control over symlink management while preserving the automatic optimization for normal operations.
 
 ## Fork Configuration System
 

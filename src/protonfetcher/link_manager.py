@@ -656,6 +656,90 @@ class LinkManager:
         top_3: VersionCandidateList = candidates[:3]
         return top_3
 
+    def are_links_up_to_date(
+        self,
+        extract_dir: Path,
+        tag: str,
+        fork: ForkName = ForkName.GE_PROTON,
+        is_manual_release: bool = False,
+    ) -> bool:
+        """
+        Check if existing symlinks are already correct and up-to-date.
+
+        This method determines what the symlinks should point to and compares
+        it with the current state, returning True if no changes are needed.
+
+        Args:
+            extract_dir: Directory containing the Proton installations
+            tag: The release tag being processed
+            fork: The Proton fork name
+            is_manual_release: Whether this is a manual release
+
+        Returns:
+            True if links are already correct, False if they need updating
+        """
+        main, fb1, fb2 = self._get_link_names(extract_dir, fork)
+
+        # For manual releases, first check if the target directory exists
+        tag_dir = self._handle_manual_release_directory(
+            extract_dir, tag, fork, is_manual_release
+        )
+
+        # If it was manual release and no directory found, consider links out of date
+        if is_manual_release and tag_dir is None:
+            return False
+
+        # Find all version candidates
+        candidates = self.find_version_candidates(extract_dir, fork)
+
+        if not candidates:  # no versions found
+            return False
+
+        # Remove duplicate versions, preferring standard naming
+        candidates = self._deduplicate_candidates(candidates)
+
+        # Handle different logic for manual vs regular releases
+        if is_manual_release and tag_dir is not None:
+            top_3 = self._handle_manual_release_candidates(
+                tag, fork, candidates, tag_dir
+            )
+        else:
+            top_3 = self._handle_regular_release_candidates(candidates)
+
+        # If no top versions found, links need updating
+        if not top_3:
+            return False
+
+        # Get current link status
+        current_links = self.list_links(extract_dir, fork)
+
+        # Create expected link mapping
+        expected_links = {}
+        link_names = [main, fb1, fb2]
+        for i, (link_name, (version, target_path)) in enumerate(zip(link_names, top_3)):
+            expected_links[link_name.name] = str(target_path)
+
+        # Compare current vs expected links
+        for link_name, expected_target in expected_links.items():
+            current_target = current_links.get(link_name)
+
+            # If link doesn't exist or target is None, it needs updating
+            if current_target is None:
+                return False
+
+            # Compare targets (normalize paths for comparison)
+            try:
+                expected_path = Path(expected_target).resolve()
+                current_path = Path(current_target).resolve()
+                if expected_path != current_path:
+                    return False
+            except OSError:
+                # If we can't resolve paths, assume they need updating
+                return False
+
+        # All links match expected targets
+        return True
+
     def manage_proton_links(
         self,
         extract_dir: Path,

@@ -1690,3 +1690,80 @@ class TestLinkManager:
         )
 
         assert result is True
+
+    def test_are_links_up_to_date_when_links_correct(self, mocker, tmp_path):
+        """Test are_links_up_to_date when links are already correct."""
+        mock_fs = mocker.Mock()
+        link_manager = LinkManager(mock_fs)
+
+        # Create test directories
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create version directories
+        ge_proton10_20 = extract_dir / "GE-Proton10-20"
+        ge_proton10_20.mkdir()
+        ge_proton10_19 = extract_dir / "GE-Proton10-19"
+        ge_proton10_19.mkdir()
+
+        # Create existing symlinks that point to correct targets
+        main_link = extract_dir / "GE-Proton"
+        fb_link = extract_dir / "GE-Proton-Fallback"
+
+        # Mock filesystem methods
+        mock_fs.exists.side_effect = lambda p: True
+        mock_fs.is_dir.side_effect = lambda p: True
+        mock_fs.is_symlink.side_effect = lambda p: str(p).endswith(
+            ("GE-Proton", "GE-Proton-Fallback")
+        )
+        mock_fs.resolve.side_effect = lambda p: {
+            str(main_link): str(ge_proton10_20),
+            str(fb_link): str(ge_proton10_19),
+        }.get(str(p), str(p))
+        mock_fs.iterdir.return_value = [ge_proton10_20, ge_proton10_19]
+
+        # Test that links are up to date
+        result = link_manager.are_links_up_to_date(
+            extract_dir, "GE-Proton10-20", ForkName.GE_PROTON, is_manual_release=False
+        )
+
+        assert result is True
+
+    def test_are_links_up_to_date_when_links_incorrect(self, mocker, tmp_path):
+        """Test are_links_up_to_date when links are incorrect."""
+        mock_fs = mocker.Mock()
+        link_manager = LinkManager(mock_fs)
+
+        # Create test directories
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+
+        # Create version directories
+        ge_proton10_20 = extract_dir / "GE-Proton10-20"
+        ge_proton10_20.mkdir()
+        ge_proton10_19 = extract_dir / "GE-Proton10-19"
+        ge_proton10_19.mkdir()
+
+        # Create existing symlinks that point to WRONG targets
+        main_link = extract_dir / "GE-Proton"
+        fb_link = extract_dir / "GE-Proton-Fallback"
+
+        # Mock filesystem methods
+        mock_fs.exists.side_effect = lambda p: True
+        mock_fs.is_dir.side_effect = lambda p: True
+        mock_fs.is_symlink.side_effect = lambda p: str(p).endswith(
+            ("GE-Proton", "GE-Proton-Fallback")
+        )
+        # Main link points to wrong target (should be ge_proton10_20)
+        mock_fs.resolve.side_effect = lambda p: {
+            str(main_link): str(ge_proton10_19),  # WRONG!
+            str(fb_link): str(ge_proton10_19),
+        }.get(str(p), str(p))
+        mock_fs.iterdir.return_value = [ge_proton10_20, ge_proton10_19]
+
+        # Test that links are NOT up to date
+        result = link_manager.are_links_up_to_date(
+            extract_dir, "GE-Proton10-20", ForkName.GE_PROTON, is_manual_release=False
+        )
+
+        assert result is False

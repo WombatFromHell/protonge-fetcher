@@ -2,10 +2,567 @@
 Unit tests for ArchiveExtractor in protonfetcher.py
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from protonfetcher.archive_extractor import ArchiveExtractor
 from protonfetcher.exceptions import ExtractionError
+
+
+class TestArchiveExtractorBranchCoverage:
+    """Branch-specific tests for ArchiveExtractor to extend code coverage."""
+
+    def test_extract_archive_tarfile_fallback_gz(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.gz format with tarfile failure → system tar fallback."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.gz archive
+        archive_path = tmp_path / "test.tar.gz"
+        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to fail
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.side_effect = ExtractionError("tarfile extraction failed")
+
+            # Mock system tar extraction
+            with patch(
+                "protonfetcher.archive_extractor.ArchiveExtractor.extract_gz_archive"
+            ) as mock_system_tar:
+                mock_system_tar.return_value = extract_path
+
+                result = extractor.extract_archive(archive_path, extract_path)
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once()
+        mock_system_tar.assert_called_once()
+
+    def test_extract_archive_tarfile_fallback_xz(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.xz format with tarfile failure → system tar fallback."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.xz archive
+        archive_path = tmp_path / "test.tar.xz"
+        create_test_archive(archive_path, ".tar.xz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to fail
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.side_effect = ExtractionError("tarfile extraction failed")
+
+            # Mock system tar extraction
+            with patch(
+                "protonfetcher.archive_extractor.ArchiveExtractor.extract_xz_archive"
+            ) as mock_system_tar:
+                mock_system_tar.return_value = extract_path
+
+                result = extractor.extract_archive(archive_path, extract_path)
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once()
+        mock_system_tar.assert_called_once()
+
+    def test_extract_archive_unknown_format_fallback(self, mocker, tmp_path):
+        """Test extract_archive unknown format with tarfile failure → system tar fallback."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test archive with unknown extension
+        archive_path = tmp_path / "test.tar.bz2"
+        archive_path.write_bytes(b"fake archive content")
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to fail
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.side_effect = ExtractionError("tarfile extraction failed")
+
+            # Mock system tar extraction
+            with patch(
+                "protonfetcher.archive_extractor.ArchiveExtractor._extract_with_system_tar"
+            ) as mock_system_tar:
+                mock_system_tar.return_value = extract_path
+
+                result = extractor.extract_archive(archive_path, extract_path)
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once()
+        mock_system_tar.assert_called_once()
+
+    def test_extract_with_tarfile_no_progress_no_details(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_with_tarfile with show_progress=False and show_file_details=False."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test archive
+        archive_path = tmp_path / "test.tar.gz"
+        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock spinner to avoid actual progress display
+        with patch("protonfetcher.archive_extractor.Spinner") as mock_spinner:
+            mock_spinner_instance = mocker.Mock()
+            mock_spinner.return_value.__enter__.return_value = mock_spinner_instance
+
+            result = extractor.extract_with_tarfile(
+                archive_path, extract_path, show_progress=False, show_file_details=False
+            )
+
+        assert result == extract_path
+        mock_spinner.assert_called_once()
+
+    def test_extract_with_tarfile_progress_no_details(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_with_tarfile with show_progress=True and show_file_details=False."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test archive
+        archive_path = tmp_path / "test.tar.gz"
+        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock spinner to avoid actual progress display
+        with patch("protonfetcher.archive_extractor.Spinner") as mock_spinner:
+            mock_spinner_instance = mocker.Mock()
+            mock_spinner.return_value.__enter__.return_value = mock_spinner_instance
+
+            result = extractor.extract_with_tarfile(
+                archive_path, extract_path, show_progress=True, show_file_details=False
+            )
+
+        assert result == extract_path
+        mock_spinner.assert_called_once()
+
+    def test_get_archive_info_error_handling(self, mocker, tmp_path):
+        """Test get_archive_info error handling when archive is invalid."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create an invalid archive
+        invalid_archive = tmp_path / "invalid.tar.gz"
+        invalid_archive.write_bytes(b"not a valid archive")
+
+        with pytest.raises(ExtractionError) as exc_info:
+            extractor.get_archive_info(invalid_archive)
+
+        assert "Error reading archive" in str(exc_info.value)
+
+    def test_is_tar_file_directory(self, mocker, tmp_path):
+        """Test is_tar_file when path is a directory."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a directory instead of a file
+        directory = tmp_path / "test_dir"
+        directory.mkdir()
+
+        result = extractor.is_tar_file(directory)
+        assert result is False
+
+    def test_is_tar_file_invalid_file(self, mocker, tmp_path):
+        """Test is_tar_file when file is not a valid tar archive."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create an invalid tar file
+        invalid_file = tmp_path / "invalid.tar"
+        invalid_file.write_bytes(b"not a tar file")
+
+        result = extractor.is_tar_file(invalid_file)
+        assert result is False
+
+    def test_extract_with_tarfile_filename_truncation(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_with_tarfile filename truncation logic."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test archive with a long filename
+        long_filename = "a" * 50 + ".txt"
+        archive_path = tmp_path / "test.tar.gz"
+        create_test_archive(archive_path, ".tar.gz", {long_filename: b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock spinner to capture filename truncation
+        with patch("protonfetcher.archive_extractor.Spinner") as mock_spinner:
+            mock_spinner_instance = mocker.Mock()
+            mock_spinner.return_value.__enter__.return_value = mock_spinner_instance
+
+            result = extractor.extract_with_tarfile(
+                archive_path, extract_path, show_progress=True, show_file_details=True
+            )
+
+        assert result == extract_path
+        # Verify that the spinner was created (the truncation logic is tested by the extraction working)
+        mock_spinner.assert_called()
+
+    def test_extract_gz_archive_command_failure(self, mocker, tmp_path):
+        """Test extract_gz_archive when tar command fails."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        archive_path = tmp_path / "test.tar.gz"
+        archive_path.write_bytes(b"test content")
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock subprocess.run to return non-zero returncode
+        with patch("subprocess.run") as mock_run:
+            mock_result = mocker.Mock()
+            mock_result.returncode = 1
+            mock_result.stderr = "tar: Error extracting archive"
+            mock_run.return_value = mock_result
+
+            with pytest.raises(ExtractionError) as exc_info:
+                extractor.extract_gz_archive(archive_path, extract_path)
+
+        assert "tar: Error extracting archive" in str(exc_info.value)
+
+    def test_extract_xz_archive_command_failure(self, mocker, tmp_path):
+        """Test extract_xz_archive when tar command fails."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        archive_path = tmp_path / "test.tar.xz"
+        archive_path.write_bytes(b"test content")
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock subprocess.run to return non-zero returncode
+        with patch("subprocess.run") as mock_run:
+            mock_result = mocker.Mock()
+            mock_result.returncode = 1
+            mock_result.stderr = "tar: Error extracting xz archive"
+            mock_run.return_value = mock_result
+
+            with pytest.raises(ExtractionError) as exc_info:
+                extractor.extract_xz_archive(archive_path, extract_path)
+
+        assert "tar: Error extracting xz archive" in str(exc_info.value)
+
+    def test_extract_with_system_tar_command_failure(self, mocker, tmp_path):
+        """Test _extract_with_system_tar when tar command fails."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        archive_path = tmp_path / "test.tar"
+        archive_path.write_bytes(b"test content")
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock subprocess.run to return non-zero returncode
+        with patch("subprocess.run") as mock_run:
+            mock_result = mocker.Mock()
+            mock_result.returncode = 1
+            mock_result.stderr = "tar: Generic extraction error"
+            mock_run.return_value = mock_result
+
+            with pytest.raises(ExtractionError) as exc_info:
+                extractor._extract_with_system_tar(archive_path, extract_path)
+
+        assert "tar: Generic extraction error" in str(exc_info.value)
+
+
+class TestArchiveExtractorBranchCoverageAdditional:
+    """Additional branch-specific tests for ArchiveExtractor to extend code coverage."""
+
+    def test_extract_archive_gz_show_progress_true_show_file_details_true(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.gz format with show_progress=True and show_file_details=True."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.gz archive
+        archive_path = tmp_path / "test.tar.gz"
+        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to succeed
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.return_value = extract_path
+
+            result = extractor.extract_archive(
+                archive_path, extract_path, show_progress=True, show_file_details=True
+            )
+
+        assert result == extract_path
+        # For .tar.gz with show_progress=True and show_file_details=True,
+        # the method calls extract_with_tarfile without the extra parameters
+        mock_tarfile.assert_called_once_with(archive_path, extract_path)
+
+    def test_extract_archive_gz_show_progress_false_show_file_details_true(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.gz format with show_progress=False and show_file_details=True."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.gz archive
+        archive_path = tmp_path / "test.tar.gz"
+        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to succeed
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.return_value = extract_path
+
+            result = extractor.extract_archive(
+                archive_path, extract_path, show_progress=False, show_file_details=True
+            )
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once_with(archive_path, extract_path, False, True)
+
+    def test_extract_archive_xz_show_progress_true_show_file_details_false(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.xz format with show_progress=True and show_file_details=False."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.xz archive
+        archive_path = tmp_path / "test.tar.xz"
+        create_test_archive(archive_path, ".tar.xz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to succeed
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.return_value = extract_path
+
+            result = extractor.extract_archive(
+                archive_path, extract_path, show_progress=True, show_file_details=False
+            )
+
+        assert result == extract_path
+        # For .tar.xz with show_progress=True and show_file_details=False,
+        # the method calls extract_with_tarfile with the parameters
+        mock_tarfile.assert_called_once_with(archive_path, extract_path, True, False)
+
+    def test_extract_archive_xz_show_progress_false_show_file_details_false(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.xz format with show_progress=False and show_file_details=False."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.xz archive
+        archive_path = tmp_path / "test.tar.xz"
+        create_test_archive(archive_path, ".tar.xz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to succeed
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.return_value = extract_path
+
+            result = extractor.extract_archive(
+                archive_path, extract_path, show_progress=False, show_file_details=False
+            )
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once_with(archive_path, extract_path, False, False)
+
+    def test_extract_archive_unknown_format_show_progress_true_show_file_details_true(
+        self, mocker, tmp_path
+    ):
+        """Test extract_archive unknown format with show_progress=True and show_file_details=True."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test archive with unknown extension
+        archive_path = tmp_path / "test.tar.bz2"
+        archive_path.write_bytes(b"fake archive content")
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to succeed
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.return_value = extract_path
+
+            result = extractor.extract_archive(
+                archive_path, extract_path, show_progress=True, show_file_details=True
+            )
+
+        assert result == extract_path
+        # For unknown formats with show_progress=True and show_file_details=True,
+        # the method calls extract_with_tarfile without the extra parameters
+        mock_tarfile.assert_called_once_with(archive_path, extract_path)
+
+    def test_extract_archive_unknown_format_show_progress_false_show_file_details_false(
+        self, mocker, tmp_path
+    ):
+        """Test extract_archive unknown format with show_progress=False and show_file_details=False."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test archive with unknown extension
+        archive_path = tmp_path / "test.tar.bz2"
+        archive_path.write_bytes(b"fake archive content")
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to succeed
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.return_value = extract_path
+
+            result = extractor.extract_archive(
+                archive_path, extract_path, show_progress=False, show_file_details=False
+            )
+
+        assert result == extract_path
+        # For unknown formats with show_progress=False and show_file_details=False,
+        # the method calls extract_with_tarfile with the parameters
+        mock_tarfile.assert_called_once_with(archive_path, extract_path, False, False)
+
+    def test_extract_archive_gz_fallback_with_system_tar(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.gz format with tarfile failure → system tar fallback."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.gz archive
+        archive_path = tmp_path / "test.tar.gz"
+        create_test_archive(archive_path, ".tar.gz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to fail
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.side_effect = ExtractionError("tarfile extraction failed")
+
+            # Mock system tar extraction
+            with patch(
+                "protonfetcher.archive_extractor.ArchiveExtractor.extract_gz_archive"
+            ) as mock_system_tar:
+                mock_system_tar.return_value = extract_path
+
+                result = extractor.extract_archive(archive_path, extract_path)
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once()
+        mock_system_tar.assert_called_once()
+
+    def test_extract_archive_xz_fallback_with_system_tar(
+        self, mocker, tmp_path, create_test_archive
+    ):
+        """Test extract_archive .tar.xz format with tarfile failure → system tar fallback."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test .tar.xz archive
+        archive_path = tmp_path / "test.tar.xz"
+        create_test_archive(archive_path, ".tar.xz", {"test.txt": b"test content"})
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to fail
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.side_effect = ExtractionError("tarfile extraction failed")
+
+            # Mock system tar extraction
+            with patch(
+                "protonfetcher.archive_extractor.ArchiveExtractor.extract_xz_archive"
+            ) as mock_system_tar:
+                mock_system_tar.return_value = extract_path
+
+                result = extractor.extract_archive(archive_path, extract_path)
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once()
+        mock_system_tar.assert_called_once()
+
+    def test_extract_archive_unknown_format_fallback_with_system_tar(
+        self, mocker, tmp_path
+    ):
+        """Test extract_archive unknown format with tarfile failure → system tar fallback."""
+        mock_fs = mocker.Mock()
+        extractor = ArchiveExtractor(mock_fs)
+
+        # Create a test archive with unknown extension
+        archive_path = tmp_path / "test.tar.bz2"
+        archive_path.write_bytes(b"fake archive content")
+
+        extract_path = tmp_path / "extracted"
+        extract_path.mkdir()
+
+        # Mock tarfile extraction to fail
+        with patch(
+            "protonfetcher.archive_extractor.ArchiveExtractor.extract_with_tarfile"
+        ) as mock_tarfile:
+            mock_tarfile.side_effect = ExtractionError("tarfile extraction failed")
+
+            # Mock system tar extraction
+            with patch(
+                "protonfetcher.archive_extractor.ArchiveExtractor._extract_with_system_tar"
+            ) as mock_system_tar:
+                mock_system_tar.return_value = extract_path
+
+                result = extractor.extract_archive(archive_path, extract_path)
+
+        assert result == extract_path
+        mock_tarfile.assert_called_once()
+        mock_system_tar.assert_called_once()
 
 
 class TestArchiveExtractor:

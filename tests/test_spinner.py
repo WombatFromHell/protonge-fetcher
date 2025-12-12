@@ -131,12 +131,11 @@ class TestSpinner:
 
     def test_spinner_finish_already_completed_exit_early(self, mocker):
         """Test spinner finish method when already completed (line 182->exit)."""
-        mock_print = mocker.patch("builtins.print")
+        mocker.patch("builtins.print")
 
         spinner = Spinner(disable=False, total=10, show_progress=True)
         spinner._completed = True  # Set as already completed
 
-        original_current = spinner.current
         spinner.current = 15  # Try to set to a higher value
         spinner.finish()  # Should exit early due to _completed being True
 
@@ -373,7 +372,6 @@ class TestSpinner:
         assert spinner.current == 10
 
         # Second call should not execute the main body since _completed is True
-        original_current = spinner.current  # This is 10
         spinner.current = 5  # Try to reset to check if it gets updated again
         spinner.finish()  # This shouldn't change current value since it's already completed
         # Current should remain as it was before this second call (5), because the method exits early
@@ -580,7 +578,7 @@ class TestSpinner:
 
     def test_spinner_update_display_early_return_due_to_fps_limit(self, mocker):
         """Test _update_display early return due to FPS limit (line 56->exit)."""
-        mock_print = mocker.patch("builtins.print")
+        mocker.patch("builtins.print")
         # Set up spinner with FPS limit
         spinner = Spinner(disable=False, fps_limit=10)  # 10 FPS = 0.1s interval
         spinner.current = 10
@@ -600,7 +598,7 @@ class TestSpinner:
 
     def test_spinner_update_display_with_zero_fps_limit(self, mocker):
         """Test _update_display with 0 FPS limit."""
-        mock_print = mocker.patch("builtins.print")
+        mocker.patch("builtins.print")
         mock_time = mocker.patch("time.time")
         mock_time.return_value = 1.0
 
@@ -629,12 +627,11 @@ class TestSpinner:
 
     def test_spinner_finish_already_completed(self, mocker):
         """Test spinner finish method when already completed (line 182->exit)."""
-        mock_print = mocker.patch("builtins.print")
+        mocker.patch("builtins.print")
 
         spinner = Spinner(disable=False, total=10, show_progress=True)
         spinner._completed = True  # Set as already completed
 
-        original_current = spinner.current
         spinner.current = 15  # Try to set to a higher value
         spinner.finish()  # Should exit early due to _completed being True
 
@@ -644,12 +641,11 @@ class TestSpinner:
 
     def test_spinner_finish_with_zero_total_exit_path(self, mocker):
         """Test spinner finish with total=0 (line 222->exit)."""
-        mock_print = mocker.patch("builtins.print")
+        mocker.patch("builtins.print")
 
         spinner = Spinner(disable=False, total=0, show_progress=True)
         spinner._completed = False  # Ensure not completed already
 
-        original_current = spinner.current
         spinner.current = 5  # Set to some value
         spinner.finish()  # Should exit early due to total=0
 
@@ -659,7 +655,7 @@ class TestSpinner:
 
     def test_spinner_finish_with_none_total(self, mocker):
         """Test spinner finish with total=None (another exit path)."""
-        mock_print = mocker.patch("builtins.print")
+        mocker.patch("builtins.print")
 
         spinner = Spinner(disable=False, total=None, show_progress=True)
         spinner._completed = False  # Ensure not completed already
@@ -687,7 +683,6 @@ class TestSpinner:
 
     def test_spinner_should_update_display_with_various_fps_limits(self, mocker):
         """Test _should_update_display with different FPS limits."""
-        spinner_default = Spinner()  # No fps_limit
         spinner_zero = Spinner(fps_limit=0)
         spinner_none = Spinner(fps_limit=None)
         spinner_positive = Spinner(fps_limit=5.0)  # 5 FPS = 0.2s interval
@@ -717,7 +712,7 @@ class TestSpinner:
 
     def test_spinner_finish_with_different_scenarios(self, mocker):
         """Test spinner finish with various completion scenarios."""
-        mock_print = mocker.patch("builtins.print")
+        mocker.patch("builtins.print")
         mock_time = mocker.patch("time.time")
         mock_time.return_value = 1.0
 

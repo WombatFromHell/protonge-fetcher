@@ -191,7 +191,15 @@ class GitHubReleaseFetcher:
         logger.info(
             f"Unpacked directory already exists: {actual_directory}, skipping download and extraction"
         )
-        # Still manage links for consistency
+
+        # Check if links are already up-to-date to avoid unnecessary recreation
+        if self.link_manager.are_links_up_to_date(
+            extract_dir, release_tag, fork, is_manual_release=is_manual_release
+        ):
+            logger.info("Symlinks are already up-to-date, skipping link management")
+            return True, actual_directory
+
+        # Only manage links if they need updating
         self.link_manager.manage_proton_links(
             extract_dir, release_tag, fork, is_manual_release=is_manual_release
         )
@@ -234,12 +242,76 @@ class GitHubReleaseFetcher:
             logger.info(
                 f"Unpacked directory exists after download: {unpacked}, skipping extraction"
             )
-            # Still manage links for consistency
+
+            # Check if links are already up-to-date to avoid unnecessary recreation
+            if self.link_manager.are_links_up_to_date(
+                extract_dir, release_tag, fork, is_manual_release=is_manual_release
+            ):
+                logger.info("Symlinks are already up-to-date, skipping link management")
+                return True, unpacked
+
+            # Only manage links if they need updating
             self.link_manager.manage_proton_links(
                 extract_dir, release_tag, fork, is_manual_release=is_manual_release
             )
             return True, unpacked
         return False, extract_dir
+
+    def relink_fork(
+        self,
+        extract_dir: Path,
+        fork: ForkName = ForkName.GE_PROTON,
+    ) -> bool:
+        """
+        Force recreation of symbolic links for a specific fork without downloading or extracting.
+
+        This method finds all existing version directories for the specified fork and
+        recreates the symlinks to ensure they point to the correct targets.
+
+        Args:
+            extract_dir: Directory containing the Proton installations
+            fork: The Proton fork name to relink
+
+        Returns:
+            True if relinking was successful
+
+        Raises:
+            LinkManagementError: If no valid versions are found for the fork
+        """
+        self._ensure_directory_is_writable(extract_dir)
+
+        # Find all version candidates for this fork
+        candidates = self.link_manager.find_version_candidates(extract_dir, fork)
+
+        if not candidates:
+            raise LinkManagementError(
+                f"No valid {fork} versions found in {extract_dir} to relink"
+            )
+
+        # Remove duplicate versions, preferring standard naming
+        candidates = self.link_manager._deduplicate_candidates(candidates)
+
+        # Sort by version (newest first)
+        candidates.sort(key=lambda t: t[0], reverse=True)
+
+        # Take top 3 versions for symlinks
+        top_3 = candidates[:3]
+
+        if not top_3:
+            raise LinkManagementError(
+                f"No valid {fork} versions found in {extract_dir} to relink"
+            )
+
+        # Get link names for this fork
+        main, fb1, fb2 = self.link_manager.get_link_names_for_fork(extract_dir, fork)
+
+        logger.info(f"Relinking {fork} symlinks...")
+
+        # Force recreation of symlinks (bypass the optimization)
+        self.link_manager.create_symlinks(main, fb1, fb2, top_3)
+
+        logger.info(f"Successfully relinked {fork} symlinks")
+        return True
 
     def _extract_and_manage_links(
         self,

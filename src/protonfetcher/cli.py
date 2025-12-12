@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 from typing import Union
 
@@ -33,6 +34,19 @@ def _validate_mutually_exclusive_args(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     if args.rm and (args.release or args.list or args.ls):
         print("Error: --rm cannot be used with --release, --list, or --ls")
+        raise SystemExit(1)
+    # Check if --relink was used without explicit --fork (before _set_default_fork)
+    relink_without_fork = args.relink and not any(
+        arg in ["--fork", "-f"] or arg.startswith("--fork=") or arg.startswith("-f=")
+        for arg in sys.argv[1:]
+    )
+    if relink_without_fork:
+        print(
+            "Error: --relink requires --fork to specify which fork's links to recreate"
+        )
+        raise SystemExit(1)
+    if args.relink and (args.release or args.list or args.ls or args.rm):
+        print("Error: --relink cannot be used with --release, --list, --ls, or --rm")
         raise SystemExit(1)
 
 
@@ -80,6 +94,11 @@ def parse_arguments() -> argparse.Namespace:
         "--rm",
         metavar="TAG",
         help="Remove a given Proton fork release folder and its associated link (if one exists)",
+    )
+    parser.add_argument(
+        "--relink",
+        action="store_true",
+        help="Force recreation of symbolic links without downloading or extracting (use with --fork)",
     )
     parser.add_argument(
         "--debug",
@@ -178,6 +197,19 @@ def _handle_list_operation_flow(fetcher: GitHubReleaseFetcher, repo: str) -> Non
     for tag in tags:
         print(f"  {tag}")
     print("Success")  # Print success to maintain consistency
+
+
+def _handle_relink_operation_flow(
+    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path
+) -> None:
+    """Handle the --relink operation flow."""
+    # Use the provided fork
+    relink_fork = convert_fork_to_enum(
+        args.fork if hasattr(args, "fork") and args.fork is not None else None
+    )
+    logger.info(f"Relinking {relink_fork} symlinks")
+    fetcher.relink_fork(extract_dir, relink_fork)
+    print("Success")
 
 
 def _handle_rm_operation_flow(
@@ -279,6 +311,11 @@ def main() -> None:
             logger.info(f"Using fork: {target_fork} ({repo})")
 
             _handle_list_operation_flow(fetcher, repo)
+            return
+
+        # Handle --relink flag
+        if args.relink:
+            _handle_relink_operation_flow(fetcher, args, extract_dir)
             return
 
         # Handle --rm flag

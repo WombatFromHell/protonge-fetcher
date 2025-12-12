@@ -1,9 +1,5 @@
 """Tests for protocol validation utility and protocol improvements."""
 
-from pathlib import Path
-
-import pytest
-
 from protonfetcher.common import FileSystemClientProtocol, NetworkClientProtocol
 from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.network import NetworkClient

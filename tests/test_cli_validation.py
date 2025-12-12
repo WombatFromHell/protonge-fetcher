@@ -98,6 +98,7 @@ class TestCLIValidation:
         args.release = None
         args.ls = False
         args.rm = False
+        args.relink = False
 
         # This should not raise an exception
         _validate_mutually_exclusive_args(args)

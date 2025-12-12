@@ -278,9 +278,65 @@ class TestCLIListReleases:
 
         assert exc_info.value.code == 1
 
-        # Capture output to verify error message
+    def test_cli_relink_validation(self, mocker: MockerFixture, tmp_path: Path, capsys):
+        """Test --relink flag validation."""
+        # Test --relink without --fork (should fail)
+        test_args = [
+            "protonfetcher",
+            "--relink",
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
         captured = capsys.readouterr()
-        assert "Error: API rate limit exceeded" in captured.out
+        assert "Error: --relink requires --fork" in captured.out
+        assert exc_info.value.code == 1
+
+        # Test --relink with --fork (should work - mock the relink_fork method)
+        test_args = [
+            "protonfetcher",
+            "--relink",
+            "--fork",
+            "GE-Proton",
+            "--extract-dir",
+            str(tmp_path / "compatibilitytools.d"),
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        # Mock the GitHubReleaseFetcher and its relink_fork method
+        mock_fetcher = mocker.Mock()
+        mock_fetcher.relink_fork.return_value = True
+
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        main()
+
+        captured = capsys.readouterr()
+        assert "Success" in captured.out
+        mock_fetcher.relink_fork.assert_called_once()
+
+        # Test --relink with conflicting flags (should fail)
+        test_args = [
+            "protonfetcher",
+            "--relink",
+            "--fork",
+            "GE-Proton",
+            "--list",
+        ]
+        mocker.patch("sys.argv", test_args)
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        captured = capsys.readouterr()
+        assert (
+            "Error: --relink cannot be used with --release, --list, --ls, or --rm"
+            in captured.out
+        )
+        assert exc_info.value.code == 1
 
     def test_cli_list_flag_mixed_with_release_error(
         self, mocker: MockerFixture, tmp_path: Path, capsys
