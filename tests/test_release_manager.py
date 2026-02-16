@@ -606,10 +606,8 @@ class TestReleaseManager:
 
         # Temporarily override mtime for this specific path
         original_mtime = mock_fs.mtime
-        mock_fs.mtime = (
-            lambda path: old_mtime
-            if str(path) == str(expired_cache_path)
-            else original_mtime(path)
+        mock_fs.mtime = lambda path: (
+            old_mtime if str(path) == str(expired_cache_path) else original_mtime(path)
         )
 
         # Verify expired cache is not used

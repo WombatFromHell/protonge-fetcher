@@ -26,8 +26,8 @@ test:
 	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch
 
 lint:
-	ruff check ./src ./tests; \
-		pyright ./src ./tests
+	ty check ./src ./tests; \
+		ruff check ./src ./tests
 
 prettier:
 	prettier --cache -c -w *.md
@@ -52,3 +52,4 @@ clean:
 all: clean build install
 
 .PHONY: build install test lint prettier format radon quality clean all
+.SILENT: build install test lint prettier format radon quality clean all

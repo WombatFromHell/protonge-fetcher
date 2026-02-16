@@ -262,7 +262,7 @@ class TestGitHubReleaseFetcher:
         fetcher.release_manager = mock_release_manager
 
         # Setup mock to raise NetworkError
-        mock_release_manager.fetch_latest_tag.side_effect = NetworkError(  # type: ignore
+        mock_release_manager.fetch_latest_tag.side_effect = NetworkError(
             "Connection failed"
         )
 
@@ -317,7 +317,7 @@ class TestGitHubReleaseFetcher:
         mock_asset_downloader.download_asset.return_value = (
             tmp_path / "Downloads" / asset_name
         )
-        mock_archive_extractor.extract_archive.side_effect = ExtractionError(  # type: ignore
+        mock_archive_extractor.extract_archive.side_effect = ExtractionError(
             "Extraction failed"
         )
 
@@ -406,7 +406,7 @@ class TestGitHubReleaseFetcher:
         fetcher.file_system_client.write.side_effect = mock_fs_write  # type: ignore
         fetcher.file_system_client.unlink.side_effect = mock_fs_unlink  # type: ignore
 
-        mock_link_manager.manage_proton_links.side_effect = LinkManagementError(  # type: ignore
+        mock_link_manager.manage_proton_links.side_effect = LinkManagementError(
             "Failed to manage proton links"
         )
 

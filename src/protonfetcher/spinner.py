@@ -5,7 +5,7 @@ from typing import (
     Any,
     Iterator,
     Optional,
-    Self,  # type: ignore
+    Self,
 )
 
 

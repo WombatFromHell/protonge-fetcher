@@ -1656,11 +1656,11 @@ class TestLinkManager:
         extract_dir.mkdir()
 
         # Test with various invalid fork types to ensure proper error handling
-        invalid_forks = ["INVALID", 123, None, object()]
+        invalid_forks: list[object] = ["INVALID", 123, None, object()]
 
         for invalid_fork in invalid_forks:
             with pytest.raises(ValueError, match="fork must be a ForkName"):
-                manager.find_tag_directory(extract_dir, "tag", invalid_fork)
+                manager.find_tag_directory(extract_dir, "tag", invalid_fork)  # type: ignore[arg-type]
 
     def test_manage_proton_links_manual_release_none_tag_dir(self, mocker, tmp_path):
         """Test manage_proton_links with manual release where tag_dir is None for branch coverage (line 696)."""
@@ -1676,13 +1676,13 @@ class TestLinkManager:
         ):
             return None
 
-        manager._handle_manual_release_directory = mock_handle_manual_release_directory
+        manager._handle_manual_release_directory = mock_handle_manual_release_directory  # type: ignore[method-assign]
 
         # Mock find_version_candidates to return some candidates
         def mock_find_version_candidates(extract_dir, fork):
             return [(("GE-Proton", 10, 0, 20), extract_dir / "GE-Proton10-20")]
 
-        manager.find_version_candidates = mock_find_version_candidates
+        manager.find_version_candidates = mock_find_version_candidates  # type: ignore[method-assign]
 
         # This should handle the case where tag_dir is None for manual release
         result = manager.manage_proton_links(
