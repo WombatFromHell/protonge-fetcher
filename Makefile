@@ -27,7 +27,7 @@ test:
 
 lint:
 	ty check ./src ./tests; \
-		ruff check ./src ./tests
+		ruff check ./src ./tests --fix
 
 prettier:
 	prettier --cache -c -w *.md

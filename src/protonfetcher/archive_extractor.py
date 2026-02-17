@@ -41,6 +41,65 @@ class ArchiveExtractor:
         except Exception as e:
             raise ExtractionError(f"Error reading archive: {e}")
 
+    def _get_archive_format(self, archive_path: Path) -> str:
+        """Determine archive format from filename.
+
+        Returns:
+            Format string: 'tar.gz', 'tar.xz', or 'other'
+        """
+        if archive_path.name.endswith(".tar.gz"):
+            return "tar.gz"
+        elif archive_path.name.endswith(".tar.xz"):
+            return "tar.xz"
+        else:
+            return "other"
+
+    def _try_tarfile_extraction(
+        self,
+        archive_path: Path,
+        target_dir: Path,
+        show_progress: bool,
+        show_file_details: bool,
+    ) -> Path:
+        """Try extraction using tarfile library.
+
+        Raises:
+            ProtonFetcherError: If extraction fails
+        """
+        if show_progress and show_file_details:
+            return self.extract_with_tarfile(archive_path, target_dir)
+        else:
+            return self.extract_with_tarfile(
+                archive_path, target_dir, show_progress, show_file_details
+            )
+
+    def _extract_with_fallback(
+        self,
+        archive_path: Path,
+        target_dir: Path,
+        show_progress: bool,
+        show_file_details: bool,
+        fallback_method,
+    ) -> Path:
+        """Try tarfile extraction, fall back to alternative method if it fails.
+
+        Args:
+            archive_path: Path to the archive
+            target_dir: Directory to extract into
+            show_progress: Whether to show progress
+            show_file_details: Whether to show file details
+            fallback_method: Alternative extraction method to try if tarfile fails
+
+        Returns:
+            Path to the target directory where archive was extracted
+        """
+        try:
+            return self._try_tarfile_extraction(
+                archive_path, target_dir, show_progress, show_file_details
+            )
+        except ProtonFetcherError:
+            return fallback_method(archive_path, target_dir)
+
     def extract_archive(
         self,
         archive_path: Path,
@@ -63,56 +122,32 @@ class ArchiveExtractor:
         Raises:
             FetchError: If extraction fails
         """
-        # Determine the archive format and dispatch to the appropriate method
-        # Try tarfile extraction first for all formats to ensure progress indication, then fall back to system tar
-        if archive_path.name.endswith(".tar.gz"):
-            # For .tar.gz files, try tarfile extraction first (for progress indication), then system tar fallback
-            try:
-                if show_progress and show_file_details:
-                    # Use default values to maintain backward compatibility with tests
-                    result = self.extract_with_tarfile(archive_path, target_dir)
-                else:
-                    result = self.extract_with_tarfile(
-                        archive_path, target_dir, show_progress, show_file_details
-                    )
-                return result
-            except ProtonFetcherError:
-                # If tarfile fails, fall back to system tar
-                result = self.extract_gz_archive(archive_path, target_dir)
-                return result
-        elif archive_path.name.endswith(".tar.xz"):
-            # For .tar.xz files, try tarfile extraction first (for progress indication), then system tar fallback
-            try:
-                if show_progress and show_file_details:
-                    # Use default values to maintain backward compatibility with tests
-                    result = self.extract_with_tarfile(archive_path, target_dir)
-                else:
-                    result = self.extract_with_tarfile(
-                        archive_path, target_dir, show_progress, show_file_details
-                    )
-                return result
-            except ProtonFetcherError:
-                # If tarfile fails, fall back to system tar
-                result = self.extract_xz_archive(archive_path, target_dir)
-                return result
-        else:
-            # For other formats, try tarfile extraction first (primary method with progress indication)
-            # If it fails, fall back to system tar for compatibility
-            try:
-                if show_progress and show_file_details:
-                    # Use default values to maintain backward compatibility with tests
-                    result = self.extract_with_tarfile(archive_path, target_dir)
-                else:
-                    result = self.extract_with_tarfile(
-                        archive_path, target_dir, show_progress, show_file_details
-                    )
-                return result
-            except ProtonFetcherError:
-                # If tarfile extraction fails, fall back to system tar command
-                result = self._extract_with_system_tar(archive_path, target_dir)
-                return result
+        format_type = self._get_archive_format(archive_path)
 
-        return target_dir
+        if format_type == "tar.gz":
+            return self._extract_with_fallback(
+                archive_path,
+                target_dir,
+                show_progress,
+                show_file_details,
+                self.extract_gz_archive,
+            )
+        elif format_type == "tar.xz":
+            return self._extract_with_fallback(
+                archive_path,
+                target_dir,
+                show_progress,
+                show_file_details,
+                self.extract_xz_archive,
+            )
+        else:
+            return self._extract_with_fallback(
+                archive_path,
+                target_dir,
+                show_progress,
+                show_file_details,
+                self._extract_with_system_tar,
+            )
 
     def _extract_with_system_tar(self, archive_path: Path, target_dir: Path) -> Path:
         """Extract archive using system tar command."""

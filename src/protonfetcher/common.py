@@ -12,6 +12,7 @@ from typing import Any, Iterator, Optional, Protocol
 class ForkName(StrEnum):
     GE_PROTON = "GE-Proton"
     PROTON_EM = "Proton-EM"
+    CACHYOS = "CachyOS"
 
 
 # Type aliases for better readability
@@ -400,6 +401,10 @@ FORKS: dict[ForkName, ForkConfig] = {
     ),
     ForkName.PROTON_EM: ForkConfig(
         repo="Etaash-mathamsetty/Proton",
+        archive_format=".tar.xz",
+    ),
+    ForkName.CACHYOS: ForkConfig(
+        repo="CachyOS/proton-cachyos",
         archive_format=".tar.xz",
     ),
 }

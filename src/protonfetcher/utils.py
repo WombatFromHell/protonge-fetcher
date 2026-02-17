@@ -76,6 +76,15 @@ def parse_version(
                 return ("EM", major, minor, patch)
             # If no match, return a tuple that will put this tag at the end for comparison
             return (tag, 0, 0, 0)
+        case ForkName.CACHYOS:
+            # CachyOS format: cachyos-10.0-20260207-slr -> prefix="cachyos", major=10, minor=0, patch=20260207
+            pattern = r"cachyos-(\d+)\.(\d+)-(\d+)-slr"
+            match_result = re.match(pattern, tag)
+            if match_result:
+                major, minor, patch = map(int, match_result.groups())
+                return ("cachyos", major, minor, patch)
+            # If no match, return a tuple that will put this tag at the end for comparison
+            return (tag, 0, 0, 0)
         case ForkName.GE_PROTON:
             # GE-Proton format: GE-Proton10-20 -> prefix="GE-Proton", major=10, minor=20
             pattern = r"GE-Proton(\d+)-(\d+)"
@@ -153,6 +162,10 @@ def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
         # For Proton-EM, the asset name follows pattern: proton-<tag>.tar.xz
         # e.g., tag 'EM-10.0-30' becomes 'proton-EM-10.0-30.tar.xz'
         return f"proton-{tag}.tar.xz"
+    elif fork == ForkName.CACHYOS:
+        # For CachyOS, the asset name follows pattern: proton-<tag>-x86_64.tar.xz
+        # e.g., tag 'cachyos-10.0-20260207-slr' becomes 'proton-cachyos-10.0-20260207-slr-x86_64.tar.xz'
+        return f"proton-{tag}-x86_64.tar.xz"
     else:
         # For GE-Proton, the asset name follows pattern: <tag>.tar.gz
         # e.g., tag 'GE-Proton10-20' becomes 'GE-Proton10-20.tar.gz'

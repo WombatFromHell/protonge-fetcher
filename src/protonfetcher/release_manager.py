@@ -50,6 +50,79 @@ class ReleaseManager:
         # Create cache directory if it doesn't exist
         self.file_system_client.mkdir(self._cache_dir, parents=True, exist_ok=True)
 
+    def _parse_redirect_location(self, response_stdout: str) -> Optional[str]:
+        """Parse redirect URL from Location header in response.
+
+        Args:
+            response_stdout: stdout from the HEAD request
+
+        Returns:
+            Extracted redirect path if found, None otherwise
+        """
+        location_match = re.search(
+            r"Location: [^\r\n]*?(/releases/tag/[^/?#\r\n]+)",
+            response_stdout,
+            re.IGNORECASE,
+        )
+        if location_match:
+            return location_match.group(1)
+        return None
+
+    def _parse_redirect_url_fallback(
+        self, response_stdout: str, original_url: str
+    ) -> str:
+        """Fallback URL parsing when Location header not found.
+
+        Tries to extract URL from response and parse its path portion.
+
+        Args:
+            response_stdout: stdout from the HEAD request
+            original_url: Original URL as fallback
+
+        Returns:
+            Extracted redirect path or original URL
+        """
+        url_match = re.search(
+            r"URL:\s*(https?://[^\s\r\n]+)", response_stdout, re.IGNORECASE
+        )
+        if url_match:
+            full_url = url_match.group(1).strip()
+            parsed_url = urllib.parse.urlparse(full_url)
+            return parsed_url.path
+        return original_url
+
+    def _extract_redirected_url(self, response_stdout: str, original_url: str) -> str:
+        """Extract the redirected URL from response headers.
+
+        Args:
+            response_stdout: stdout from the HEAD request
+            original_url: Original URL as fallback
+
+        Returns:
+            Redirected URL path or original URL
+        """
+        redirected_url = self._parse_redirect_location(response_stdout)
+        if redirected_url is None:
+            return self._parse_redirect_url_fallback(response_stdout, original_url)
+        return redirected_url
+
+    def _extract_tag_from_url(self, url_path: str) -> str:
+        """Extract tag name from GitHub releases URL path.
+
+        Args:
+            url_path: URL path containing /releases/tag/{tag}
+
+        Returns:
+            Extracted tag name
+
+        Raises:
+            NetworkError: If tag cannot be extracted
+        """
+        match = re.search(GITHUB_URL_PATTERN, url_path)
+        if not match:
+            raise NetworkError(f"Could not determine latest tag from URL: {url_path}")
+        return match.group(1)
+
     def fetch_latest_tag(self, repo: str) -> str:
         """Get the latest release tag by following the redirect from /releases/latest.
 
@@ -72,36 +145,11 @@ class ReleaseManager:
         except Exception as e:
             raise NetworkError(f"Failed to fetch latest tag for {repo}: {e}")
 
-        # Parse the redirect URL from curl response headers
-        location_match = re.search(
-            r"Location: [^\r\n]*?(/releases/tag/[^/?#\r\n]+)",
-            response.stdout,
-            re.IGNORECASE,
-        )
-        if not location_match:
-            # Try another pattern for the redirect - extract URL and then get path portion
-            # Handle both "Location:" and "URL:" patterns that might appear in curl output
-            url_match = re.search(
-                r"URL:\s*(https?://[^\s\r\n]+)", response.stdout, re.IGNORECASE
-            )
-            if url_match:
-                full_url = url_match.group(1).strip()
-                # Extract the path portion from the full URL to match pattern
-                parsed_url = urllib.parse.urlparse(full_url)
-                redirected_url = parsed_url.path
-            else:
-                # If no Location header found, use the original URL
-                redirected_url = url
-        else:
-            redirected_url = location_match.group(1)
+        # Extract redirected URL from response
+        redirected_url = self._extract_redirected_url(response.stdout, url)
 
-        match = re.search(GITHUB_URL_PATTERN, redirected_url)
-        if not match:
-            raise NetworkError(
-                f"Could not determine latest tag from URL: {redirected_url}"
-            )
-
-        tag = match.group(1)
+        # Extract tag from URL
+        tag = self._extract_tag_from_url(redirected_url)
         logger.info(f"Found latest tag: {tag}")
         return tag
 
@@ -183,10 +231,45 @@ class ReleaseManager:
             if asset["name"].lower().endswith(expected_extension)
         ]
 
+    def _find_asset_for_cachyos(
+        self, assets: list[dict[str, Any]], tag: str
+    ) -> Optional[str]:
+        """Find the x86_64 asset for CachyOS releases.
+
+        CachyOS releases have multiple architecture variants (arm64, x86_64, x86_64_v2, etc.).
+        This method specifically looks for the x86_64 variant.
+
+        Args:
+            assets: List of asset dictionaries from GitHub API
+            tag: Release tag (e.g., 'cachyos-10.0-20260207-slr')
+
+        Returns:
+            Asset name if found, None otherwise
+        """
+        # Generate the expected asset name for x86_64 architecture
+        expected_name = f"proton-{tag}-x86_64.tar.xz"
+
+        for asset in assets:
+            if asset["name"] == expected_name:
+                return asset["name"]
+
+        return None
+
     def _handle_api_response(
-        self, assets: list[dict[str, Any]], expected_extension: str
+        self,
+        assets: list[dict[str, Any]],
+        expected_extension: str,
+        fork: Optional[ForkName] = None,
+        tag: Optional[str] = None,
     ) -> str:
         """Handle the API response to find the appropriate asset."""
+        # For CachyOS, specifically look for the x86_64 asset
+        if fork == ForkName.CACHYOS and tag is not None:
+            cachyos_asset = self._find_asset_for_cachyos(assets, tag)
+            if cachyos_asset:
+                logger.info(f"Found CachyOS x86_64 asset via API: {cachyos_asset}")
+                return cachyos_asset
+
         matching_assets = self._find_matching_assets(assets, expected_extension)
 
         if matching_assets:
@@ -233,7 +316,7 @@ class ReleaseManager:
 
         assets: list[dict[str, Any]] = release_data["assets"]
         expected_extension = self._get_expected_extension(fork)
-        return self._handle_api_response(assets, expected_extension)
+        return self._handle_api_response(assets, expected_extension, fork, tag)
 
     def _try_html_fallback(self, repo: str, tag: str, fork: ForkName) -> str:
         """Try to find the asset by HTML parsing if API fails."""
@@ -392,6 +475,74 @@ class ReleaseManager:
                         return size
         return None
 
+    def _is_in_test(self) -> bool:
+        """Check if running in a test environment."""
+        return "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+
+    def _try_get_cached_size(
+        self, repo: str, tag: str, asset_name: str
+    ) -> Optional[int]:
+        """Try to get cached asset size.
+
+        Returns:
+            Cached size if available and not in test mode, None otherwise
+        """
+        if self._is_in_test():
+            return None
+
+        cached_size = self._get_cached_asset_size(repo, tag, asset_name)
+        if cached_size is not None:
+            logger.debug(f"Using cached size for {asset_name}: {cached_size} bytes")
+            return cached_size
+        return None
+
+    def _fetch_size_with_head_request(self, url: str, asset_name: str) -> ProcessResult:
+        """Execute HEAD request to fetch asset size.
+
+        Raises:
+            NetworkError: If the request fails
+        """
+        result = self.network_client.head(url, follow_redirects=True)
+        if result.returncode != 0:
+            stderr_content = getattr(result, "stderr", "")
+            if isinstance(stderr_content, str) and (
+                "404" in stderr_content or "not found" in stderr_content.lower()
+            ):
+                raise NetworkError(f"Remote asset not found: {asset_name}")
+            raise NetworkError(
+                f"Failed to get remote asset size for {asset_name}: {stderr_content}"
+            )
+
+        # Check for 404 or similar errors even if returncode is 0
+        self._check_for_error_in_response(result, asset_name)
+        return result
+
+    def _extract_and_cache_size(
+        self,
+        result: ProcessResult,
+        url: str,
+        repo: str,
+        tag: str,
+        asset_name: str,
+    ) -> Optional[int]:
+        """Extract size from response and cache it.
+
+        Returns:
+            Size in bytes if found, None otherwise
+        """
+        size = self._extract_size_from_response(result.stdout)
+        if size:
+            logger.info(f"Remote asset size: {size} bytes")
+            if not self._is_in_test():
+                self._cache_asset_size(repo, tag, asset_name, size)
+            return size
+
+        # If content-length not available, try following redirects
+        size = self._follow_redirect_and_get_size(
+            result, url, repo, tag, asset_name, self._is_in_test()
+        )
+        return size
+
     def get_remote_asset_size(self, repo: str, tag: str, asset_name: str) -> int:
         """Get the size of a remote asset using HEAD request.
 
@@ -406,49 +557,20 @@ class ReleaseManager:
         Raises:
             FetchError: If unable to get asset size
         """
-        # Don't use cache during tests to preserve test isolation
-        in_test = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
-
-        cached_size = None
-        if not in_test:
-            # Check if size is already cached
-            cached_size = self._get_cached_asset_size(repo, tag, asset_name)
-            if cached_size is not None:
-                logger.debug(f"Using cached size for {asset_name}: {cached_size} bytes")
-                return cached_size
+        # Try cache first
+        cached_size = self._try_get_cached_size(repo, tag, asset_name)
+        if cached_size is not None:
+            return cached_size
 
         url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
         logger.info(f"Getting remote asset size from: {url}")
 
         try:
-            # First try with HEAD request following redirects
-            result = self.network_client.head(url, follow_redirects=True)
-            if result.returncode != 0:
-                stderr_content = getattr(result, "stderr", "")
-                if isinstance(stderr_content, str) and (
-                    "404" in stderr_content or "not found" in stderr_content.lower()
-                ):
-                    raise NetworkError(f"Remote asset not found: {asset_name}")
-                raise NetworkError(
-                    f"Failed to get remote asset size for {asset_name}: {stderr_content}"
-                )
+            # Fetch size with HEAD request
+            result = self._fetch_size_with_head_request(url, asset_name)
 
-            # Check for 404 or similar errors in the response headers or stderr even if returncode is 0
-            self._check_for_error_in_response(result, asset_name)
-
-            # Extract Content-Length from headers
-            size = self._extract_size_from_response(result.stdout)
-            if size:
-                logger.info(f"Remote asset size: {size} bytes")
-                # Cache the result for future use (if not testing)
-                if not in_test:
-                    self._cache_asset_size(repo, tag, asset_name, size)
-                return size
-
-            # If content-length is not available or is 0, try following redirects
-            size = self._follow_redirect_and_get_size(
-                result, url, repo, tag, asset_name, in_test
-            )
+            # Extract and cache size
+            size = self._extract_and_cache_size(result, url, repo, tag, asset_name)
             if size:
                 return size
 

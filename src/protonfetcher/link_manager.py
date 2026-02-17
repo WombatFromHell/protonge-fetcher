@@ -54,6 +54,12 @@ class LinkManager:
                     extract_dir / "Proton-EM-Fallback",
                     extract_dir / "Proton-EM-Fallback2",
                 )
+            case ForkName.CACHYOS:
+                return (
+                    extract_dir / "CachyOS",
+                    extract_dir / "CachyOS-Fallback",
+                    extract_dir / "CachyOS-Fallback2",
+                )
             case ForkName.GE_PROTON:
                 return (
                     extract_dir / "GE-Proton",
@@ -67,6 +73,114 @@ class LinkManager:
                     extract_dir / "",
                     extract_dir / "",
                 )
+
+    def _find_ge_proton_tag_directory(self, extract_dir: Path, tag: str) -> Path:
+        """Find tag directory for GE-Proton.
+
+        Args:
+            extract_dir: Directory to search
+            tag: Release tag
+
+        Returns:
+            Path to the found directory
+
+        Raises:
+            LinkManagementError: If directory not found
+        """
+        tag_dir_path = extract_dir / tag
+        if self.file_system_client.exists(
+            tag_dir_path
+        ) and self.file_system_client.is_dir(tag_dir_path):
+            return tag_dir_path
+
+        raise LinkManagementError(f"Manual release directory not found: {tag_dir_path}")
+
+    def _find_proton_em_tag_directory(self, extract_dir: Path, tag: str) -> Path:
+        """Find tag directory for Proton-EM.
+
+        Args:
+            extract_dir: Directory to search
+            tag: Release tag
+
+        Returns:
+            Path to the found directory
+
+        Raises:
+            LinkManagementError: If directory not found
+        """
+        proton_em_dir = extract_dir / f"proton-{tag}"
+        if self.file_system_client.exists(
+            proton_em_dir
+        ) and self.file_system_client.is_dir(proton_em_dir):
+            return proton_em_dir
+
+        # If not found, also try without proton- prefix
+        tag_dir_path = extract_dir / tag
+        if self.file_system_client.exists(
+            tag_dir_path
+        ) and self.file_system_client.is_dir(tag_dir_path):
+            return tag_dir_path
+
+        raise LinkManagementError(
+            f"Manual release directory not found: {extract_dir / tag} or {proton_em_dir}"
+        )
+
+    def _find_cachyos_tag_directory(self, extract_dir: Path, tag: str) -> Path:
+        """Find tag directory for CachyOS.
+
+        Args:
+            extract_dir: Directory to search
+            tag: Release tag
+
+        Returns:
+            Path to the found directory
+
+        Raises:
+            LinkManagementError: If directory not found
+        """
+        # CachyOS archives extract to directory with -x86_64 suffix
+        # e.g., tag 'cachyos-10.0-20260207-slr' extracts to 'proton-cachyos-10.0-20260207-slr-x86_64'
+        cachyos_dir = extract_dir / f"proton-{tag}-x86_64"
+        if self.file_system_client.exists(
+            cachyos_dir
+        ) and self.file_system_client.is_dir(cachyos_dir):
+            return cachyos_dir
+
+        # If not found, also try without -x86_64 suffix
+        cachyos_dir_no_suffix = extract_dir / f"proton-{tag}"
+        if self.file_system_client.exists(
+            cachyos_dir_no_suffix
+        ) and self.file_system_client.is_dir(cachyos_dir_no_suffix):
+            return cachyos_dir_no_suffix
+
+        # If not found, also try without proton- prefix
+        tag_dir_path = extract_dir / tag
+        if self.file_system_client.exists(
+            tag_dir_path
+        ) and self.file_system_client.is_dir(tag_dir_path):
+            return tag_dir_path
+
+        raise LinkManagementError(
+            f"Manual release directory not found: {extract_dir / tag}, {cachyos_dir}, or {cachyos_dir_no_suffix}"
+        )
+
+    def _validate_find_tag_inputs(
+        self,
+        extract_dir: Path,
+        tag: str,
+        fork: ForkName,
+    ) -> None:
+        """Validate inputs for find_tag_directory.
+
+        Raises:
+            ValueError: If inputs are invalid
+        """
+        if not isinstance(extract_dir, Path):
+            raise ValueError(f"extract_dir must be a Path, got {type(extract_dir)}")
+        if not isinstance(tag, str) or not tag:
+            raise ValueError(f"tag must be a non-empty string, got {tag}")
+        if not isinstance(fork, ForkName):
+            raise ValueError(f"fork must be a ForkName, got {type(fork)}")
 
     def find_tag_directory(
         self,
@@ -91,58 +205,32 @@ class LinkManager:
             ValueError: If fork is not supported
         """
         # Validate input
-        if not isinstance(extract_dir, Path):
-            raise ValueError(f"extract_dir must be a Path, got {type(extract_dir)}")
-        if not isinstance(tag, str) or not tag:
-            raise ValueError(f"tag must be a non-empty string, got {tag}")
-        if not isinstance(fork, ForkName):
-            raise ValueError(f"fork must be a ForkName, got {type(fork)}")
+        self._validate_find_tag_inputs(extract_dir, tag, fork)
 
-        # Find the correct directory for the manual tag
+        # Not a manual release
         if not is_manual_release:
             return None
 
-        # Find the correct directory for the manual tag
+        # Dispatch to fork-specific implementation
         if fork == ForkName.PROTON_EM:
-            proton_em_dir = extract_dir / f"proton-{tag}"
-            if self.file_system_client.exists(
-                proton_em_dir
-            ) and self.file_system_client.is_dir(proton_em_dir):
-                return proton_em_dir
-
-            # If not found and it's Proton-EM, also try without proton- prefix
-            tag_dir_path = extract_dir / tag
-            if self.file_system_client.exists(
-                tag_dir_path
-            ) and self.file_system_client.is_dir(tag_dir_path):
-                return tag_dir_path
-
-            # If neither path exists for Proton-EM, raise an error
-            raise LinkManagementError(
-                f"Manual release directory not found: {extract_dir / tag} or {proton_em_dir}"
-            )
-
-        # For GE-Proton, try the tag as-is
+            return self._find_proton_em_tag_directory(extract_dir, tag)
+        elif fork == ForkName.CACHYOS:
+            return self._find_cachyos_tag_directory(extract_dir, tag)
         elif fork == ForkName.GE_PROTON:
-            tag_dir_path = extract_dir / tag
-            if self.file_system_client.exists(
-                tag_dir_path
-            ) and self.file_system_client.is_dir(tag_dir_path):
-                return tag_dir_path
-
-            # If path doesn't exist for GE-Proton, raise an error
-            raise LinkManagementError(
-                f"Manual release directory not found: {tag_dir_path}"
-            )
-
+            return self._find_ge_proton_tag_directory(extract_dir, tag)
         else:
-            # This should not happen with proper ForkName enum, but added for safety
             raise ValueError(f"Unsupported fork: {fork}")
 
     def _get_tag_name(self, entry: Path, fork: ForkName) -> str:
         """Get the tag name from the directory entry, handling Proton-EM prefix."""
         if fork == ForkName.PROTON_EM and entry.name.startswith("proton-"):
             return entry.name[7:]  # Remove "proton-" prefix
+        elif fork == ForkName.CACHYOS and entry.name.startswith("proton-"):
+            # Remove "proton-" prefix and "-x86_64" suffix if present
+            name = entry.name[7:]  # Remove "proton-" prefix
+            if name.endswith("-x86_64"):
+                name = name[:-7]  # Remove "-x86_64" suffix
+            return name
         else:
             return entry.name
 
@@ -151,11 +239,26 @@ class LinkManager:
         if fork == ForkName.PROTON_EM and tag_name.startswith("GE-Proton"):
             # Skip GE-Proton directories when processing Proton-EM
             return True
+        elif fork == ForkName.CACHYOS and tag_name.startswith("GE-Proton"):
+            # Skip GE-Proton directories when processing CachyOS
+            return True
         elif fork == ForkName.GE_PROTON and (
             tag_name.startswith("EM-")
             or (tag_name.startswith("proton-") and "EM-" in tag_name)
         ):
             # Skip Proton-EM directories when processing GE-Proton
+            return True
+        elif fork == ForkName.GE_PROTON and (
+            tag_name.startswith("cachyos-")
+            or (tag_name.startswith("proton-") and "cachyos" in tag_name.lower())
+        ):
+            # Skip CachyOS directories when processing GE-Proton
+            return True
+        elif fork == ForkName.PROTON_EM and (
+            tag_name.startswith("cachyos-")
+            or (tag_name.startswith("proton-") and "cachyos" in tag_name.lower())
+        ):
+            # Skip CachyOS directories when processing Proton-EM
             return True
         return False
 
@@ -174,6 +277,15 @@ class LinkManager:
                 return bool(
                     re.match(em_pattern1, entry.name)
                     or re.match(em_pattern2, entry.name)
+                )
+            case ForkName.CACHYOS:
+                # CachyOS directories should match pattern: proton-cachyos-{major}.{minor}-{date}-slr-x86_64
+                # or cachyos-{major}.{minor}-{date}-slr (with or without -x86_64 suffix)
+                cachyos_pattern1 = r"^proton-cachyos-\d+\.\d+-\d+-slr(-x86_64)?$"
+                cachyos_pattern2 = r"^cachyos-\d+\.\d+-\d+-slr$"
+                return bool(
+                    re.match(cachyos_pattern1, entry.name)
+                    or re.match(cachyos_pattern2, entry.name)
                 )
 
     def find_version_candidates(
@@ -456,13 +568,21 @@ class LinkManager:
         """Determine the correct release path, considering Proton-EM format."""
         release_path = extract_dir / tag
 
-        # Also handle Proton-EM format with "proton-" prefix
-        if fork == ForkName.PROTON_EM:
-            proton_em_path = extract_dir / f"proton-{tag}"
+        # Also handle Proton-EM and CachyOS format with "proton-" prefix
+        if fork in (ForkName.PROTON_EM, ForkName.CACHYOS):
+            proton_prefixed_path = extract_dir / f"proton-{tag}"
             if not self.file_system_client.exists(
                 release_path
-            ) and self.file_system_client.exists(proton_em_path):
-                release_path = proton_em_path
+            ) and self.file_system_client.exists(proton_prefixed_path):
+                release_path = proton_prefixed_path
+
+            # For CachyOS, also check with -x86_64 suffix
+            if fork == ForkName.CACHYOS:
+                cachyos_path = extract_dir / f"proton-{tag}-x86_64"
+                if not self.file_system_client.exists(
+                    release_path
+                ) and self.file_system_client.exists(cachyos_path):
+                    release_path = cachyos_path
 
         return release_path
 
@@ -556,39 +676,69 @@ class LinkManager:
         """Get the symlink names for the fork."""
         return self.get_link_names_for_fork(extract_dir, fork)
 
+    def _get_expected_manual_release_path(
+        self, extract_dir: Path, tag: str, fork: ForkName
+    ) -> Path:
+        """Get the expected path for a manual release directory.
+
+        Args:
+            extract_dir: Base extraction directory
+            tag: Release tag
+            fork: Proton fork name
+
+        Returns:
+            Expected path for the manual release directory
+        """
+        if fork == ForkName.GE_PROTON:
+            return extract_dir / tag
+        elif fork == ForkName.CACHYOS:
+            # CachyOS uses "proton-" prefix and "-x86_64" suffix
+            return extract_dir / f"proton-{tag}-x86_64"
+        else:
+            # Proton-EM uses "proton-" prefix
+            return extract_dir / f"proton-{tag}"
+
+    def _log_manual_release_warning(self, expected_path: Path) -> None:
+        """Log a warning when expected manual release directory is not found.
+
+        Args:
+            expected_path: The expected directory path that was not found
+        """
+        logger.warning("Expected extracted directory does not exist: %s", expected_path)
+
     def _handle_manual_release_directory(
         self, extract_dir: Path, tag: str, fork: ForkName, is_manual_release: bool
     ) -> Optional[Path]:
-        """Handle manual release by finding the tag directory."""
+        """Handle manual release by finding the tag directory.
+
+        Args:
+            extract_dir: Directory to search for the tag directory
+            tag: The release tag to find
+            fork: The Proton fork name
+            is_manual_release: Whether this is a manual release
+
+        Returns:
+            Path to the found directory, or None if not found
+        """
+        if not is_manual_release:
+            return self.find_tag_directory(extract_dir, tag, fork, is_manual_release)
+
         try:
             tag_dir = self.find_tag_directory(extract_dir, tag, fork, is_manual_release)
         except LinkManagementError:
-            # If it's a manual release and no directory is found, log warning and return None
-            if is_manual_release:
-                expected_path = (
-                    extract_dir / tag
-                    if fork == ForkName.GE_PROTON
-                    else extract_dir / f"proton-{tag}"
-                )
-                logger.warning(
-                    "Expected extracted directory does not exist: %s", expected_path
-                )
-                return None
-            else:
-                # If not manual release, re-raise the exception
-                raise
-
-        # If it's a manual release and no directory is found, log warning and return
-        if is_manual_release and tag_dir is None:
-            expected_path = (
-                extract_dir / tag
-                if fork == ForkName.GE_PROTON
-                else extract_dir / f"proton-{tag}"
+            expected_path = self._get_expected_manual_release_path(
+                extract_dir, tag, fork
             )
-            logger.warning(
-                "Expected extracted directory does not exist: %s", expected_path
-            )
+            self._log_manual_release_warning(expected_path)
             return None
+
+        if tag_dir is None:
+            expected_path = self._get_expected_manual_release_path(
+                extract_dir, tag, fork
+            )
+            self._log_manual_release_warning(expected_path)
+            return None
+
         return tag_dir
 
     def _deduplicate_candidates(
@@ -656,6 +806,78 @@ class LinkManager:
         top_3: VersionCandidateList = candidates[:3]
         return top_3
 
+    def _get_top_3_candidates(
+        self,
+        extract_dir: Path,
+        tag: str,
+        fork: ForkName,
+        is_manual_release: bool,
+        tag_dir: Optional[Path],
+    ) -> Optional[VersionCandidateList]:
+        """Get the top 3 version candidates for symlinks.
+
+        Returns:
+            List of top 3 (version, path) tuples, or None if no candidates found
+        """
+        candidates = self.find_version_candidates(extract_dir, fork)
+        if not candidates:
+            return None
+
+        candidates = self._deduplicate_candidates(candidates)
+
+        if is_manual_release and tag_dir is not None:
+            top_3 = self._handle_manual_release_candidates(
+                tag, fork, candidates, tag_dir
+            )
+        else:
+            top_3 = self._handle_regular_release_candidates(candidates)
+
+        if not top_3:
+            return None
+
+        return top_3
+
+    def _build_expected_link_mapping(
+        self,
+        link_names: tuple[Path, Path, Path],
+        top_3: VersionCandidateList,
+    ) -> dict[str, str]:
+        """Build expected link mapping from link names and top 3 candidates.
+
+        Returns:
+            Dict mapping link name to expected target path
+        """
+        expected_links: dict[str, str] = {}
+        for link_name, (version, target_path) in zip(link_names, top_3):
+            expected_links[link_name.name] = str(target_path)
+        return expected_links
+
+    def _compare_link_targets(
+        self,
+        current_links: dict[str, str | None],
+        expected_links: dict[str, str],
+    ) -> bool:
+        """Compare current vs expected link targets.
+
+        Returns:
+            True if all links match expected targets, False otherwise
+        """
+        for link_name, expected_target in expected_links.items():
+            current_target = current_links.get(link_name)
+
+            if current_target is None:
+                return False
+
+            try:
+                expected_path = Path(expected_target).resolve()
+                current_path = Path(current_target).resolve()
+                if expected_path != current_path:
+                    return False
+            except OSError:
+                return False
+
+        return True
+
     def are_links_up_to_date(
         self,
         extract_dir: Path,
@@ -679,66 +901,31 @@ class LinkManager:
             True if links are already correct, False if they need updating
         """
         main, fb1, fb2 = self._get_link_names(extract_dir, fork)
+        link_names = (main, fb1, fb2)
 
-        # For manual releases, first check if the target directory exists
+        # For manual releases, check if target directory exists
         tag_dir = self._handle_manual_release_directory(
             extract_dir, tag, fork, is_manual_release
         )
 
-        # If it was manual release and no directory found, consider links out of date
         if is_manual_release and tag_dir is None:
             return False
 
-        # Find all version candidates
-        candidates = self.find_version_candidates(extract_dir, fork)
-
-        if not candidates:  # no versions found
-            return False
-
-        # Remove duplicate versions, preferring standard naming
-        candidates = self._deduplicate_candidates(candidates)
-
-        # Handle different logic for manual vs regular releases
-        if is_manual_release and tag_dir is not None:
-            top_3 = self._handle_manual_release_candidates(
-                tag, fork, candidates, tag_dir
-            )
-        else:
-            top_3 = self._handle_regular_release_candidates(candidates)
-
-        # If no top versions found, links need updating
-        if not top_3:
+        # Get top 3 candidates
+        top_3 = self._get_top_3_candidates(
+            extract_dir, tag, fork, is_manual_release, tag_dir
+        )
+        if top_3 is None:
             return False
 
         # Get current link status
         current_links = self.list_links(extract_dir, fork)
 
-        # Create expected link mapping
-        expected_links = {}
-        link_names = [main, fb1, fb2]
-        for i, (link_name, (version, target_path)) in enumerate(zip(link_names, top_3)):
-            expected_links[link_name.name] = str(target_path)
+        # Build expected mapping
+        expected_links = self._build_expected_link_mapping(link_names, top_3)
 
-        # Compare current vs expected links
-        for link_name, expected_target in expected_links.items():
-            current_target = current_links.get(link_name)
-
-            # If link doesn't exist or target is None, it needs updating
-            if current_target is None:
-                return False
-
-            # Compare targets (normalize paths for comparison)
-            try:
-                expected_path = Path(expected_target).resolve()
-                current_path = Path(current_target).resolve()
-                if expected_path != current_path:
-                    return False
-            except OSError:
-                # If we can't resolve paths, assume they need updating
-                return False
-
-        # All links match expected targets
-        return True
+        # Compare current vs expected
+        return self._compare_link_targets(current_links, expected_links)
 
     def manage_proton_links(
         self,

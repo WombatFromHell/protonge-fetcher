@@ -143,37 +143,88 @@ class GitHubReleaseFetcher:
         """Get the expected unpack directories based on fork type."""
         unpacked = extract_dir / release_tag
         if fork == ForkName.PROTON_EM:
-            unpacked_for_em = extract_dir / f"proton-{release_tag}"
-            return unpacked, unpacked_for_em
+            unpacked_with_prefix = extract_dir / f"proton-{release_tag}"
+            return unpacked, unpacked_with_prefix
+        elif fork == ForkName.CACHYOS:
+            # CachyOS archives extract to directory with -x86_64 suffix
+            # e.g., tag 'cachyos-10.0-20260207-slr' extracts to 'proton-cachyos-10.0-20260207-slr-x86_64'
+            unpacked_with_prefix = extract_dir / f"proton-{release_tag}-x86_64"
+            return unpacked, unpacked_with_prefix
         else:
             return unpacked, None
+
+    def _check_proton_em_directory(
+        self, unpacked: Path, unpacked_for_em: Path | None
+    ) -> ExistenceCheckResult:
+        """Check if Proton-EM directory exists (with or without prefix).
+
+        Args:
+            unpacked: Standard path (without proton- prefix)
+            unpacked_for_em: Path with proton- prefix
+
+        Returns:
+            Tuple of (exists, actual_path)
+        """
+        if unpacked_for_em and unpacked_for_em.exists() and unpacked_for_em.is_dir():
+            return True, unpacked_for_em
+        if unpacked.exists() and unpacked.is_dir():
+            return True, unpacked
+        return False, None
+
+    def _check_cachyos_directory(
+        self, unpacked: Path, unpacked_with_prefix: Path | None
+    ) -> ExistenceCheckResult:
+        """Check if CachyOS directory exists (with or without prefix).
+
+        Args:
+            unpacked: Standard path (without proton- prefix)
+            unpacked_with_prefix: Path with proton- prefix
+
+        Returns:
+            Tuple of (exists, actual_path)
+        """
+        if (
+            unpacked_with_prefix
+            and unpacked_with_prefix.exists()
+            and unpacked_with_prefix.is_dir()
+        ):
+            return True, unpacked_with_prefix
+        if unpacked.exists() and unpacked.is_dir():
+            return True, unpacked
+        return False, None
+
+    def _check_ge_proton_directory(self, unpacked: Path) -> ExistenceCheckResult:
+        """Check if GE-Proton directory exists.
+
+        Args:
+            unpacked: Path to check
+
+        Returns:
+            Tuple of (exists, actual_path)
+        """
+        if unpacked.exists() and unpacked.is_dir():
+            return True, unpacked
+        return False, None
 
     def _check_existing_directory(
         self, unpacked: Path, unpacked_for_em: Path | None, fork: ForkName
     ) -> ExistenceCheckResult:
-        """Check if the unpacked directory already exists and return the actual path."""
-        directory_exists = False
-        actual_directory = None
+        """Check if the unpacked directory already exists and return the actual path.
 
+        Args:
+            unpacked: Standard path (without proton- prefix)
+            unpacked_for_em: Path with proton- prefix (for Proton-EM and CachyOS)
+            fork: Proton fork name
+
+        Returns:
+            Tuple of (exists, actual_path)
+        """
         if fork == ForkName.PROTON_EM:
-            # For Proton-EM, check both possible names: tag name directly or with "proton-" prefix
-            if (
-                unpacked_for_em
-                and unpacked_for_em.exists()
-                and unpacked_for_em.is_dir()
-            ):
-                directory_exists = True
-                actual_directory = unpacked_for_em
-            elif unpacked.exists() and unpacked.is_dir():
-                directory_exists = True
-                actual_directory = unpacked
+            return self._check_proton_em_directory(unpacked, unpacked_for_em)
+        elif fork == ForkName.CACHYOS:
+            return self._check_cachyos_directory(unpacked, unpacked_for_em)
         else:
-            # For GE-Proton, only check with tag name directly
-            if unpacked.exists() and unpacked.is_dir():
-                directory_exists = True
-                actual_directory = unpacked
-
-        return directory_exists, actual_directory
+            return self._check_ge_proton_directory(unpacked)
 
     def _handle_existing_directory(
         self,
@@ -339,6 +390,14 @@ class GitHubReleaseFetcher:
             if proton_em_path.exists() and proton_em_path.is_dir():
                 unpacked = proton_em_path
                 logger.info(f"Unpacked directory exists after extraction: {unpacked}")
+            # For CachyOS, check if directory with "proton-" prefix and "-x86_64" suffix exists
+            elif fork == ForkName.CACHYOS:
+                cachyos_path = extract_dir / f"proton-{release_tag}-x86_64"
+                if cachyos_path.exists() and cachyos_path.is_dir():
+                    unpacked = cachyos_path
+                    logger.info(
+                        f"Unpacked directory exists after extraction: {unpacked}"
+                    )
 
         # Manage symbolic links
         self.link_manager.manage_proton_links(
