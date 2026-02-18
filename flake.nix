@@ -2,7 +2,7 @@
   description = "ProtonFetcher - Reproducible Python zipapp build environment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -27,11 +27,20 @@
 
           buildInputs = [
             python
-            pkgs.zip # Deterministic zip archive creation
-            pkgs.rsync # File copying with exclusion patterns
-            pkgs.gnused # GNU sed for in-place editing
-            pkgs.coreutils # touch, sha256sum, date, etc.
-            pkgs.gnutar # GNU tar (fallback)
+            pkgs.uv
+            pkgs.zip
+            pkgs.rsync
+            pkgs.gnused
+            pkgs.gnugrep
+            pkgs.coreutils
+            pkgs.gnutar
+            pkgs.which
+            pkgs.gawk
+            pkgs.jq
+            pkgs.util-linux # provides readlink, blockdev, etc.
+            pkgs.git # git commands in shell hooks
+            pkgs.less # pager
+            pkgs.findutils # find, locate, updatedb
           ];
 
           shellHook = ''
