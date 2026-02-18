@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Union
 
+from .__version__ import __version__
 from .common import DEFAULT_FORK, ForkName
 from .exceptions import ProtonFetcherError
 from .github_fetcher import GitHubReleaseFetcher
@@ -84,7 +85,14 @@ def _validate_mutually_exclusive_args(args: argparse.Namespace) -> None:
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Fetch and extract the latest ProtonGE release asset."
+        description=f"ProtonFetcher v{__version__} - Fetch and extract the latest ProtonGE release asset."
+    )
+    parser.add_argument(
+        "--version",
+        "-V",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="show program's version number and exit",
     )
     parser.add_argument(
         "--extract-dir",

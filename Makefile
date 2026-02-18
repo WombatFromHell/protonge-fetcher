@@ -5,10 +5,15 @@ ENTRY = entry:main
 ARTIFACT = protonfetcher.pyz
 OUT = $(BUILD_DIR)/$(ARTIFACT)
 
+# Extract version from pyproject.toml
+VERSION = $(shell $(PY) -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+
 build:
 	mkdir -p $(BUILD_DIR)
+	sed -i 's/__version__ = "DEV"/__version__ = "$(VERSION)"/' $(SRC_DIR)/protonfetcher/__version__.py
 	$(PY) -m zipapp $(SRC_DIR) -o $(OUT) -m $(ENTRY) -p "/usr/bin/env python3"
 	chmod +x $(OUT)
+	sed -i 's/__version__ = "$(VERSION)"/__version__ = "DEV"/' $(SRC_DIR)/protonfetcher/__version__.py
 
 install: $(OUT)
 	@if [ -d "$$HOME/.local/bin/scripts/" ]; then \
