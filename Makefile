@@ -6,15 +6,18 @@ ENTRY_FUNC = main
 ARTIFACT = protonfetcher.pyz
 OUT = $(BUILD_DIR)/$(ARTIFACT)
 CHECKSUM = $(BUILD_DIR)/$(ARTIFACT).sha256sum
+VERSION_FILE = $(SRC_DIR)/protonfetcher/__version__.py
 
-# Fixed epoch for reproducible builds: 2015-10-21 00:00:00 UTC
-# Can be overridden via environment or use git commit timestamp:
-# SOURCE_DATE_EPOCH ?= $(shell git log -1 --pretty=%ct 2>/dev/null || echo 1445385600)
-SOURCE_DATE_EPOCH ?= 1445385600
+# Fixed epoch for reproducible builds:
+# Default to Jan 1, 1980 00:00:00 UTC (315532800) if not set
+SOURCE_DATE_EPOCH ?= 315532800
 export SOURCE_DATE_EPOCH
 
 # Extract version from pyproject.toml
-VERSION = $(shell $(PY) -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+VERSION := $(shell grep '^version = ' pyproject.toml | cut -d'"' -f2)
+
+# Human-readable timestamp for logging
+TIMESTAMP := $(shell date -d "@$(SOURCE_DATE_EPOCH)" -u +%Y-%m-%dT%H:%M:%SZ)
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \
@@ -22,50 +25,51 @@ clean:
 	$(BUILD_DIR) \
 	.pytest_cache \
 	.ruff_cache \
+	.direnv \
 	.coverage
 
 build: clean
-	@echo "Building deterministic zipapp..."
+	@echo "Building $(ARTIFACT) (version $(VERSION))"
+	@echo "SOURCE_DATE_EPOCH: $(SOURCE_DATE_EPOCH) ($(TIMESTAMP))"
+	mkdir -p $(BUILD_DIR)
 
-	# Clean previous build artifacts
-	rm -rf $(BUILD_DIR)/staging $(BUILD_DIR)/archive.zip
+	# Inject version into constants.py
+	sed -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' $(VERSION_FILE)
+
+	# Create staging directory for deterministic build
+	# Copy contents of src/ directly into staging (not src/ itself)
+	rm -rf $(BUILD_DIR)/staging
 	mkdir -p $(BUILD_DIR)/staging
+	cp -r $(SRC_DIR)/* $(BUILD_DIR)/staging/
 
-	# Copy source to staging, excluding __pycache__ and other non-source files
-	rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
-		$(SRC_DIR)/ $(BUILD_DIR)/staging/
+	# Create __main__.py for zipapp entry point (overwrite if exists)
+	echo "from entry import main; main()" > $(BUILD_DIR)/staging/__main__.py
 
-	# Update version in staging
-	sed -i 's/__version__ = "DEV"/__version__ = "$(VERSION)"/' $(BUILD_DIR)/staging/protonfetcher/__version__.py
+	# Normalize timestamps on ALL files in staging directory
+	# This is crucial for bitwise determinism
+	find $(BUILD_DIR)/staging -exec touch -d "@$(SOURCE_DATE_EPOCH)" {} \;
 
-	# Create __main__.py for zipapp entry point (replaces -m flag)
-	echo "from $(ENTRY_MODULE) import $(ENTRY_FUNC); $(ENTRY_FUNC)()" > $(BUILD_DIR)/staging/__main__.py
-
-	# Normalize timestamps on ALL files in staging
-	find $(BUILD_DIR)/staging -print0 | xargs -0r touch --no-dereference --date="@$(SOURCE_DATE_EPOCH)"
-
-	# Create zip archive deterministically:
-	# -X: strip extra file attributes (uid/gid/extended attrs)
-	# -r: recursive
+	# Create the zip archive deterministically
+	# -X: strip extra file attributes
 	# -q: quiet mode
-	# Files are piped in sorted order for deterministic file ordering
+	# Using 'find | LC_ALL=C sort' ensures consistent file ordering across systems
 	cd $(BUILD_DIR)/staging && \
 		find . -type f | LC_ALL=C sort | \
-		zip -X -r -q -@ ../archive.zip
+		zip -X -q -@ ../archive.zip
 
-	# Prepend shebang to create executable .pyz
-	printf '#!/usr/bin/env python3\n' > $(OUT)
+	# Prepend shebang to create executable pyz
+	echo '#!/usr/bin/env python3' > $(OUT)
 	cat $(BUILD_DIR)/archive.zip >> $(OUT)
 	chmod +x $(OUT)
 
-	# Generate SHA256 checksum file for verification
+	# Generate SHA256 checksum file for verification (basename only for portability)
 	cd $(BUILD_DIR) && sha256sum $(ARTIFACT) > $(ARTIFACT).sha256sum
 
-	# Cleanup intermediate files
+	# Cleanup staging and intermediate files
 	rm -rf $(BUILD_DIR)/staging $(BUILD_DIR)/archive.zip
 
 	@echo "Built: $(OUT)"
-	@echo "Checksum: $$(cat $(BUILD_DIR)/$(ARTIFACT).sha256sum)"
+	@echo "SHA256: $$(cat $(OUT).sha256sum | cut -d' ' -f1)"
 
 install: $(OUT)
 	@cd $(BUILD_DIR) && sha256sum -c $(ARTIFACT).sha256sum

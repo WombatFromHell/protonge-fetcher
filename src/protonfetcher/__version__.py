@@ -3,7 +3,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 # This value is replaced at build time by the Makefile
-__version__ = "DEV"
+__version__ = "1.2.1"
 
 
 def _get_version() -> str:
@@ -16,4 +16,4 @@ def _get_version() -> str:
         return "unknown"
 
 
-__version__ = _get_version()
+__version__ = "1.2.1"

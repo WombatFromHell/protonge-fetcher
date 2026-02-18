@@ -6,11 +6,20 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        python = pkgs.python313;  # Match .python-version
+        # Read Python version from .python-version file (strip newline and dot)
+        pythonVersion = builtins.replaceStrings [ "\n" ] [ "" ] (builtins.readFile ./.python-version);
+        pythonAttr = builtins.replaceStrings [ "." ] [ "" ] pythonVersion;
+        python = pkgs."python${pythonAttr}";
       in
       {
         devShells.default = pkgs.mkShell {
@@ -18,11 +27,11 @@
 
           buildInputs = [
             python
-            pkgs.zip          # Deterministic zip archive creation
-            pkgs.rsync        # File copying with exclusion patterns
-            pkgs.gnused       # GNU sed for in-place editing
-            pkgs.coreutils    # touch, sha256sum, date, etc.
-            pkgs.gnutar       # GNU tar (fallback)
+            pkgs.zip # Deterministic zip archive creation
+            pkgs.rsync # File copying with exclusion patterns
+            pkgs.gnused # GNU sed for in-place editing
+            pkgs.coreutils # touch, sha256sum, date, etc.
+            pkgs.gnutar # GNU tar (fallback)
           ];
 
           shellHook = ''
