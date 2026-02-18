@@ -91,7 +91,7 @@ def parse_arguments() -> argparse.Namespace:
         "--version",
         "-V",
         action="version",
-        version=f"%(prog)s {__version__}",
+        version=f"%(prog)s v{__version__}",
         help="show program's version number and exit",
     )
     parser.add_argument(
