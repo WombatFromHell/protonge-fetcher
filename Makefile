@@ -26,15 +26,15 @@ test:
 	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch
 
 lint:
-	ty check ./src ./tests; \
-		ruff check ./src ./tests --fix
+	uv run ty check ./src ./tests; \
+		uv run ruff check ./src ./tests --fix
 
 prettier:
-	prettier --cache -c -w *.md
+	uv run prettier -c -w *.md
 
 format: prettier
-	ruff check --select I ./src ./tests --fix; \
-	ruff format ./src ./tests
+	uv run ruff check --select I ./src ./tests --fix; \
+	uv run ruff format ./src ./tests
 
 radon:
 	uv run radon cc ./src -a

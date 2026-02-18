@@ -4,9 +4,14 @@ version = "1.2.0"
 description = "Grab the latest Proton-GE release from GitHub and keep 'compatibilitytools.d' up-to-date"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
+
+[dependency-groups]
+dev = [
+  "prettier>=0.0.7",
   "pytest>=8.4.2",
   "pytest-cov>=7.0.0",
   "pytest-mock>=3.15.1",
   "radon>=6.0.1",
+  "ruff>=0.15.1",
+  "ty>=0.0.17",
 ]
