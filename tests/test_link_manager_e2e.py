@@ -622,6 +622,169 @@ class TestListLinks:
         assert links_info["GE-Proton"] is None
 
 
+class TestHasManagedLinks:
+    """Test the has_managed_links method."""
+
+    def test_has_managed_links_returns_true_when_symlinks_exist(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test has_managed_links returns True when symlinks exist."""
+        # Arrange
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Create a version directory
+        version_dir = extract_dir / "GE-Proton10-20"
+        version_dir.mkdir()
+
+        # Create a symlink
+        main_link = extract_dir / "GE-Proton"
+        main_link.symlink_to(version_dir)
+
+        fs = FileSystemClient()
+        link_manager = LinkManager(fs)
+
+        # Act
+        result = link_manager.has_managed_links(
+            extract_dir=extract_dir,
+            fork=ForkName.GE_PROTON,
+        )
+
+        # Assert
+        assert result is True
+
+    def test_has_managed_links_returns_false_when_no_symlinks(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test has_managed_links returns False when no symlinks exist."""
+        # Arrange
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Create version directories but no symlinks
+        for name in ["GE-Proton10-20", "GE-Proton10-19"]:
+            (extract_dir / name).mkdir()
+
+        fs = FileSystemClient()
+        link_manager = LinkManager(fs)
+
+        # Act
+        result = link_manager.has_managed_links(
+            extract_dir=extract_dir,
+            fork=ForkName.GE_PROTON,
+        )
+
+        # Assert
+        assert result is False
+
+    def test_has_managed_links_returns_false_when_empty_directory(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test has_managed_links returns False when directory is empty."""
+        # Arrange
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        fs = FileSystemClient()
+        link_manager = LinkManager(fs)
+
+        # Act
+        result = link_manager.has_managed_links(
+            extract_dir=extract_dir,
+            fork=ForkName.GE_PROTON,
+        )
+
+        # Assert
+        assert result is False
+
+    def test_has_managed_links_proton_em(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test has_managed_links for Proton-EM."""
+        # Arrange
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        version_dir = extract_dir / "EM-10.0-30"
+        version_dir.mkdir()
+
+        # Create Proton-EM symlink
+        main_link = extract_dir / "Proton-EM"
+        main_link.symlink_to(version_dir)
+
+        fs = FileSystemClient()
+        link_manager = LinkManager(fs)
+
+        # Act
+        result = link_manager.has_managed_links(
+            extract_dir=extract_dir,
+            fork=ForkName.PROTON_EM,
+        )
+
+        # Assert
+        assert result is True
+
+    def test_has_managed_links_cachyos(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test has_managed_links for CachyOS."""
+        # Arrange
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        version_dir = extract_dir / "cachyos-10.0-20260207-slr"
+        version_dir.mkdir()
+
+        # Create CachyOS symlink
+        main_link = extract_dir / "CachyOS"
+        main_link.symlink_to(version_dir)
+
+        fs = FileSystemClient()
+        link_manager = LinkManager(fs)
+
+        # Act
+        result = link_manager.has_managed_links(
+            extract_dir=extract_dir,
+            fork=ForkName.CACHYOS,
+        )
+
+        # Assert
+        assert result is True
+
+    def test_has_managed_links_returns_true_for_any_symlink(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test has_managed_links returns True if any of the three symlinks exist."""
+        # Arrange
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        version_dir = extract_dir / "GE-Proton10-18"
+        version_dir.mkdir()
+
+        # Create only the fallback2 symlink
+        fb2_link = extract_dir / "GE-Proton-Fallback2"
+        fb2_link.symlink_to(version_dir)
+
+        fs = FileSystemClient()
+        link_manager = LinkManager(fs)
+
+        # Act
+        result = link_manager.has_managed_links(
+            extract_dir=extract_dir,
+            fork=ForkName.GE_PROTON,
+        )
+
+        # Assert
+        assert result is True
+
+
 class TestManageProtonLinks:
     """Test the complete manage_proton_links workflow."""
 

@@ -15,6 +15,7 @@ from .common import (
 from .exceptions import NetworkError
 from .release_manager import ReleaseManager
 from .spinner import Spinner
+from .utils import format_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -128,12 +129,12 @@ class AssetDownloader:
 
             if local_size == remote_size:
                 logger.info(
-                    f"Local asset {out_path} already exists with matching size ({local_size} bytes), skipping download"
+                    f"Local asset {out_path} already exists with matching size ({format_bytes(local_size)}), skipping download"
                 )
                 return out_path
             else:
                 logger.info(
-                    f"Local size ({local_size} bytes) differs from remote size ({remote_size} bytes), downloading new version"
+                    f"Local size ({format_bytes(local_size)}) differs from remote size ({format_bytes(remote_size)}), downloading new version"
                 )
         else:
             logger.info("Local asset does not exist, proceeding with download")

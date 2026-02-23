@@ -61,6 +61,9 @@ Main orchestrator with methods for:
 - Release discovery (`list_recent_releases`)
 - Environment validation and process flow management
 - Relink operations (`relink_fork`)
+- Dry-run preview (`fetch_and_extract` with `dry_run=True`)
+- Multi-fork updates (`update_all_managed_forks`)
+- Update checking (`check_for_updates`)
 
 ### ReleaseManager
 
@@ -101,6 +104,7 @@ Manages symbolic links with intelligent version sorting and optimized link manag
 - **Fork-specific link naming**: Handles GE-Proton, Proton-EM, and CachyOS conventions
 - **Manual release handling**: Special logic for manually specified releases
 - **Intelligent link status checking**: `are_links_up_to_date()` method prevents unnecessary symlink recreation
+- **Managed link detection**: `has_managed_links()` method checks if fork has active symlinks
 - **Performance optimization**: Only updates symlinks when targets change or links are broken
 - **Error handling**: Comprehensive error handling for filesystem operations
 - **Directory validation**: Pattern-based validation to exclude non-Proton directories
@@ -129,7 +133,7 @@ Provides command-line functionality:
 
 - Argument parsing with validation
 - Logging configuration
-- Operation flow handling (fetch, list, remove, links, relink)
+- Operation flow handling (fetch, list, remove, links, relink, dry-run)
 - Fork name conversion and validation
 
 ## CLI Interface
@@ -139,21 +143,23 @@ Provides command-line functionality:
 - `--extract-dir`, `-x`: Extract directory (default: `~/.steam/steam/compatibilitytools.d/`)
 - `--output`, `-o`: Download directory (default: `~/Downloads/`)
 - `--release`, `-r`: Specify release tag instead of latest
-- `--fork`, `-f`: Fork to download (GE-Proton, Proton-EM, CachyOS)
+- `--fork`, `-f`: Fork to download (GE-Proton, Proton-EM, CachyOS). Use `-f` without a value to update all forks with managed links
 - `--list`, `-l`: List recent releases
 - `--ls`: List managed symbolic links (default behavior)
 - `--rm`: Remove specific release and update links
 - `--relink`: Force recreation of symbolic links without downloading or extracting (requires `--fork`)
+- `--check`, `-c`: Check if newer releases are available for managed forks (script-friendly output, requires `--fork`)
+- `--dry-run`, `-n`: Show what would be downloaded/extracted/linked without making any changes
 - `--debug`: Enable debug logging
 
 ### Validation and Constraints
 
-- Mutually exclusive flags: `--list`/`--release`, `--ls`/`--release`, `--rm`/`--release`, `--relink`/`--release`
+- Mutually exclusive flags: `--list`/`--release`, `--ls`/`--release`, `--rm`/`--release`, `--relink`/`--release`, `--check`/(`--list`, `--ls`, `--rm`, `--relink`, `--dry-run`), `--dry-run`/(`--list`, `--ls`, `--rm`, `--relink`)
 - `--relink` requires explicit `--fork` flag
 - Path validation and directory permission checks
 - Fork name validation using ForkName enum
 - Environment validation for required tools (curl)
-- Directory writability validation
+- Directory writability validation (skipped in dry-run mode)
 
 ### Operation Flows
 
@@ -163,6 +169,44 @@ Provides command-line functionality:
 - **Remove release (`--rm`)**: Removes specified release directory and updates symlinks
 - **Relink (`--relink`)**: Forces recreation of symbolic links without downloading or extracting
 - **Fetch and extract (with `--fork` or `--release`)**: Downloads and extracts the specified release
+- **Update all managed forks (`-f` without value)**: Updates all forks that have managed symbolic links
+
+#### Multi-Fork Update Mode
+
+The `-f` flag can be used without a value to update all forks that have managed symbolic links:
+
+- **Purpose**: Automatically update all Proton forks that are already in use (have managed symlinks)
+- **Use Case**: Keep all installed Proton forks up-to-date with a single command
+- **Behavior**:
+  - Scans all supported forks (GE-Proton, Proton-EM, CachyOS)
+  - For each fork, checks if any managed symlinks exist
+  - For forks with managed symlinks, fetches and installs the latest release
+  - Skips forks without managed symlinks
+- **Output**: Shows which forks were updated and which were skipped
+
+**Example Usage:**
+
+```bash
+# Update all forks with managed links
+protonfetcher -f
+
+# Update all forks with managed links (long form)
+protonfetcher --fork
+
+# Preview which forks would be updated
+protonfetcher -f -n
+```
+
+**Example Output:**
+
+```
+Updating all forks with managed links...
+Skipping GE-Proton: no managed links found
+Updating Proton-EM: fetching latest release...
+Successfully updated Proton-EM
+Skipping CachyOS: no managed links found
+Successfully updated 1 fork(s)
+```
 
 #### Relink Operation
 
@@ -188,6 +232,115 @@ protonfetcher --relink --fork CachyOS
 ```
 
 This provides users with fine-grained control over symlink management while preserving the automatic optimization for normal operations.
+
+#### Dry-Run Operation
+
+The `--dry-run`/`-n` flag provides a way to preview what would be done without making any changes:
+
+- **Purpose**: Show what would be downloaded, extracted, and linked without performing any filesystem modifications
+- **Use Case**: Verify which release would be fetched and what symlinks would be created before committing to the operation
+- **Behavior**:
+  - Resolves the release tag (or uses the specified one)
+  - Finds the appropriate asset for the fork
+  - Gets the remote asset size for display
+  - Logs what would be downloaded, extracted, and linked
+  - Makes no filesystem changes (no download, no extraction, no symlink creation)
+- **Mutual Exclusivity**: Cannot be used with `--list`, `--ls`, `--rm`, or `--relink` (these are already informational or non-destructive)
+- **Output**: Prints "Dry run complete" instead of "Success"
+
+**Example Usage:**
+
+```bash
+# Preview what would be downloaded for latest GE-Proton
+protonfetcher --fork GE-Proton --dry-run
+
+# Short form
+protonfetcher -f GE-Proton -n
+
+# Preview specific release
+protonfetcher --fork Proton-EM --release EM-10.0-30 --dry-run
+```
+
+**Example Output:**
+
+```
+Would download: GE-Proton10-20.tar.gz (123456789 bytes)
+  URL: https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton10-20/GE-Proton10-20.tar.gz
+  Destination: ~/Downloads/GE-Proton10-20.tar.gz
+Would extract to: ~/.steam/steam/compatibilitytools.d/GE-Proton10-20
+Would create/update symlinks:
+  GE-Proton -> GE-Proton10-20
+  GE-Proton-Fallback -> GE-Proton10-19
+  GE-Proton-Fallback2 -> GE-Proton10-18
+Dry run complete - no changes made
+```
+
+This allows users to verify the tool's behavior before making changes to their system.
+
+#### Check Mode Operation
+
+The `--check`/`-c` flag provides a script-friendly way to check for updates:
+
+- **Purpose**: Check if newer ProtonGE releases are available without downloading
+- **Use Case**: Timer scripts, automation, update notifications
+- **Behavior**:
+  - Used alone (`-c`): Check all forks with managed links
+  - With `--fork <name>` (`-c -f <name>`): Check specific fork
+  - With `-f` without value (`-c -f`): Check all forks with managed links
+  - Prints `"New release available for {fork}: {latest_tag}!"` for each available update
+  - Prints `"{fork}: up-to-date"` when no updates available
+  - Exit code 0 if updates available, 1 if none available
+- **Mutual Exclusivity**: Cannot be used with `--list`, `--ls`, `--rm`, `--relink`, or `--dry-run`
+
+**Example Usage:**
+
+```bash
+# Check all managed forks (standalone)
+protonfetcher --check
+
+# Check all managed forks (short form)
+protonfetcher -c
+
+# Check single fork
+protonfetcher --fork GE-Proton --check
+
+# Check all managed forks (explicit -f)
+protonfetcher -f -c
+
+# In a script
+if protonfetcher -c; then
+    protonfetcher -f  # Update all managed forks
+fi
+```
+
+**Example Output:**
+
+```bash
+# When updates available:
+$ protonfetcher -c
+New release available for GE-Proton: GE-Proton10-21!
+New release available for Proton-EM: EM-10.0-31!
+
+# When up-to-date (exit code 1):
+$ protonfetcher -c
+GE-Proton: up-to-date
+Proton-EM: up-to-date
+CachyOS: up-to-date
+$ echo $?
+1
+
+# Check specific fork:
+$ protonfetcher -f GE-Proton -c
+New release available for GE-Proton: GE-Proton10-21!
+
+# Check specific fork (up-to-date):
+$ protonfetcher -f GE-Proton -c
+GE-Proton: up-to-date
+$ echo $?
+1
+```
+
+This allows automation scripts to efficiently check for updates and trigger downloads only when needed.
 
 ## Fork Configuration System
 

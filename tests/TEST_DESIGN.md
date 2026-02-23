@@ -137,7 +137,9 @@ uv run pytest --cov=protonfetcher --cov-report=term-missing
 ```
 tests/
 ├── conftest.py              # Shared fixtures and configuration
+├── test_check_mode.py       # Check mode (--check/-c) tests
 ├── test_cli_e2e.py          # CLI interface tests
+├── test_dry_run.py          # Dry-run mode tests
 ├── test_extraction_workflow_e2e.py  # Archive extraction tests
 ├── test_github_fetcher_e2e.py       # Main orchestrator tests
 ├── test_link_manager_e2e.py         # Symlink management tests
@@ -154,7 +156,7 @@ tests/
 | **Unit Tests** | Component-specific method testing | Embedded in e2e files |
 | **Integration Tests** | Component interaction testing | `test_network_integration.py` |
 | **End-to-End Tests** | Complete workflow testing | `test_*_e2e.py` files |
-| **CLI Tests** | Command-line interface testing | `test_cli_e2e.py` |
+| **CLI Tests** | Command-line interface testing | `test_cli_e2e.py`, `test_dry_run.py`, `test_check_mode.py` |
 
 ## Core Testing Principles
 

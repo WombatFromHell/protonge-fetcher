@@ -668,3 +668,157 @@ class TestDebugLogging:
 
         # Assert: Debug logging should be configured
         assert caplog.at_level("DEBUG")
+
+
+class TestForkFlagWithoutValue:
+    """Test the -f flag without a value (multi-fork update mode)."""
+
+    def test_f_flag_without_value_calls_update_all_managed_forks(
+        self,
+        mocker: Any,
+        capsys: pytest.CaptureFixture[str],
+        temp_environment: dict[str, Path],
+    ) -> None:
+        """Test that -f without a value calls update_all_managed_forks."""
+        # Arrange
+        mock_fetcher = mocker.MagicMock()
+        mock_fetcher.update_all_managed_forks.return_value = {
+            ForkName.GE_PROTON: temp_environment["extract_dir"] / "GE-Proton10-20"
+        }
+
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.sys.argv",
+            [
+                "protonfetcher",
+                "-f",
+                "-x",
+                str(temp_environment["extract_dir"]),
+                "-o",
+                str(temp_environment["output_dir"]),
+            ],
+        )
+
+        # Act
+        main()
+
+        # Assert
+        mock_fetcher.update_all_managed_forks.assert_called_once()
+        captured = capsys.readouterr()
+        assert "Successfully updated" in captured.out
+
+    def test_f_flag_without_value_dry_run(
+        self,
+        mocker: Any,
+        capsys: pytest.CaptureFixture[str],
+        caplog: pytest.LogCaptureFixture,
+        temp_environment: dict[str, Path],
+    ) -> None:
+        """Test that -f without value and -n shows dry run message."""
+        # Arrange
+        mock_fetcher = mocker.MagicMock()
+        mock_fetcher.update_all_managed_forks.return_value = {
+            ForkName.GE_PROTON: None  # Dry run returns None
+        }
+
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.sys.argv",
+            [
+                "protonfetcher",
+                "-f",
+                "-n",
+                "-x",
+                str(temp_environment["extract_dir"]),
+                "-o",
+                str(temp_environment["output_dir"]),
+            ],
+        )
+
+        # Act
+        with caplog.at_level("INFO"):
+            main()
+
+        # Assert
+        captured = capsys.readouterr()
+        # Verify update_all_managed_forks was called with dry_run=True
+        mock_fetcher.update_all_managed_forks.assert_called_once()
+        call_kwargs = mock_fetcher.update_all_managed_forks.call_args.kwargs
+        assert call_kwargs.get("dry_run") is True
+        # No Success message for dry run
+        assert "Success" not in captured.out
+
+    def test_f_flag_with_specific_fork_value(
+        self,
+        mocker: Any,
+        capsys: pytest.CaptureFixture[str],
+        temp_environment: dict[str, Path],
+    ) -> None:
+        """Test that -f with a specific fork value uses fetch_and_extract."""
+        # Arrange
+        mock_fetcher = mocker.MagicMock()
+        mock_fetcher.fetch_and_extract.return_value = (
+            temp_environment["extract_dir"] / "GE-Proton10-20"
+        )
+
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.sys.argv",
+            [
+                "protonfetcher",
+                "-f",
+                "GE-Proton",
+                "-x",
+                str(temp_environment["extract_dir"]),
+                "-o",
+                str(temp_environment["output_dir"]),
+            ],
+        )
+
+        # Act
+        main()
+
+        # Assert
+        mock_fetcher.fetch_and_extract.assert_called_once()
+        mock_fetcher.update_all_managed_forks.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Success" in captured.out
+
+    def test_f_flag_without_value_no_managed_forks(
+        self,
+        mocker: Any,
+        capsys: pytest.CaptureFixture[str],
+        temp_environment: dict[str, Path],
+    ) -> None:
+        """Test that -f without value when no forks are managed shows appropriate message."""
+        # Arrange
+        mock_fetcher = mocker.MagicMock()
+        mock_fetcher.update_all_managed_forks.return_value = {}
+
+        mocker.patch(
+            "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.sys.argv",
+            [
+                "protonfetcher",
+                "-f",
+                "-x",
+                str(temp_environment["extract_dir"]),
+                "-o",
+                str(temp_environment["output_dir"]),
+            ],
+        )
+
+        # Act
+        main()
+
+        # Assert
+        captured = capsys.readouterr()
+        assert "No forks were updated" in captured.out

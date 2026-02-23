@@ -22,6 +22,7 @@ from .filesystem import FileSystemClient
 from .link_manager import LinkManager
 from .network import NetworkClient
 from .release_manager import ReleaseManager
+from .utils import format_bytes, parse_version
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +365,168 @@ class GitHubReleaseFetcher:
         logger.info(f"Successfully relinked {fork} symlinks")
         return True
 
+    def update_all_managed_forks(
+        self,
+        output_dir: Path,
+        extract_dir: Path,
+        dry_run: bool = False,
+    ) -> dict[ForkName, Path | None]:
+        """
+        Update all forks that have managed symbolic links.
+
+        This method checks which forks have managed symlinks and fetches the
+        latest release for each of them.
+
+        Args:
+            output_dir: Directory to download the asset to
+            extract_dir: Directory to extract to
+            dry_run: If True, only show what would be done without making changes
+
+        Returns:
+            Dictionary mapping ForkName to the extracted directory path (or None in dry-run mode)
+
+        Raises:
+            ProtonFetcherError: If fetching or extraction fails for any fork
+        """
+        from .common import FORKS
+
+        self._validate_environment()
+
+        # In dry-run mode, skip environment validation for writability
+        if not dry_run:
+            self._ensure_directories_writable(output_dir, extract_dir)
+
+        results: dict[ForkName, Path | None] = {}
+        first_fork = True
+
+        for fork in FORKS.keys():
+            # Check if this fork has managed links
+            if not self.link_manager.has_managed_links(extract_dir, fork):
+                logger.debug(f"Skipping {fork}: no managed links found")
+                continue
+
+            # Add newline between fork outputs for readability
+            if not first_fork:
+                print()
+            first_fork = False
+
+            logger.info(f"Updating {fork}: fetching latest release...")
+            repo = FORKS[fork].repo
+
+            try:
+                result = self.fetch_and_extract(
+                    repo,
+                    output_dir,
+                    extract_dir,
+                    fork=fork,
+                    dry_run=dry_run,
+                )
+                results[fork] = result
+                logger.debug(f"Successfully updated {fork}")
+            except ProtonFetcherError as e:
+                logger.error(f"Failed to update {fork}: {e}")
+                results[fork] = None
+                # Continue with other forks instead of failing entirely
+                continue
+
+        if not results:
+            logger.warning("No managed forks found to update")
+
+        return results
+
+    def _dry_run_workflow(
+        self,
+        repo: str,
+        output_dir: Path,
+        extract_dir: Path,
+        release_tag: str,
+        fork: ForkName,
+        is_manual_release: bool,
+    ) -> None:
+        """Execute dry-run workflow: show what would be done without making changes.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+            output_dir: Directory where asset would be downloaded
+            extract_dir: Directory where asset would be extracted
+            release_tag: Release tag to fetch
+            fork: The ProtonGE fork name
+            is_manual_release: Whether this is a manually specified release
+
+        Returns:
+            None (dry-run mode doesn't return a path)
+        """
+        # Get expected asset name
+        try:
+            asset_name = self.release_manager.find_asset_by_name(
+                repo, release_tag, fork
+            )
+        except ProtonFetcherError as e:
+            raise ProtonFetcherError(
+                f"Could not find asset for release {release_tag} in {repo}: {e}"
+            )
+
+        if asset_name is None:
+            raise ProtonFetcherError(
+                f"Could not find asset for release {release_tag} in {repo}"
+            )
+
+        # Get remote asset size for display
+        try:
+            remote_size = self.release_manager.get_remote_asset_size(
+                repo, release_tag, asset_name
+            )
+            size_str = f" ({format_bytes(remote_size)})"
+        except Exception:
+            size_str = ""
+
+        # Show what would be downloaded
+        download_url = (
+            f"https://github.com/{repo}/releases/download/{release_tag}/{asset_name}"
+        )
+        logger.info(f"Would download: {asset_name}{size_str}")
+        logger.info(f"  URL: {download_url}")
+        logger.info(f"  Destination: {output_dir / asset_name}")
+
+        # Show what would be extracted
+        unpacked = extract_dir / release_tag
+        if fork == ForkName.PROTON_EM:
+            unpacked = extract_dir / f"proton-{release_tag}"
+        elif fork == ForkName.CACHYOS:
+            unpacked = extract_dir / f"proton-{release_tag}-x86_64"
+
+        logger.info(f"Would extract to: {unpacked}")
+
+        # Show what symlinks would be created
+        # Get version candidates to determine what links would point to
+        candidates = self.link_manager.find_version_candidates(extract_dir, fork)
+
+        # Add the new release to candidates for symlink planning
+        candidates.append((parse_version(release_tag, fork), unpacked))
+
+        # Remove duplicates and sort
+        candidates = self.link_manager._deduplicate_candidates(candidates)
+        candidates.sort(key=lambda t: t[0], reverse=True)
+
+        # Take top 3 versions for symlinks
+        top_3 = candidates[:3]
+
+        if top_3:
+            main, fb1, fb2 = self.link_manager.get_link_names_for_fork(
+                extract_dir, fork
+            )
+            logger.info("Would create/update symlinks:")
+
+            if len(top_3) >= 1:
+                logger.info(f"  {main.name} -> {top_3[0][1].name}")
+            if len(top_3) >= 2:
+                logger.info(f"  {fb1.name} -> {top_3[1][1].name}")
+            if len(top_3) >= 3:
+                logger.info(f"  {fb2.name} -> {top_3[2][1].name}")
+
+        logger.info("Dry run complete - no changes made")
+        return None
+
     def _extract_and_manage_links(
         self,
         archive_path: Path,
@@ -415,6 +578,7 @@ class GitHubReleaseFetcher:
         fork: ForkName = ForkName.GE_PROTON,
         show_progress: bool = True,
         show_file_details: bool = True,
+        dry_run: bool = False,
     ) -> Path | None:
         """Fetch and extract a Proton release.
 
@@ -426,20 +590,30 @@ class GitHubReleaseFetcher:
             fork: The ProtonGE fork name for appropriate asset naming
             show_progress: Whether to show the progress bar
             show_file_details: Whether to show file details during extraction
+            dry_run: If True, only show what would be done without making changes
 
         Returns:
-            Path to the extract directory
+            Path to the extract directory, or None in dry-run mode
 
         Raises:
             FetchError: If fetching or extraction fails
         """
         self._validate_environment()
-        self._ensure_directories_writable(output_dir, extract_dir)
+
+        # In dry-run mode, skip environment validation for writability
+        if not dry_run:
+            self._ensure_directories_writable(output_dir, extract_dir)
 
         # Track whether this is a manual release
         is_manual_release = release_tag is not None
 
         release_tag = self._determine_release_tag(repo, release_tag)
+
+        # In dry-run mode, show what would be done
+        if dry_run:
+            return self._dry_run_workflow(
+                repo, output_dir, extract_dir, release_tag, fork, is_manual_release
+            )
 
         # Check if unpacked directory already exists
         unpacked, unpacked_for_em = self._get_expected_directories(
@@ -474,3 +648,36 @@ class GitHubReleaseFetcher:
             show_progress,
             show_file_details,
         )
+
+    def check_for_updates(self, extract_dir: Path, fork: ForkName) -> str | None:
+        """
+        Check if a newer release is available for the specified fork.
+
+        This method checks the currently installed versions for the specified
+        fork and determines if a newer release is available on GitHub.
+
+        Args:
+            extract_dir: Directory containing Proton installations
+            fork: The Proton fork name
+
+        Returns:
+            Latest release tag if update available, None otherwise
+
+        Raises:
+            ProtonFetcherError: If checking for updates fails
+        """
+        from .common import FORKS
+
+        # Get currently installed versions
+        installed_versions = self.link_manager.get_installed_versions(extract_dir, fork)
+
+        # Get the repo for this fork
+        repo = FORKS[fork].repo
+
+        # Check for newer release
+        try:
+            return self.release_manager.check_for_newer_release(
+                repo, installed_versions, fork
+            )
+        except Exception as e:
+            raise ProtonFetcherError(f"Failed to check for updates for {fork}: {e}")

@@ -173,12 +173,12 @@ def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
 
 
 def format_bytes(bytes_value: int) -> str:
-    """Format bytes into a human-readable string."""
+    """Format bytes into a human-readable string using binary units (KiB, MiB, GiB)."""
     if bytes_value < 1024:
         return f"{bytes_value} B"
     elif bytes_value < 1024 * 1024:
-        return f"{bytes_value / 1024:.2f} KB"
+        return f"{bytes_value / 1024:.2f} KiB"
     elif bytes_value < 1024 * 1024 * 1024:
-        return f"{bytes_value / (1024 * 1024):.2f} MB"
+        return f"{bytes_value / (1024 * 1024):.2f} MiB"
     else:
-        return f"{bytes_value / (1024 * 1024 * 1024):.2f} GB"
+        return f"{bytes_value / (1024 * 1024 * 1024):.2f} GiB"

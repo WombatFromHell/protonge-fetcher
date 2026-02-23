@@ -562,6 +562,29 @@ class LinkManager:
 
         return links_info
 
+    def has_managed_links(
+        self, extract_dir: Path, fork: ForkName = ForkName.GE_PROTON
+    ) -> bool:
+        """
+        Check if a fork has any managed symbolic links.
+
+        Args:
+            extract_dir: Directory to search for links
+            fork: The Proton fork name to determine link naming
+
+        Returns:
+            True if at least one managed symlink exists for the fork, False otherwise
+        """
+        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
+
+        for link in [main, fb1, fb2]:
+            if self.file_system_client.exists(
+                link
+            ) and self.file_system_client.is_symlink(link):
+                return True
+
+        return False
+
     def _determine_release_path(
         self, extract_dir: Path, tag: str, fork: ForkName
     ) -> Path:
@@ -973,3 +996,33 @@ class LinkManager:
         # Create the symlinks
         self.create_symlinks(main, fb1, fb2, top_3)
         return True
+
+    def get_installed_versions(self, extract_dir: Path, fork: ForkName) -> list[str]:
+        """
+        Get list of currently installed version tags for a fork.
+
+        This method finds all version directories for the specified fork
+        and returns their tag names, sorted by version (newest first).
+
+        Args:
+            extract_dir: Directory to search for installed versions
+            fork: The Proton fork name
+
+        Returns:
+            List of version tag strings, sorted newest first
+        """
+        # Find all version candidates
+        candidates = self.find_version_candidates(extract_dir, fork)
+
+        if not candidates:
+            return []
+
+        # Remove duplicates, preferring standard naming
+        candidates = self._deduplicate_candidates(candidates)
+
+        # Sort by version (newest first)
+        candidates.sort(key=lambda t: t[0], reverse=True)
+
+        # Extract tag names from directory paths
+        # Use the directory name as the tag
+        return [path.name for _, path in candidates]

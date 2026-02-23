@@ -20,9 +20,10 @@ from .common import (
     NetworkClientProtocol,
     ProcessResult,
     ReleaseTagsList,
+    VersionTuple,
 )
 from .exceptions import NetworkError
-from .utils import get_proton_asset_name
+from .utils import format_bytes, get_proton_asset_name, parse_version
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class ReleaseManager:
 
         # Extract tag from URL
         tag = self._extract_tag_from_url(redirected_url)
-        logger.info(f"Found latest tag: {tag}")
+        logger.debug(f"Found latest tag: {tag}")
         return tag
 
     def _get_cache_key(self, repo: str, tag: str, asset_name: str) -> str:
@@ -267,7 +268,7 @@ class ReleaseManager:
         if fork == ForkName.CACHYOS and tag is not None:
             cachyos_asset = self._find_asset_for_cachyos(assets, tag)
             if cachyos_asset:
-                logger.info(f"Found CachyOS x86_64 asset via API: {cachyos_asset}")
+                logger.debug(f"Found CachyOS x86_64 asset via API: {cachyos_asset}")
                 return cachyos_asset
 
         matching_assets = self._find_matching_assets(assets, expected_extension)
@@ -275,13 +276,13 @@ class ReleaseManager:
         if matching_assets:
             # Return the name of the first matching asset
             asset_name = matching_assets[0]["name"]
-            logger.info(f"Found asset via API: {asset_name}")
+            logger.debug(f"Found asset via API: {asset_name}")
             return asset_name
         else:
             # If no matching extension assets found, use the first available asset as fallback
             if assets:
                 asset_name = assets[0]["name"]
-                logger.info(
+                logger.debug(
                     f"Found asset (non-matching extension) via API: {asset_name}"
                 )
                 return asset_name
@@ -291,7 +292,7 @@ class ReleaseManager:
     def _try_api_approach(self, repo: str, tag: str, fork: ForkName) -> str:
         """Try to find the asset using the GitHub API."""
         api_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
-        logger.info(f"Fetching release info from API: {api_url}")
+        logger.debug(f"Fetching release info from API: {api_url}")
 
         headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -468,7 +469,7 @@ class ReleaseManager:
 
                     size = self._extract_size_from_response(result.stdout)
                     if size:
-                        logger.info(f"Remote asset size: {size} bytes")
+                        logger.debug(f"Remote asset size: {format_bytes(size)}")
                         # Cache the result for future use (if not testing)
                         if not in_test:
                             self._cache_asset_size(repo, tag, asset_name, size)
@@ -492,7 +493,9 @@ class ReleaseManager:
 
         cached_size = self._get_cached_asset_size(repo, tag, asset_name)
         if cached_size is not None:
-            logger.debug(f"Using cached size for {asset_name}: {cached_size} bytes")
+            logger.debug(
+                f"Using cached size for {asset_name}: {format_bytes(cached_size)}"
+            )
             return cached_size
         return None
 
@@ -532,7 +535,7 @@ class ReleaseManager:
         """
         size = self._extract_size_from_response(result.stdout)
         if size:
-            logger.info(f"Remote asset size: {size} bytes")
+            logger.debug(f"Remote asset size: {format_bytes(size)}")
             if not self._is_in_test():
                 self._cache_asset_size(repo, tag, asset_name, size)
             return size
@@ -563,7 +566,7 @@ class ReleaseManager:
             return cached_size
 
         url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
-        logger.info(f"Getting remote asset size from: {url}")
+        logger.debug(f"Getting remote asset size from: {url}")
 
         try:
             # Fetch size with HEAD request
@@ -628,3 +631,64 @@ class ReleaseManager:
                 tag_names.append(release["tag_name"])
 
         return tag_names[:20]
+
+    def check_for_newer_release(
+        self, repo: str, current_versions: list[str], fork: ForkName
+    ) -> str | None:
+        """
+        Check if a newer release is available than the currently installed versions.
+
+        This method fetches the latest release tag from GitHub and compares it
+        with the currently installed versions to determine if an update is available.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+            current_versions: List of currently installed version tags
+            fork: The Proton fork name for version parsing
+
+        Returns:
+            Latest release tag if newer than installed versions, None otherwise
+        """
+        if not current_versions:
+            # No versions installed, latest is "newer"
+            return self.fetch_latest_tag(repo)
+
+        # Fetch the latest tag
+        latest_tag = self.fetch_latest_tag(repo)
+
+        # Parse the latest version
+        try:
+            latest_version = parse_version(latest_tag, fork)
+        except (ValueError, IndexError):
+            # If we can't parse the latest version, assume no update
+            logger.debug(f"Could not parse latest version: {latest_tag}")
+            return None
+
+        # Parse all current versions and find the newest one
+        current_parsed: list[tuple[VersionTuple, str]] = []
+        for tag in current_versions:
+            try:
+                parsed = parse_version(tag, fork)
+                current_parsed.append((parsed, tag))
+            except (ValueError, IndexError):
+                # Skip versions we can't parse
+                logger.debug(f"Could not parse current version: {tag}")
+                continue
+
+        if not current_parsed:
+            # No valid current versions, return latest
+            return latest_tag
+
+        # Find the newest current version
+        current_parsed.sort(key=lambda t: t[0], reverse=True)
+        newest_current_version = current_parsed[0][0]
+
+        # Compare: if latest > newest current, return latest
+        if latest_version > newest_current_version:
+            logger.info(
+                f"New release available: {latest_tag} (current: {current_parsed[0][1]})"
+            )
+            return latest_tag
+
+        logger.debug(f"Already up-to-date: {latest_tag} <= {current_parsed[0][1]}")
+        return None

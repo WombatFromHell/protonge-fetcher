@@ -706,3 +706,212 @@ class TestEnvironmentValidation:
                 show_progress=False,
                 show_file_details=False,
             )
+
+
+class TestUpdateAllManagedForks:
+    """Test the update_all_managed_forks method."""
+
+    def test_update_all_managed_forks_updates_forks_with_links(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test that update_all_managed_forks only updates forks with managed links."""
+        # Arrange
+        output_dir = Path("/mock/Downloads")
+        extract_dir = Path("/mock/compatibilitytools.d")
+
+        # Mock has_managed_links to return True for GE-Proton, False for others
+        def mock_has_managed_links(extract_dir: Path, fork: ForkName) -> bool:
+            return fork == ForkName.GE_PROTON
+
+        # Mock filesystem
+        mock_filesystem_client.exists.return_value = True
+        mock_filesystem_client.is_dir.return_value = True
+        mock_filesystem_client.is_symlink.return_value = False
+
+        # Mock network responses for GE-Proton
+        import json
+
+        mock_get_response = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(
+                {"assets": [{"name": "GE-Proton10-20.tar.gz", "size": 1048576}]}
+            ),
+            stderr="",
+        )
+        mock_network_client.get.return_value = mock_get_response
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Content-Length: 1048576", stderr=""
+        )
+        mock_network_client.download.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=mock_filesystem_client,
+        )
+        mocker.patch.object(
+            fetcher.link_manager,
+            "has_managed_links",
+            side_effect=mock_has_managed_links,
+        )
+
+        # Act
+        results = fetcher.update_all_managed_forks(output_dir, extract_dir)
+
+        # Assert
+        assert ForkName.GE_PROTON in results
+        assert ForkName.PROTON_EM not in results  # Skipped
+        assert ForkName.CACHYOS not in results  # Skipped
+
+    def test_update_all_managed_forks_dry_run(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test update_all_managed_forks in dry-run mode."""
+        # Arrange
+        output_dir = Path("/mock/Downloads")
+        extract_dir = Path("/mock/compatibilitytools.d")
+
+        # Mock has_managed_links to return True for all forks
+        def mock_has_managed_links(extract_dir: Path, fork: ForkName) -> bool:
+            return True
+
+        # Mock filesystem
+        mock_filesystem_client.exists.return_value = True
+        mock_filesystem_client.is_dir.return_value = True
+
+        # Mock network responses
+        import json
+
+        mock_get_response = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(
+                {"assets": [{"name": "GE-Proton10-20.tar.gz", "size": 1048576}]}
+            ),
+            stderr="",
+        )
+        mock_network_client.get.return_value = mock_get_response
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Content-Length: 1048576", stderr=""
+        )
+
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=mock_filesystem_client,
+        )
+        mocker.patch.object(
+            fetcher.link_manager,
+            "has_managed_links",
+            side_effect=mock_has_managed_links,
+        )
+
+        # Act
+        results = fetcher.update_all_managed_forks(
+            output_dir, extract_dir, dry_run=True
+        )
+
+        # Assert - dry run should return None for all forks
+        assert ForkName.GE_PROTON in results
+        assert results[ForkName.GE_PROTON] is None
+
+    def test_update_all_managed_forks_no_managed_links(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test update_all_managed_forks when no forks have managed links."""
+        # Arrange
+        output_dir = Path("/mock/Downloads")
+        extract_dir = Path("/mock/compatibilitytools.d")
+
+        # Mock has_managed_links to return False for all forks
+        def mock_has_managed_links(extract_dir: Path, fork: ForkName) -> bool:
+            return False
+
+        mock_filesystem_client.exists.return_value = True
+        mock_filesystem_client.is_dir.return_value = True
+
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=mock_filesystem_client,
+        )
+        mocker.patch.object(
+            fetcher.link_manager,
+            "has_managed_links",
+            side_effect=mock_has_managed_links,
+        )
+
+        # Act
+        results = fetcher.update_all_managed_forks(output_dir, extract_dir)
+
+        # Assert
+        assert len(results) == 0
+        assert "No managed forks found to update" in caplog.text
+
+    def test_update_all_managed_forks_handles_errors_gracefully(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test that update_all_managed_forks continues on errors."""
+        # Arrange
+        output_dir = Path("/mock/Downloads")
+        extract_dir = Path("/mock/compatibilitytools.d")
+
+        # Mock has_managed_links to return True for all forks
+        def mock_has_managed_links(extract_dir: Path, fork: ForkName) -> bool:
+            return True
+
+        # Mock network to fail for GE-Proton but succeed for others
+        import json
+
+        def mock_get(url: str, **kwargs: Any) -> subprocess.CompletedProcess:
+            if "proton-ge-custom" in url:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr="Error"
+                )
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=json.dumps({"assets": [{"name": "test.tar.xz", "size": 1024}]}),
+                stderr="",
+            )
+
+        mock_network_client.get.side_effect = mock_get
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Content-Length: 1024", stderr=""
+        )
+        mock_network_client.download.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        mock_filesystem_client.exists.return_value = True
+        mock_filesystem_client.is_dir.return_value = True
+
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=mock_filesystem_client,
+        )
+        mocker.patch.object(
+            fetcher.link_manager,
+            "has_managed_links",
+            side_effect=mock_has_managed_links,
+        )
+
+        # Act
+        results = fetcher.update_all_managed_forks(output_dir, extract_dir)
+
+        # Assert - should have results for all forks, GE-Proton should be None
+        assert ForkName.GE_PROTON in results
+        # Other forks may have results or None depending on error handling
