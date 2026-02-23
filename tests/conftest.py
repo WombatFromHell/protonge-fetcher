@@ -1,15 +1,14 @@
 """
 Shared pytest configuration and fixtures for ProtonFetcher test suite.
 
-This module provides comprehensive fixtures for e2e and integration testing,
-following the protocol-based design of ProtonFetcher.
+Streamlined fixtures using factory pattern for flexibility and reduced duplication.
 """
 
 import subprocess
 import sys
 import tarfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -33,59 +32,26 @@ def test_data() -> dict[str, Any]:
     """
     Centralized test data for all test scenarios.
 
-    This fixture provides fork-specific configurations, CLI outputs, and
-    GitHub API patterns to avoid hardcoding strings in tests.
-
-    Returns:
-        Dictionary with test data organized by category:
-        - FORKS: Fork-specific configurations (repo, asset patterns, link names)
-        - CLI_OUTPUTS: Expected CLI output strings
-        - GITHUB_API: GitHub API error messages and patterns
-
     Usage:
         def test_fork_configuration(test_data: dict[str, Any], fork: ForkName):
             repo = test_data["FORKS"][fork]["repo"]
-            expected_tag = test_data["FORKS"][fork]["example_tag"]
-            assert repo == "GloriousEggroll/proton-ge-custom"
-
-        def test_asset_pattern(test_data, fork):
-            pattern = test_data["FORKS"][fork]["asset_pattern"]
-            assert pattern.endswith(test_data["FORKS"][fork]["archive_format"])
     """
     return {
         "FORKS": {
             ForkName.GE_PROTON: {
                 "repo": "GloriousEggroll/proton-ge-custom",
-                "asset_pattern": "GE-Proton*.tar.gz",
-                "link_names": (
-                    "GE-Proton",
-                    "GE-Proton-Fallback",
-                    "GE-Proton-Fallback2",
-                ),
                 "example_tag": "GE-Proton10-20",
                 "example_asset": "GE-Proton10-20.tar.gz",
                 "archive_format": ".tar.gz",
             },
             ForkName.PROTON_EM: {
                 "repo": "Etaash-mathamsetty/Proton",
-                "asset_pattern": "proton-EM*.tar.xz",
-                "link_names": (
-                    "Proton-EM",
-                    "Proton-EM-Fallback",
-                    "Proton-EM-Fallback2",
-                ),
                 "example_tag": "EM-10.0-30",
                 "example_asset": "proton-EM-10.0-30.tar.xz",
                 "archive_format": ".tar.xz",
             },
             ForkName.CACHYOS: {
                 "repo": "CachyOS/proton-cachyos",
-                "asset_pattern": "proton-cachyos*.tar.xz",
-                "link_names": (
-                    "CachyOS",
-                    "CachyOS-Fallback",
-                    "CachyOS-Fallback2",
-                ),
                 "example_tag": "cachyos-10.0-20260207-slr",
                 "example_asset": "proton-cachyos-10.0-20260207-slr-x86_64.tar.xz",
                 "archive_format": ".tar.xz",
@@ -103,267 +69,248 @@ def test_data() -> dict[str, Any]:
 
 
 # =============================================================================
-# NetworkClientProtocol Fixtures
+# Factory Fixtures (Network, Filesystem, Archive)
 # =============================================================================
 
 
 @pytest.fixture
-def mock_network_client(mocker: Any) -> Any:
+def mock_network_factory(mocker: Any) -> Callable[..., Any]:
     """
-    Create a realistic mock of NetworkClientProtocol.
+    Factory for creating configured NetworkClientProtocol mocks.
 
-    Provides realistic behavior for:
-    - HTTP GET requests (GitHub API responses)
-    - HTTP HEAD requests (redirect following, content-length)
-    - Download operations
+    Usage:
+        def test_with_custom_response(mock_network_factory):
+            mock_network = mock_network_factory(
+                get_response={"assets": [{"name": "test.tar.gz", "size": 1024}]},
+                rate_limit=False,
+            )
 
-    Returns:
-        MagicMock configured as NetworkClientProtocol
+        def test_rate_limit(mock_network_factory):
+            mock_network = mock_network_factory(rate_limit=True)
     """
-    mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-    mock_network.timeout = DEFAULT_TIMEOUT
-    mock_network.PROTOCOL_VERSION = "1.0"
 
-    # Default GET response (successful API call)
-    mock_get_response = subprocess.CompletedProcess(
-        args=[],
-        returncode=0,
-        stdout='{"assets": [{"name": "test.tar.gz", "size": 1048576}]}',
-        stderr="",
-    )
-    mock_network.get.return_value = mock_get_response
+    def _create_mock(
+        get_response: dict | str | None = None,
+        head_response: dict | str | None = None,
+        download_response: dict | None = None,
+        rate_limit: bool = False,
+        not_found: bool = False,
+        custom_returncode: int | None = None,
+    ) -> Any:
+        mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
+        mock_network.timeout = DEFAULT_TIMEOUT
 
-    # Default HEAD response (successful redirect with content-length)
-    mock_head_response = subprocess.CompletedProcess(
-        args=[],
-        returncode=0,
-        stdout="Location: https://github.com/repo/releases/download/v1.0/test.tar.gz\nContent-Length: 1048576",
-        stderr="",
-    )
-    mock_network.head.return_value = mock_head_response
+        if rate_limit:
+            mock_network.get.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout='{"message": "API rate limit exceeded"}',
+                stderr="403 Forbidden",
+            )
+        elif not_found:
+            mock_response = subprocess.CompletedProcess(
+                args=[], returncode=22, stdout="", stderr="404 Not Found"
+            )
+            mock_network.get.return_value = mock_response
+            mock_network.head.return_value = mock_response
+        else:
+            import json
 
-    # Default download response
-    mock_download_response = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout="", stderr=""
-    )
-    mock_network.download.return_value = mock_download_response
+            if get_response is None:
+                get_response = {"assets": [{"name": "test.tar.gz", "size": 1048576}]}
+            if isinstance(get_response, dict):
+                get_response = json.dumps(get_response)
 
-    return mock_network
+            mock_network.get.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=get_response, stderr=""
+            )
+
+            if head_response is None:
+                head_response = "Location: https://github.com/repo/releases/tag/v1.0"
+            if isinstance(head_response, dict):
+                head_response = "\n".join(f"{k}: {v}" for k, v in head_response.items())
+
+            mock_network.head.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=head_response, stderr=""
+            )
+
+        if download_response:
+            mock_network.download.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=download_response.get("returncode", 0),
+                stdout=download_response.get("stdout", ""),
+                stderr=download_response.get("stderr", ""),
+            )
+        else:
+            mock_network.download.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        return mock_network
+
+    return _create_mock
 
 
 @pytest.fixture
-def mock_network_with_github_redirect(mocker: Any) -> Any:
+def mock_filesystem_factory(mocker: Any, tmp_path: Path) -> Callable[..., Any]:
     """
-    Create a mock that simulates GitHub's /releases/latest redirect behavior.
+    Factory for creating configured FileSystemClientProtocol mocks.
 
-    Returns:
-        MagicMock configured with GitHub redirect response
+    Usage:
+        def test_with_custom_structure(mock_filesystem_factory):
+            mock_fs = mock_filesystem_factory(
+                exists_map={"/dir": True, "/file": True},
+                is_dir_map={"/dir": True, "/file": False},
+                read_map={"/file": b"content"},
+            )
+
+        def test_with_real_tmp(mock_filesystem_factory):
+            mock_fs = mock_filesystem_factory(use_tmp_path=True)
     """
-    mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-    mock_network.timeout = DEFAULT_TIMEOUT
 
-    # Simulate GitHub redirect from /releases/latest to specific tag
-    mock_head_response = subprocess.CompletedProcess(
-        args=[],
-        returncode=0,
-        stdout="Location: https://github.com/GloriousEggroll/proton-ge-custom/releases/tag/GE-Proton10-20",
-        stderr="",
-    )
-    mock_network.head.return_value = mock_head_response
+    def _create_mock(
+        exists_map: dict[str, bool] | None = None,
+        is_dir_map: dict[str, bool] | None = None,
+        is_symlink_map: dict[str, bool] | None = None,
+        read_map: dict[str, bytes] | None = None,
+        size_map: dict[str, int] | None = None,
+        use_tmp_path: bool = False,
+    ) -> Any:
+        mock_fs = mocker.MagicMock(spec=FileSystemClientProtocol)
+        mock_fs.PROTOCOL_VERSION = "1.0"
 
-    return mock_network
+        if use_tmp_path:
+            mock_fs.exists.side_effect = lambda p: p.exists()
+            mock_fs.is_dir.side_effect = lambda p: p.is_dir()
+            mock_fs.is_symlink.side_effect = lambda p: p.is_symlink()
+            mock_fs.read.side_effect = lambda p: p.read_bytes()
+            mock_fs.write.side_effect = lambda p, d: p.write_bytes(d)
+            mock_fs.size.side_effect = lambda p: p.stat().st_size
+            mock_fs.mtime.side_effect = lambda p: p.stat().st_mtime
+            mock_fs.mkdir.side_effect = lambda p, **kwargs: p.mkdir(**kwargs)
+            mock_fs.iterdir.side_effect = lambda p: p.iterdir()
+            mock_fs.symlink_to.side_effect = lambda p, t, **kwargs: p.symlink_to(t)
+            mock_fs.resolve.side_effect = lambda p: p.resolve()
+            mock_fs.unlink.side_effect = lambda p: p.unlink()
+            mock_fs.rmtree.side_effect = lambda p: (
+                p.rmdir() if p.is_dir() else p.unlink()
+            )
+        else:
+            # Default: return True for exists/is_dir unless explicitly overridden
+            exists_map = exists_map or {}
+            mock_fs.exists.side_effect = lambda p: exists_map.get(str(p), True)
+
+            is_dir_map = is_dir_map or {}
+            mock_fs.is_dir.side_effect = lambda p: is_dir_map.get(str(p), True)
+
+            is_symlink_map = is_symlink_map or {}
+            mock_fs.is_symlink.side_effect = lambda p: is_symlink_map.get(str(p), False)
+
+            read_map = read_map or {}
+            mock_fs.read.side_effect = lambda p: read_map.get(str(p), b"test content")
+
+            size_map = size_map or {}
+            mock_fs.size.side_effect = lambda p: size_map.get(str(p), 1048576)
+
+            mock_fs.mkdir.return_value = None
+            mock_fs.iterdir.return_value = iter([])
+            mock_fs.symlink_to.return_value = None
+            mock_fs.resolve.side_effect = lambda p: p
+            mock_fs.unlink.return_value = None
+            mock_fs.rmtree.return_value = None
+
+        return mock_fs
+
+    return _create_mock
 
 
 @pytest.fixture
-def mock_network_with_api_response(
-    mocker: Any, release_assets: list[dict[str, Any]]
-) -> Any:
+def sample_archive_factory(tmp_path: Path) -> Callable[..., Path]:
     """
-    Create a mock with specific GitHub API release assets.
+    Factory for creating sample archives.
 
-    Args:
-        release_assets: List of asset dictionaries to return
-
-    Returns:
-        MagicMock configured with specific API response
+    Usage:
+        def test_extraction(sample_archive_factory):
+            archive = sample_archive_factory(
+                format="gz",
+                tag="GE-Proton10-20",
+                files=[
+                    ("version", "GE-Proton10-20"),
+                    ("lib/libwine.so", "fake libwine"),
+                ],
+            )
     """
-    mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-    mock_network.timeout = DEFAULT_TIMEOUT
 
-    import json
+    def _create_archive(
+        format: str = "gz",
+        tag: str = "GE-Proton10-20",
+        files: list[tuple[str, str]] | None = None,
+    ) -> Path:
+        if format == "gz":
+            archive_path = tmp_path / f"{tag}.tar.gz"
+            mode = "w:gz"
+        else:
+            archive_path = tmp_path / f"proton-{tag}.tar.xz"
+            mode = "w:xz"
 
-    api_response = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout=json.dumps({"assets": release_assets}), stderr=""
-    )
-    mock_network.get.return_value = api_response
+        content_dir = tmp_path / "content" / tag
+        content_dir.mkdir(parents=True)
 
-    return mock_network
+        if files is None:
+            files = [("version", tag), ("file.txt", "test content")]
 
+        for filename, content in files:
+            file_path = content_dir / filename
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content)
 
-@pytest.fixture
-def mock_network_with_rate_limit(mocker: Any) -> Any:
-    """Create a mock that simulates GitHub API rate limiting."""
-    mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-    mock_network.timeout = DEFAULT_TIMEOUT
+        with tarfile.open(archive_path, mode) as tar:
+            tar.add(content_dir, arcname=tag)
 
-    mock_response = subprocess.CompletedProcess(
-        args=[],
-        returncode=0,
-        stdout='{"message": "API rate limit exceeded"}',
-        stderr="403 Forbidden",
-    )
-    mock_network.get.return_value = mock_response
+        return archive_path
 
-    return mock_network
-
-
-@pytest.fixture
-def mock_network_with_404(mocker: Any) -> Any:
-    """Create a mock that simulates 404 Not Found responses."""
-    mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-    mock_network.timeout = DEFAULT_TIMEOUT
-
-    mock_response = subprocess.CompletedProcess(
-        args=[],
-        returncode=22,
-        stdout="",
-        stderr="404 Not Found",
-    )
-    mock_network.get.return_value = mock_response
-    mock_network.head.return_value = mock_response
-
-    return mock_network
+    return _create_archive
 
 
 # =============================================================================
-# FileSystemClientProtocol Fixtures
+# Backward Compatibility Fixtures (use factories internally)
 # =============================================================================
 
 
 @pytest.fixture
-def mock_filesystem_client(mocker: Any) -> Any:
-    """
-    Create a realistic mock of FileSystemClientProtocol.
-
-    Provides realistic behavior for:
-    - Path existence checks
-    - Directory operations
-    - File I/O
-    - Symlink operations
-
-    Returns:
-        MagicMock configured as FileSystemClientProtocol
-    """
-    mock_fs = mocker.MagicMock(spec=FileSystemClientProtocol)
-    mock_fs.PROTOCOL_VERSION = "1.0"
-
-    # Default existence checks
-    mock_fs.exists.return_value = True
-    mock_fs.is_dir.return_value = True
-    mock_fs.is_symlink.return_value = False
-
-    # Default file operations
-    mock_fs.read.return_value = b"test content"
-    mock_fs.size.return_value = 1048576  # 1MB
-    mock_fs.mtime.return_value = 1234567890.0
-
-    # Default directory operations
-    mock_fs.mkdir.return_value = None
-    mock_fs.iterdir.return_value = iter([])
-
-    # Default symlink operations
-    mock_fs.symlink_to.return_value = None
-    mock_fs.resolve.side_effect = lambda p: p  # Return path as-is
-    mock_fs.unlink.return_value = None
-    mock_fs.rmtree.return_value = None
-
-    return mock_fs
+def mock_network_client(mock_network_factory: Callable[..., Any]) -> Any:
+    """Create a default NetworkClientProtocol mock (backward compatibility)."""
+    return mock_network_factory()
 
 
 @pytest.fixture
-def real_filesystem_client() -> Any:
-    """
-    Create a real FileSystemClient for integration tests.
-
-    Returns:
-        Actual FileSystemClient instance
-    """
-    from protonfetcher.filesystem import FileSystemClient
-
-    return FileSystemClient()
+def mock_filesystem_client(mock_filesystem_factory: Callable[..., Any]) -> Any:
+    """Create a default FileSystemClientProtocol mock (backward compatibility)."""
+    return mock_filesystem_factory()
 
 
 @pytest.fixture
-def mock_filesystem_with_directory_structure(mocker: Any, tmp_path: Path) -> Any:
-    """
-    Create a mock filesystem that tracks a temporary directory structure.
+def sample_tar_gz_archive(sample_archive_factory: Callable[..., Path]) -> Path:
+    """Create a sample .tar.gz archive (backward compatibility)."""
+    return sample_archive_factory(format="gz", tag="GE-Proton10-20")
 
-    Args:
-        mocker: pytest-mock fixture
-        tmp_path: pytest temporary path
 
-    Returns:
-        MagicMock that delegates to real tmp_path operations
-    """
-    mock_fs = mocker.MagicMock(spec=FileSystemClientProtocol)
-    mock_fs.PROTOCOL_VERSION = "1.0"
-
-    # Delegate to real tmp_path operations
-    mock_fs.exists.side_effect = lambda p: p.exists()
-    mock_fs.is_dir.side_effect = lambda p: p.is_dir()
-    mock_fs.is_symlink.side_effect = lambda p: p.is_symlink()
-    mock_fs.read.side_effect = lambda p: p.read_bytes()
-    mock_fs.write.side_effect = lambda p, d: p.write_bytes(d)
-    mock_fs.size.side_effect = lambda p: p.stat().st_size
-    mock_fs.mtime.side_effect = lambda p: p.stat().st_mtime
-    mock_fs.mkdir.side_effect = lambda p, **kwargs: p.mkdir(**kwargs)
-    mock_fs.iterdir.side_effect = lambda p: p.iterdir()
-    mock_fs.symlink_to.side_effect = lambda p, t, **kwargs: p.symlink_to(t)
-    mock_fs.resolve.side_effect = lambda p: p.resolve()
-    mock_fs.unlink.side_effect = lambda p: p.unlink()
-    mock_fs.rmtree.side_effect = lambda p: p.rmdir() if p.is_dir() else p.unlink()
-
-    return mock_fs
+@pytest.fixture
+def sample_tar_xz_archive(sample_archive_factory: Callable[..., Path]) -> Path:
+    """Create a sample .tar.xz archive (backward compatibility)."""
+    return sample_archive_factory(format="xz", tag="EM-10.0-30")
 
 
 # =============================================================================
-# Mock Data Factories
+# Data Factory Fixtures
 # =============================================================================
 
 
 @pytest.fixture
 def release_assets(request: pytest.FixtureRequest) -> list[dict[str, Any]]:
-    """
-    Factory for creating GitHub release assets.
-
-    Can be parametrized or used with indirect=True for custom asset lists.
-    Default: Returns assets for both GE-Proton and Proton-EM.
-
-    Args:
-        request: pytest request object (for parametrization)
-
-    Returns:
-        List of asset dictionaries with 'name' and 'size' keys
-
-    Usage:
-        # Direct use - returns default assets
-        def test_with_default_assets(release_assets):
-            assert len(release_assets) > 0
-
-        # Parametrized with indirect=True
-        @pytest.mark.parametrize(
-            "release_assets",
-            [[{"name": "custom.tar.gz", "size": 1024}]],
-            indirect=True,
-        )
-        def test_with_custom_assets(release_assets):
-            assert release_assets[0]["name"] == "custom.tar.gz"
-    """
-    # Check if test has parametrized assets
+    """Factory for creating GitHub release assets."""
     if hasattr(request, "param"):
         return request.param
-
-    # Default assets
     return [
         {"name": "GE-Proton10-20.tar.gz", "size": 1048576},
         {"name": "GE-Proton10-19.tar.gz", "size": 1048575},
@@ -372,34 +319,8 @@ def release_assets(request: pytest.FixtureRequest) -> list[dict[str, Any]]:
 
 
 @pytest.fixture
-def github_release_response(
-    request: pytest.FixtureRequest,
-) -> dict[str, Any]:
-    """
-    Factory for creating GitHub API release responses.
-
-    Can be parametrized with specific release data for custom scenarios.
-
-    Args:
-        request: pytest request object (for parametrization)
-
-    Returns:
-        Dictionary with 'tag_name', 'name', and 'assets' keys
-
-    Usage:
-        # Direct use - returns default response
-        def test_with_default_response(github_release_response):
-            assert "tag_name" in github_release_response
-
-        # Parametrized with custom data
-        @pytest.mark.parametrize(
-            "github_release_response",
-            [{"tag_name": "custom-tag", "name": "Custom Release"}],
-            indirect=True,
-        )
-        def test_with_custom_response(github_release_response):
-            assert github_release_response["tag_name"] == "custom-tag"
-    """
+def github_release_response(request: pytest.FixtureRequest) -> dict[str, Any]:
+    """Factory for GitHub API release responses."""
     params = getattr(request, "param", {})
     return {
         "tag_name": params.get("tag_name", "GE-Proton10-20"),
@@ -416,35 +337,9 @@ def github_release_response(
 
 @pytest.fixture
 def recent_releases(request: pytest.FixtureRequest) -> list[str]:
-    """
-    Factory for creating list of recent release tags.
-
-    Can be parametrized for custom release lists.
-    Default: Returns 5 recent GE-Proton releases.
-
-    Args:
-        request: pytest request object (for parametrization)
-
-    Returns:
-        List of release tag strings
-
-    Usage:
-        # Direct use - returns default releases
-        def test_with_default_releases(recent_releases):
-            assert len(recent_releases) == 5
-
-        # Parametrized with custom list
-        @pytest.mark.parametrize(
-            "recent_releases",
-            [["custom-1", "custom-2"]],
-            indirect=True,
-        )
-        def test_with_custom_releases(recent_releases):
-            assert recent_releases[0] == "custom-1"
-    """
+    """Factory for recent release tag lists."""
     if hasattr(request, "param"):
         return request.param
-
     return [
         "GE-Proton10-20",
         "GE-Proton10-19",
@@ -455,169 +350,54 @@ def recent_releases(request: pytest.FixtureRequest) -> list[str]:
 
 
 # =============================================================================
-# Archive Factories
-# =============================================================================
-
-
-@pytest.fixture
-def sample_tar_gz_archive(tmp_path: Path) -> Path:
-    """
-    Create a sample .tar.gz archive for testing extraction.
-
-    Contains a realistic ProtonGE-like directory structure.
-
-    Args:
-        tmp_path: pytest temporary path
-
-    Returns:
-        Path to the created archive
-    """
-    archive_path = tmp_path / "GE-Proton10-20.tar.gz"
-
-    # Create temporary content directory
-    content_dir = tmp_path / "content" / "GE-Proton10-20"
-    content_dir.mkdir(parents=True)
-
-    # Create sample files
-    (content_dir / "version").write_text("GE-Proton10-20")
-    (content_dir / "file.txt").write_text("test content")
-
-    # Create subdirectory structure similar to real ProtonGE
-    lib_dir = content_dir / "lib"
-    lib_dir.mkdir()
-    (lib_dir / "libwine.so").write_text("fake libwine")
-
-    # Create the archive - add the directory itself, not the parent
-    with tarfile.open(archive_path, "w:gz") as tar:
-        tar.add(content_dir, arcname="GE-Proton10-20")
-
-    return archive_path
-
-
-@pytest.fixture
-def sample_tar_xz_archive(tmp_path: Path) -> Path:
-    """
-    Create a sample .tar.xz archive for testing extraction.
-
-    Contains a realistic Proton-EM-like directory structure.
-
-    Args:
-        tmp_path: pytest temporary path
-
-    Returns:
-        Path to the created archive
-    """
-    archive_path = tmp_path / "proton-EM-10.0-30.tar.xz"
-
-    # Create temporary content directory
-    content_dir = tmp_path / "content" / "proton-EM-10.0-30"
-    content_dir.mkdir(parents=True)
-
-    # Create sample files
-    (content_dir / "version").write_text("EM-10.0-30")
-    (content_dir / "file.txt").write_text("test content")
-
-    # Create subdirectory structure
-    lib_dir = content_dir / "lib"
-    lib_dir.mkdir()
-    (lib_dir / "libwine.so").write_text("fake libwine")
-
-    # Create the archive - add the directory itself, not the parent
-    with tarfile.open(archive_path, "w:xz") as tar:
-        tar.add(content_dir, arcname="proton-EM-10.0-30")
-
-    return archive_path
-
-
-@pytest.fixture
-def sample_archive(
-    request: pytest.FixtureRequest,
-    tmp_path: Path,
-    sample_tar_gz_archive: Path,
-    sample_tar_xz_archive: Path,
-) -> Path:
-    """
-    Parametrized fixture for sample archives.
-
-    Use with @pytest.mark.parametrize("sample_archive", ["gz", "xz"])
-
-    Args:
-        request: pytest request object
-        tmp_path: pytest temporary path
-        sample_tar_gz_archive: .tar.gz archive fixture
-        sample_tar_xz_archive: .tar.xz archive fixture
-
-    Returns:
-        Path to the requested archive type
-    """
-    archive_type = getattr(request, "param", "gz")
-    if archive_type == "xz":
-        return sample_tar_xz_archive
-    return sample_tar_gz_archive
-
-
-# =============================================================================
 # Directory Structure Fixtures
 # =============================================================================
 
 
 @pytest.fixture
 def temp_environment(tmp_path: Path) -> dict[str, Path]:
-    """
-    Create temporary directories for testing download/extraction workflows.
-
-    Args:
-        tmp_path: pytest temporary path
-
-    Returns:
-        Dictionary with output_dir and extract_dir paths
-    """
+    """Create temporary directories for testing workflows."""
     output_dir = tmp_path / "Downloads"
     extract_dir = tmp_path / "compatibilitytools.d"
     output_dir.mkdir(parents=True)
     extract_dir.mkdir(parents=True)
+    return {"tmp": tmp_path, "output_dir": output_dir, "extract_dir": extract_dir}
 
-    return {
-        "tmp": tmp_path,
-        "output_dir": output_dir,
-        "extract_dir": extract_dir,
-    }
+
+@pytest.fixture
+def extract_dir(tmp_path: Path) -> Path:
+    """Create a temporary extract directory."""
+    extract_dir = tmp_path / "compatibilitytools.d"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    return extract_dir
+
+
+@pytest.fixture
+def output_dir(tmp_path: Path) -> Path:
+    """Create a temporary output/download directory."""
+    output_dir = tmp_path / "Downloads"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 @pytest.fixture
 def installed_proton_versions(tmp_path: Path, fork: ForkName) -> list[Path]:
-    """
-    Create fake installed Proton directories for testing link management.
-
-    Requires fork parameter from parametrized fixture or explicit value.
-
-    Args:
-        tmp_path: pytest temporary path
-        fork: Which fork's directories to create (from parametrized fixture)
-
-    Returns:
-        List of created directory paths
-
-    Usage:
-        @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-        def test_with_installed_versions(fork, installed_proton_versions, ...):
-            # installed_proton_versions will match the fork parameter
-    """
+    """Create fake installed Proton directories."""
     extract_dir = tmp_path / "compatibilitytools.d"
     extract_dir.mkdir(parents=True, exist_ok=True)
 
-    versions = []
     if fork == ForkName.GE_PROTON:
         version_names = ["GE-Proton10-20", "GE-Proton10-19", "GE-Proton10-18"]
     elif fork == ForkName.PROTON_EM:
         version_names = ["EM-10.0-30", "EM-10.0-29", "EM-10.0-28"]
-    else:  # CACHYOS
+    else:
         version_names = [
             "cachyos-10.0-20260207-slr",
             "cachyos-10.0-20260206-slr",
             "cachyos-10.0-20260205-slr",
         ]
 
+    versions = []
     for version_name in version_names:
         version_dir = extract_dir / version_name
         version_dir.mkdir()
@@ -629,40 +409,19 @@ def installed_proton_versions(tmp_path: Path, fork: ForkName) -> list[Path]:
 
 @pytest.fixture
 def symlink_environment(tmp_path: Path, fork: ForkName) -> dict[str, Any]:
-    """
-    Create a complete symlink testing environment.
-
-    Sets up:
-    - Extract directory with installed versions
-    - Existing symlinks (main, fallback1, fallback2)
-
-    Requires fork parameter from parametrized fixture or explicit value.
-
-    Args:
-        tmp_path: pytest temporary path
-        fork: Which fork's symlinks to create (from parametrized fixture)
-
-    Returns:
-        Dictionary with environment details
-
-    Usage:
-        @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-        def test_with_symlinks(fork, symlink_environment, ...):
-            # symlink_environment will match the fork parameter
-    """
+    """Create a complete symlink testing environment."""
     from protonfetcher.filesystem import FileSystemClient
 
     extract_dir = tmp_path / "compatibilitytools.d"
     extract_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create version directories
     if fork == ForkName.GE_PROTON:
         version_names = ["GE-Proton10-20", "GE-Proton10-19", "GE-Proton10-18"]
         link_names = ["GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"]
     elif fork == ForkName.PROTON_EM:
         version_names = ["EM-10.0-30", "EM-10.0-29", "EM-10.0-28"]
         link_names = ["Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"]
-    else:  # CACHYOS
+    else:
         version_names = [
             "cachyos-10.0-20260207-slr",
             "cachyos-10.0-20260206-slr",
@@ -679,7 +438,6 @@ def symlink_environment(tmp_path: Path, fork: ForkName) -> dict[str, Any]:
         (version_dir / "version").write_text(version_name)
         version_dirs.append(version_dir)
 
-    # Create symlinks
     symlinks = {}
     for i, link_name in enumerate(link_names):
         if i < len(version_dirs):
@@ -704,40 +462,13 @@ def symlink_environment(tmp_path: Path, fork: ForkName) -> dict[str, Any]:
 
 @pytest.fixture(params=[ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS])
 def fork(request: pytest.FixtureRequest) -> ForkName:
-    """
-    Parametrized fixture for testing both forks.
-
-    Use in tests to automatically run for both GE-Proton and Proton-EM.
-
-    Args:
-        request: pytest request object
-
-    Returns:
-        ForkName enum value
-    """
+    """Parametrized fixture for testing all forks."""
     return request.param
 
 
 @pytest.fixture
 def fork_repo(fork: ForkName) -> str:
-    """
-    Get the repository name for a given fork.
-
-    Use this fixture to avoid hardcoding repository strings in tests.
-    Works with the parametrized `fork` fixture for comprehensive testing.
-
-    Args:
-        fork: ForkName enum value (from parametrized fixture)
-
-    Returns:
-        Repository string in format 'owner/repo'
-
-    Usage:
-        @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-        def test_repo_configuration(fork, fork_repo):
-            # fork_repo automatically matches the fork parameter
-            assert "proton" in fork_repo.lower()
-    """
+    """Get repository name for a given fork."""
     from protonfetcher.common import FORKS
 
     return FORKS[fork].repo
@@ -745,23 +476,7 @@ def fork_repo(fork: ForkName) -> str:
 
 @pytest.fixture
 def fork_archive_format(fork: ForkName) -> str:
-    """
-    Get the archive format for a given fork.
-
-    Use this fixture to avoid hardcoding archive format extensions.
-
-    Args:
-        fork: ForkName enum value (from parametrized fixture)
-
-    Returns:
-        Archive format extension (e.g., '.tar.gz', '.tar.xz')
-
-    Usage:
-        @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-        def test_archive_format(fork, fork_archive_format):
-            # fork_archive_format automatically matches the fork parameter
-            assert fork_archive_format.startswith(".tar")
-    """
+    """Get archive format for a given fork."""
     from protonfetcher.common import FORKS
 
     return FORKS[fork].archive_format
@@ -769,25 +484,7 @@ def fork_archive_format(fork: ForkName) -> str:
 
 @pytest.fixture
 def fork_link_names(fork: ForkName, extract_dir: Path) -> tuple[Path, Path, Path]:
-    """
-    Get the symlink names for a given fork as Path objects.
-
-    Use this fixture to get fork-specific symlink paths without hardcoding names.
-
-    Args:
-        fork: ForkName enum value (from parametrized fixture)
-        extract_dir: Directory where symlinks are created (from fixture)
-
-    Returns:
-        Tuple of (main, fallback1, fallback2) Path objects
-
-    Usage:
-        @pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM])
-        def test_symlink_paths(fork, fork_link_names):
-            main_link, fb1, fb2 = fork_link_names
-            # fork_link_names automatically matches the fork parameter
-            assert "Proton" in main_link.name
-    """
+    """Get symlink paths for a given fork."""
     from protonfetcher.filesystem import FileSystemClient
     from protonfetcher.link_manager import LinkManager
 
@@ -803,16 +500,7 @@ def fork_link_names(fork: ForkName, extract_dir: Path) -> tuple[Path, Path, Path
 
 @pytest.fixture
 def release_manager(mock_network_client: Any, mock_filesystem_client: Any) -> Any:
-    """
-    Create a ReleaseManager with mocked dependencies.
-
-    Args:
-        mock_network_client: NetworkClientProtocol mock
-        mock_filesystem_client: FileSystemClientProtocol mock
-
-    Returns:
-        ReleaseManager instance
-    """
+    """Create ReleaseManager with mocked dependencies."""
     from protonfetcher.release_manager import ReleaseManager
 
     return ReleaseManager(mock_network_client, mock_filesystem_client, DEFAULT_TIMEOUT)
@@ -820,16 +508,7 @@ def release_manager(mock_network_client: Any, mock_filesystem_client: Any) -> An
 
 @pytest.fixture
 def asset_downloader(mock_network_client: Any, mock_filesystem_client: Any) -> Any:
-    """
-    Create an AssetDownloader with mocked dependencies.
-
-    Args:
-        mock_network_client: NetworkClientProtocol mock
-        mock_filesystem_client: FileSystemClientProtocol mock
-
-    Returns:
-        AssetDownloader instance
-    """
+    """Create AssetDownloader with mocked dependencies."""
     from protonfetcher.asset_downloader import AssetDownloader
 
     return AssetDownloader(mock_network_client, mock_filesystem_client, DEFAULT_TIMEOUT)
@@ -837,15 +516,7 @@ def asset_downloader(mock_network_client: Any, mock_filesystem_client: Any) -> A
 
 @pytest.fixture
 def archive_extractor(mock_filesystem_client: Any) -> Any:
-    """
-    Create an ArchiveExtractor with mocked dependencies.
-
-    Args:
-        mock_filesystem_client: FileSystemClientProtocol mock
-
-    Returns:
-        ArchiveExtractor instance
-    """
+    """Create ArchiveExtractor with mocked dependencies."""
     from protonfetcher.archive_extractor import ArchiveExtractor
 
     return ArchiveExtractor(mock_filesystem_client, DEFAULT_TIMEOUT)
@@ -853,15 +524,7 @@ def archive_extractor(mock_filesystem_client: Any) -> Any:
 
 @pytest.fixture
 def link_manager(mock_filesystem_client: Any) -> Any:
-    """
-    Create a LinkManager with mocked dependencies.
-
-    Args:
-        mock_filesystem_client: FileSystemClientProtocol mock
-
-    Returns:
-        LinkManager instance
-    """
+    """Create LinkManager with mocked dependencies."""
     from protonfetcher.link_manager import LinkManager
 
     return LinkManager(mock_filesystem_client, DEFAULT_TIMEOUT)
@@ -869,18 +532,7 @@ def link_manager(mock_filesystem_client: Any) -> Any:
 
 @pytest.fixture
 def github_fetcher(mock_network_client: Any, mock_filesystem_client: Any) -> Any:
-    """
-    Create a GitHubReleaseFetcher with mocked dependencies.
-
-    This is the main SUT (System Under Test) for e2e tests.
-
-    Args:
-        mock_network_client: NetworkClientProtocol mock
-        mock_filesystem_client: FileSystemClientProtocol mock
-
-    Returns:
-        GitHubReleaseFetcher instance
-    """
+    """Create GitHubReleaseFetcher with mocked dependencies."""
     from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
     return GitHubReleaseFetcher(
@@ -891,100 +543,18 @@ def github_fetcher(mock_network_client: Any, mock_filesystem_client: Any) -> Any
 
 
 # =============================================================================
-# CLI Test Helpers
-# =============================================================================
-
-
-@pytest.fixture
-def cli_args(args: list[str]) -> list[str]:
-    """
-    Fixture for passing CLI arguments in tests.
-
-    Override in tests to test specific argument combinations.
-
-    Args:
-        args: List of argument strings
-
-    Returns:
-        List of CLI arguments
-    """
-    return args
-
-
-@pytest.fixture
-def extract_dir(tmp_path: Path) -> Path:
-    """
-    Create a temporary extract directory.
-
-    Args:
-        tmp_path: pytest temporary path
-
-    Returns:
-        Path to extract directory
-    """
-    extract_dir = tmp_path / "compatibilitytools.d"
-    extract_dir.mkdir(parents=True, exist_ok=True)
-    return extract_dir
-
-
-@pytest.fixture
-def output_dir(tmp_path: Path) -> Path:
-    """
-    Create a temporary output/download directory.
-
-    Args:
-        tmp_path: pytest temporary path
-
-    Returns:
-        Path to output directory
-    """
-    output_dir = tmp_path / "Downloads"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
-
-
-# =============================================================================
 # Mocking Helper Fixtures
 # =============================================================================
 
 
 @pytest.fixture
 def mock_tarfile_operations(mocker: Any) -> Any:
-    """
-    Fixture for mocking tarfile operations.
-
-    Provides a factory function to configure tarfile mocks with custom members.
-
-    Returns:
-        Callable that sets up tarfile mock with specified members.
-        Returns dict with keys:
-            - 'tarfile_mock': The patched tarfile.open mock
-            - 'tar_mock': The mock tar object returned by __enter__
-
-    Example:
-        mocks = mock_tarfile_operations(
-            members=[
-                {"name": "test_dir", "is_dir": True, "size": 0},
-                {"name": "test_dir/file.txt", "is_dir": False, "size": 1024},
-            ]
-        )
-        assert mocks['tarfile_mock'].called
-    """
+    """Factory for mocking tarfile operations."""
 
     def _setup_tarfile_mock(
         members: list[dict[str, Any]] | None = None,
         raise_on_open: Exception | None = None,
     ) -> dict[str, Any]:
-        """
-        Set up tarfile mock with specified members.
-
-        Args:
-            members: List of member dicts with keys: name, is_dir, size
-            raise_on_open: Exception to raise when tarfile.open is called
-
-        Returns:
-            Dict with 'tarfile_mock' and 'tar_mock' keys
-        """
         mock_tarfile = mocker.patch("tarfile.open")
 
         if raise_on_open:
@@ -1013,37 +583,13 @@ def mock_tarfile_operations(mocker: Any) -> Any:
 
 @pytest.fixture
 def mock_urllib_download(mocker: Any) -> Any:
-    """
-    Fixture for mocking urllib download operations.
-
-    Provides a factory function to configure urllib mocks with custom response data.
-
-    Returns:
-        Callable that sets up urllib mock with specified chunks
-
-    Example:
-        mock_resp = mock_urllib_download(
-            chunks=[b"chunk1", b"chunk2", b""],
-            content_length=1048576
-        )
-    """
+    """Factory for mocking urllib download operations."""
 
     def _setup_urllib_mock(
         chunks: list[bytes] | None = None,
         content_length: int | None = None,
         raise_on_open: Exception | None = None,
     ) -> Any:
-        """
-        Set up urllib mock with specified response data.
-
-        Args:
-            chunks: List of byte chunks to return from read()
-            content_length: Content-Length header value
-            raise_on_open: Exception to raise when urlopen is called
-
-        Returns:
-            Mock response object
-        """
         mock_urllib = mocker.patch("urllib.request.urlopen")
 
         if raise_on_open:
@@ -1071,17 +617,7 @@ def mock_urllib_download(mocker: Any) -> Any:
 
 @pytest.fixture
 def mock_subprocess_tar(mocker: Any) -> Any:
-    """
-    Fixture for mocking subprocess tar command.
-
-    Provides a factory function to configure subprocess.run mocks for tar commands.
-
-    Returns:
-        Callable that sets up subprocess mock with specified return code
-
-    Example:
-        mock_run = mock_subprocess_tar(returncode=0, stderr="")
-    """
+    """Factory for mocking subprocess tar command."""
 
     def _setup_subprocess_mock(
         returncode: int = 0,
@@ -1089,18 +625,6 @@ def mock_subprocess_tar(mocker: Any) -> Any:
         stderr: str = "",
         raise_on_call: Exception | None = None,
     ) -> Any:
-        """
-        Set up subprocess mock for tar command.
-
-        Args:
-            returncode: Return code for the CompletedProcess
-            stdout: Stdout for the CompletedProcess
-            stderr: Stderr for the CompletedProcess
-            raise_on_call: Exception to raise when subprocess.run is called
-
-        Returns:
-            Mock subprocess.run
-        """
         mock_run = mocker.patch("subprocess.run")
 
         if raise_on_call:
@@ -1117,26 +641,9 @@ def mock_subprocess_tar(mocker: Any) -> Any:
 
 @pytest.fixture
 def mock_builtin_open(mocker: Any) -> Any:
-    """
-    Fixture for mocking built-in open() function.
-
-    Provides a factory function to capture writes without creating real files.
-
-    Returns:
-        Tuple of (mock_open, written_data list)
-
-    Example:
-        mock_file, written_data = mock_builtin_open()
-        # After code runs, written_data contains all bytes written
-    """
+    """Factory for mocking built-in open() function."""
 
     def _setup_builtin_open() -> tuple[Any, list[bytes]]:
-        """
-        Set up built-in open mock.
-
-        Returns:
-            Tuple of (mock_file, written_data list)
-        """
         written_data: list[bytes] = []
         mock_file = mocker.MagicMock()
 
