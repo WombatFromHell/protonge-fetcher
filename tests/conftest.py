@@ -389,12 +389,14 @@ def installed_proton_versions(tmp_path: Path, fork: ForkName) -> list[Path]:
     if fork == ForkName.GE_PROTON:
         version_names = ["GE-Proton10-20", "GE-Proton10-19", "GE-Proton10-18"]
     elif fork == ForkName.PROTON_EM:
-        version_names = ["EM-10.0-30", "EM-10.0-29", "EM-10.0-28"]
+        # Use actual directory naming convention (with proton- prefix)
+        version_names = ["proton-EM-10.0-30", "proton-EM-10.0-29", "proton-EM-10.0-28"]
     else:
+        # Use actual directory naming convention (with proton- prefix and -x86_64 suffix)
         version_names = [
-            "cachyos-10.0-20260207-slr",
-            "cachyos-10.0-20260206-slr",
-            "cachyos-10.0-20260205-slr",
+            "proton-cachyos-10.0-20260207-slr-x86_64",
+            "proton-cachyos-10.0-20260206-slr-x86_64",
+            "proton-cachyos-10.0-20260205-slr-x86_64",
         ]
 
     versions = []
@@ -419,13 +421,15 @@ def symlink_environment(tmp_path: Path, fork: ForkName) -> dict[str, Any]:
         version_names = ["GE-Proton10-20", "GE-Proton10-19", "GE-Proton10-18"]
         link_names = ["GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"]
     elif fork == ForkName.PROTON_EM:
-        version_names = ["EM-10.0-30", "EM-10.0-29", "EM-10.0-28"]
+        # Use actual directory naming convention (with proton- prefix)
+        version_names = ["proton-EM-10.0-30", "proton-EM-10.0-29", "proton-EM-10.0-28"]
         link_names = ["Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"]
     else:
+        # Use actual directory naming convention (with proton- prefix and -x86_64 suffix)
         version_names = [
-            "cachyos-10.0-20260207-slr",
-            "cachyos-10.0-20260206-slr",
-            "cachyos-10.0-20260205-slr",
+            "proton-cachyos-10.0-20260207-slr-x86_64",
+            "proton-cachyos-10.0-20260206-slr-x86_64",
+            "proton-cachyos-10.0-20260205-slr-x86_64",
         ]
         link_names = ["CachyOS", "CachyOS-Fallback", "CachyOS-Fallback2"]
 

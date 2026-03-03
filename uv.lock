@@ -113,7 +113,7 @@ wheels = [
 
 [[package]]
 name = "protonge-fetcher"
-version = "1.2.6"
+version = "1.2.7"
 source = { virtual = "." }
 
 [package.dev-dependencies]

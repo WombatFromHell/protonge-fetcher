@@ -69,7 +69,8 @@ def parse_version(
     match fork:
         case ForkName.PROTON_EM:
             # Proton-EM format: EM-10.0-30 -> prefix="EM", major=10, minor=0, patch=30
-            pattern = r"EM-(\d+)\.(\d+)-(\d+)"
+            # Also handles directory names: proton-EM-10.0-30
+            pattern = r"(?:proton-)?EM-(\d+)\.(\d+)-(\d+)"
             match_result = re.match(pattern, tag)
             if match_result:
                 major, minor, patch = map(int, match_result.groups())
@@ -78,7 +79,8 @@ def parse_version(
             return (tag, 0, 0, 0)
         case ForkName.CACHYOS:
             # CachyOS format: cachyos-10.0-20260207-slr -> prefix="cachyos", major=10, minor=0, patch=20260207
-            pattern = r"cachyos-(\d+)\.(\d+)-(\d+)-slr"
+            # Also handles directory names: proton-cachyos-10.0-20260207-slr-x86_64
+            pattern = r"(?:proton-)?cachyos-(\d+)\.(\d+)-(\d+)-slr(?:-x86_64)?"
             match_result = re.match(pattern, tag)
             if match_result:
                 major, minor, patch = map(int, match_result.groups())

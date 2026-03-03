@@ -685,7 +685,7 @@ class ReleaseManager:
 
         # Compare: if latest > newest current, return latest
         if latest_version > newest_current_version:
-            logger.info(
+            logger.debug(
                 f"New release available: {latest_tag} (current: {current_parsed[0][1]})"
             )
             return latest_tag

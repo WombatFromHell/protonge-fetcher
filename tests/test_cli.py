@@ -220,15 +220,66 @@ class TestCheckForNewerRelease:
     """Tests for ReleaseManager.check_for_newer_release() method."""
 
     @pytest.mark.parametrize(
-        "current_versions,latest_tag,expected",
+        "fork,repo,current_versions,latest_tag,expected",
         [
-            (["GE-Proton10-20"], "GE-Proton10-21", "GE-Proton10-21"),
-            (["GE-Proton10-20"], "GE-Proton10-20", None),
-            ([], "GE-Proton10-21", "GE-Proton10-21"),
+            # GE-Proton tests
             (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
+                ["GE-Proton10-20"],
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
+                ["GE-Proton10-20"],
+                "GE-Proton10-20",
+                None,
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
+                [],
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
                 ["GE-Proton10-18", "GE-Proton10-19", "GE-Proton10-20"],
                 "GE-Proton10-22",
                 "GE-Proton10-22",
+            ),
+            # Proton-EM tests (with directory naming convention)
+            (
+                ForkName.PROTON_EM,
+                "Etaash-mathamsetty/Proton",
+                ["proton-EM-10.0-30"],
+                "EM-10.0-31",
+                "EM-10.0-31",
+            ),
+            (
+                ForkName.PROTON_EM,
+                "Etaash-mathamsetty/Proton",
+                ["proton-EM-10.0-30"],
+                "EM-10.0-30",
+                None,
+            ),
+            # CachyOS tests (with directory naming convention)
+            (
+                ForkName.CACHYOS,
+                "CachyOS/proton-cachyos",
+                ["proton-cachyos-10.0-20260207-slr-x86_64"],
+                "cachyos-10.0-20260227-slr",
+                "cachyos-10.0-20260227-slr",
+            ),
+            (
+                ForkName.CACHYOS,
+                "CachyOS/proton-cachyos",
+                ["proton-cachyos-10.0-20260207-slr-x86_64"],
+                "cachyos-10.0-20260207-slr",
+                None,
             ),
         ],
     )
@@ -237,11 +288,13 @@ class TestCheckForNewerRelease:
         mocker: Any,
         mock_network_client: Any,
         mock_filesystem_client: Any,
+        fork: ForkName,
+        repo: str,
         current_versions: list[str],
         latest_tag: str,
         expected: str | None,
     ) -> None:
-        """Test detection of newer releases."""
+        """Test detection of newer releases for all forks."""
         mock_network_client.get.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=f'{{"tag_name": "{latest_tag}"}}', stderr=""
         )
@@ -255,9 +308,9 @@ class TestCheckForNewerRelease:
         release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
 
         result = release_manager.check_for_newer_release(
-            "GloriousEggroll/proton-ge-custom",
+            repo,
             current_versions,
-            ForkName.GE_PROTON,
+            fork,
         )
 
         assert result == expected
@@ -274,22 +327,32 @@ class TestGetInstalledVersions:
                 ["GE-Proton10-18", "GE-Proton10-20", "GE-Proton10-19"],
                 ["GE-Proton10-20", "GE-Proton10-19", "GE-Proton10-18"],
             ),
+            # Proton-EM with actual directory naming (proton- prefix)
             (
                 ForkName.PROTON_EM,
-                ["EM-10.0-28", "EM-10.0-30", "EM-10.0-29"],
-                ["EM-10.0-30", "EM-10.0-29", "EM-10.0-28"],
+                [
+                    "proton-EM-10.0-28",
+                    "proton-EM-10.0-30",
+                    "proton-EM-10.0-29",
+                ],
+                [
+                    "proton-EM-10.0-30",
+                    "proton-EM-10.0-29",
+                    "proton-EM-10.0-28",
+                ],
             ),
+            # CachyOS with actual directory naming (proton- prefix and -x86_64 suffix)
             (
                 ForkName.CACHYOS,
                 [
-                    "cachyos-10.0-20260207-slr",
-                    "cachyos-10.0-20260215-slr",
-                    "cachyos-10.0-20260210-slr",
+                    "proton-cachyos-10.0-20260207-slr-x86_64",
+                    "proton-cachyos-10.0-20260215-slr-x86_64",
+                    "proton-cachyos-10.0-20260210-slr-x86_64",
                 ],
                 [
-                    "cachyos-10.0-20260215-slr",
-                    "cachyos-10.0-20260210-slr",
-                    "cachyos-10.0-20260207-slr",
+                    "proton-cachyos-10.0-20260215-slr-x86_64",
+                    "proton-cachyos-10.0-20260210-slr-x86_64",
+                    "proton-cachyos-10.0-20260207-slr-x86_64",
                 ],
             ),
         ],
@@ -335,23 +398,74 @@ class TestGetInstalledVersions:
 class TestCheckForUpdates:
     """Tests for GitHubReleaseFetcher.check_for_updates() method."""
 
-    def test_check_for_updates_available(
-        self, mocker: Any, mock_network_client: Any, tmp_path: Path
+    @pytest.mark.parametrize(
+        "fork,installed_dir,latest_tag,expected",
+        [
+            # GE-Proton
+            (
+                ForkName.GE_PROTON,
+                "GE-Proton10-20",
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+                None,
+            ),
+            # Proton-EM (with proton- prefix in directory name)
+            (
+                ForkName.PROTON_EM,
+                "proton-EM-10.0-30",
+                "EM-10.0-31",
+                "EM-10.0-31",
+            ),
+            (
+                ForkName.PROTON_EM,
+                "proton-EM-10.0-30",
+                "EM-10.0-30",
+                None,
+            ),
+            # CachyOS (with proton- prefix and -x86_64 suffix)
+            (
+                ForkName.CACHYOS,
+                "proton-cachyos-10.0-20260207-slr-x86_64",
+                "cachyos-10.0-20260227-slr",
+                "cachyos-10.0-20260227-slr",
+            ),
+            (
+                ForkName.CACHYOS,
+                "proton-cachyos-10.0-20260207-slr-x86_64",
+                "cachyos-10.0-20260207-slr",
+                None,
+            ),
+        ],
+    )
+    def test_check_for_updates_all_forks(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        tmp_path: Path,
+        fork: ForkName,
+        installed_dir: str,
+        latest_tag: str,
+        expected: str | None,
     ) -> None:
-        """Test check_for_updates when update is available."""
+        """Test check_for_updates for all forks with real directory naming."""
         from protonfetcher.filesystem import FileSystemClient
 
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
-        (extract_dir / "GE-Proton10-20").mkdir()
+        (extract_dir / installed_dir).mkdir()
 
         mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
+            args=[], returncode=0, stdout=f'{{"tag_name": "{latest_tag}"}}', stderr=""
         )
         mock_network_client.head.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
+            stdout=f"Location: /releases/tag/{latest_tag}",
             stderr="",
         )
 
@@ -361,37 +475,8 @@ class TestCheckForUpdates:
             file_system_client=fs,
         )
 
-        result = fetcher.check_for_updates(extract_dir, ForkName.GE_PROTON)
-        assert result == "GE-Proton10-21"
-
-    def test_check_for_updates_up_to_date(
-        self, mocker: Any, mock_network_client: Any, tmp_path: Path
-    ) -> None:
-        """Test check_for_updates when already up-to-date."""
-        from protonfetcher.filesystem import FileSystemClient
-
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-        (extract_dir / "GE-Proton10-21").mkdir()
-
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
-            stderr="",
-        )
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
-        )
-
-        fs = FileSystemClient()
-        fetcher = GitHubReleaseFetcher(
-            network_client=mock_network_client,
-            file_system_client=fs,
-        )
-
-        result = fetcher.check_for_updates(extract_dir, ForkName.GE_PROTON)
-        assert result is None
+        result = fetcher.check_for_updates(extract_dir, fork)
+        assert result == expected
 
 
 class TestCheckOperationFlow:
