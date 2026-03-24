@@ -409,6 +409,55 @@ class TestVersionSorting:
         # Should prefer standard naming (without proton- prefix)
         assert deduped[0][1].name == "EM-10.0-30"
 
+    def test_find_version_candidates_with_special_build_suffixes(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test that Proton-EM directories with special build suffixes (e.g., -HDRTEST) are recognized.
+
+        This is a regression test for the bug where directories like proton-EM-10.0-36-HDRTEST
+        were not recognized as valid Proton-EM directories because the regex pattern required
+        the directory name to end with the patch number.
+        """
+        # Arrange
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Create Proton-EM directories including special build suffixes
+        for name in [
+            "proton-EM-10.0-36-HDRTEST",
+            "proton-EM-10.0-34",
+            "proton-EM-10.0-33",
+            "EM-10.0-30",
+        ]:
+            (extract_dir / name).mkdir()
+
+        fs = FileSystemClient()
+        link_manager = LinkManager(fs)
+
+        # Act
+        candidates = link_manager.find_version_candidates(
+            extract_dir=extract_dir,
+            fork=ForkName.PROTON_EM,
+        )
+
+        # Assert: All 4 directories should be recognized
+        assert len(candidates) == 4
+
+        # Verify the HDRTEST version was found
+        candidate_names = [c[1].name for c in candidates]
+        assert "proton-EM-10.0-36-HDRTEST" in candidate_names
+
+        # Verify version parsing: HDRTEST should be parsed as version 10.0.36
+        hdrtest_candidate = next(
+            c for c in candidates if c[1].name == "proton-EM-10.0-36-HDRTEST"
+        )
+        # Version tuple should be ("EM", 10, 0, 36)
+        assert hdrtest_candidate[0][0] == "EM"
+        assert hdrtest_candidate[0][1] == 10
+        assert hdrtest_candidate[0][2] == 0
+        assert hdrtest_candidate[0][3] == 36
+
 
 class TestReleaseRemoval:
     """Test release removal and link updates."""

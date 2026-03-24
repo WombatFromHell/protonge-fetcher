@@ -267,13 +267,15 @@ class LinkManager:
         match fork:
             case ForkName.GE_PROTON:
                 # GE-Proton directories should match pattern: GE-Proton{major}-{minor}
-                ge_pattern = r"^GE-Proton\d+-\d+$"
+                # Allow optional suffixes (e.g., -RC1, -beta)
+                ge_pattern = r"^GE-Proton\d+-\d+(?:-.*)?$"
                 return bool(re.match(ge_pattern, entry.name))
             case ForkName.PROTON_EM:
                 # Proton-EM directories should match pattern: proton-EM-{major}.{minor}-{patch}
                 # or EM-{major}.{minor}-{patch}
-                em_pattern1 = r"^proton-EM-\d+\.\d+-\d+$"
-                em_pattern2 = r"^EM-\d+\.\d+-\d+$"
+                # Allow optional suffixes (e.g., -HDRTEST, -RC1)
+                em_pattern1 = r"^proton-EM-\d+\.\d+-\d+(?:-.*)?$"
+                em_pattern2 = r"^EM-\d+\.\d+-\d+(?:-.*)?$"
                 return bool(
                     re.match(em_pattern1, entry.name)
                     or re.match(em_pattern2, entry.name)
@@ -281,8 +283,9 @@ class LinkManager:
             case ForkName.CACHYOS:
                 # CachyOS directories should match pattern: proton-cachyos-{major}.{minor}-{date}-slr-x86_64
                 # or cachyos-{major}.{minor}-{date}-slr (with or without -x86_64 suffix)
-                cachyos_pattern1 = r"^proton-cachyos-\d+\.\d+-\d+-slr(-x86_64)?$"
-                cachyos_pattern2 = r"^cachyos-\d+\.\d+-\d+-slr$"
+                # Allow optional suffixes after the base pattern
+                cachyos_pattern1 = r"^proton-cachyos-\d+\.\d+-\d+-slr(?:-x86_64)?(?:-.*)?$"
+                cachyos_pattern2 = r"^cachyos-\d+\.\d+-\d+-slr(?:-.*)?$"
                 return bool(
                     re.match(cachyos_pattern1, entry.name)
                     or re.match(cachyos_pattern2, entry.name)

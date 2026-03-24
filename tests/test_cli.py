@@ -478,6 +478,87 @@ class TestCheckForUpdates:
         result = fetcher.check_for_updates(extract_dir, fork)
         assert result == expected
 
+    def test_check_with_special_build_suffix_installed(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Test that check_for_updates correctly handles special build suffixes.
+
+        This is a regression test for the bug where directories like proton-EM-10.0-36-HDRTEST
+        were not recognized, causing --check to incorrectly report updates available when
+        the latest version was already installed.
+        """
+        from protonfetcher.filesystem import FileSystemClient
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Install the HDRTEST version (special build suffix)
+        (extract_dir / "proton-EM-10.0-36-HDRTEST").mkdir()
+
+        # Mock the latest tag to be the same as the installed version
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout='{"tag_name": "EM-10.0-36"}', stderr=""
+        )
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="Location: /releases/tag/EM-10.0-36",
+            stderr="",
+        )
+
+        fs = FileSystemClient()
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=fs,
+        )
+
+        # Should return None since we have 10.0.36 installed (HDRTEST is same version)
+        result = fetcher.check_for_updates(extract_dir, ForkName.PROTON_EM)
+        assert result is None
+
+    def test_check_with_older_special_build_suffix(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Test that check_for_updates reports update when newer version available.
+
+        When an older special build suffix version is installed, check should
+        correctly report that a newer version is available.
+        """
+        from protonfetcher.filesystem import FileSystemClient
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Install an older HDRTEST version
+        (extract_dir / "proton-EM-10.0-33-HDRTEST").mkdir()
+
+        # Mock the latest tag to be newer
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout='{"tag_name": "EM-10.0-36"}', stderr=""
+        )
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="Location: /releases/tag/EM-10.0-36",
+            stderr="",
+        )
+
+        fs = FileSystemClient()
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=fs,
+        )
+
+        # Should return the newer version
+        result = fetcher.check_for_updates(extract_dir, ForkName.PROTON_EM)
+        assert result == "EM-10.0-36"
+
 
 class TestCheckOperationFlow:
     """Tests for _handle_check_operation_flow() CLI handler."""
