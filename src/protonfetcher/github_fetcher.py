@@ -113,6 +113,26 @@ class GitHubReleaseFetcher:
         """Remove a specific Proton fork release folder and its associated symbolic links."""
         return self.link_manager.remove_release(extract_dir, tag, fork)
 
+    def prune_releases(
+        self,
+        extract_dir: Path,
+        fork: ForkName,
+        keep: int = 3,
+        dry_run: bool = False,
+    ) -> tuple[list[str], list[str]]:
+        """Remove old unmanaged Proton releases, keeping the N newest versions.
+
+        Args:
+            extract_dir: Directory containing Proton installations
+            fork: The Proton fork name to prune
+            keep: Number of newest versions to retain (default: 3)
+            dry_run: If True, only report what would be removed
+
+        Returns:
+            Tuple of (kept_versions, pruned_versions) lists
+        """
+        return self.link_manager.prune_releases(extract_dir, fork, keep, dry_run)
+
     def _validate_environment(self) -> None:
         """Validate that required tools and directories are available."""
         # Validate that curl is available

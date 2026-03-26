@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 
 
 def _set_default_fork(args: argparse.Namespace) -> argparse.Namespace:
-    """Set default fork if not provided (but not for --ls/--check which should handle all forks).
+    """Set default fork if not provided (but not for --ls/--check/--prune which should handle all forks).
 
     When -f is provided without a value, args.fork will be None, indicating
     that all forks with managed links should be updated.
     """
-    if not hasattr(args, "fork") and not args.ls and not args.check:
+    if not hasattr(args, "fork") and not args.ls and not args.check and not args.prune:
         args.fork = DEFAULT_FORK
-    elif not hasattr(args, "fork") and (args.ls or args.check):
-        args.fork = None  # Will be handled specially for --ls/--check
+    elif not hasattr(args, "fork") and (args.ls or args.check or args.prune):
+        args.fork = None  # Will be handled specially for --ls/--check/--prune
     elif hasattr(args, "fork") and args.fork is None:
         # -f was provided without a value - this means update all managed forks
         pass  # Keep args.fork as None to signal multi-fork update
@@ -48,6 +48,11 @@ _CONFLICT_RULES = [
         "check",
         ["list", "ls", "rm", "relink", "dry_run"],
         "--check cannot be used with --list, --ls, --rm, --relink, or --dry-run",
+    ),
+    (
+        "prune",
+        ["release", "list", "ls", "rm", "relink", "check"],
+        "--prune cannot be used with --release, --list, --ls, --rm, --relink, or --check",
     ),
     (
         "dry_run",
@@ -162,6 +167,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Force recreation of symbolic links without downloading or extracting (use with --fork)",
     )
     parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Remove old unmanaged releases for all forks, keeping the N newest (use with --fork for specific fork)",
+    )
+    parser.add_argument(
+        "--keep",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Number of newest versions to keep when pruning (default: 3)",
+    )
+    parser.add_argument(
         "--check",
         "-c",
         action="store_true",
@@ -242,21 +259,38 @@ def _get_forks_to_list(
     return [fork_enum]
 
 
-def _print_links_for_fork(link_manager: Any, extract_dir: Path, fork: ForkName) -> None:
+def _print_links_for_fork(
+    link_manager: Any, extract_dir: Path, fork: ForkName, show_versions: bool = False
+) -> None:
     """Print links for a single fork.
 
     Args:
         link_manager: LinkManager instance
         extract_dir: Directory to search for links
         fork: Proton fork name
+        show_versions: Whether to also show prunable versions
     """
     links_info = link_manager.list_links(extract_dir, fork)
-    print(f"Links for {fork}:")
+    print(f"Links for {fork.value}:")
     for link_name, target_path in links_info.items():
         if target_path:
             print(f"  {link_name} -> {target_path}")
         else:
             print(f"  {link_name} -> (not found)")
+
+    if show_versions:
+        # Get installed versions and linked versions
+        installed = link_manager.get_installed_versions(extract_dir, fork)
+        linked = link_manager.get_linked_versions(extract_dir, fork)
+
+        # Find prunable versions (installed but not linked and not in top 3)
+        prunable = [v for i, v in enumerate(installed, 1) 
+                    if v not in linked and i > 3]
+
+        if prunable:
+            print(f"\nPrunable {fork.value} versions ({len(prunable)}):")
+            for version in prunable:
+                print(f"  ○ {version}")
 
 
 def handle_ls_operation(
@@ -271,7 +305,7 @@ def handle_ls_operation(
     forks_to_check = _get_forks_to_list(args, list_all_forks)
 
     for fork in forks_to_check:
-        _print_links_for_fork(fetcher.link_manager, extract_dir, fork)
+        _print_links_for_fork(fetcher.link_manager, extract_dir, fork, show_versions=True)
 
 
 def _handle_ls_operation_flow(
@@ -318,6 +352,87 @@ def _handle_rm_operation_flow(
     )
     logger.info(f"Removing release: {args.rm}")
     fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
+    print("Success")
+
+
+def _handle_prune_operation_flow(
+    fetcher: GitHubReleaseFetcher,
+    args: argparse.Namespace,
+    extract_dir: Path,
+) -> None:
+    """
+    Handle the --prune operation flow.
+
+    Prunes old unmanaged releases, keeping the N newest versions.
+    Includes confirmation prompt to warn about potential prefix breakage.
+    
+    When used without --fork, prunes all forks.
+    When used with --dry-run, shows what would be pruned without confirmation.
+    """
+    # Determine which forks to prune
+    if hasattr(args, "fork") and args.fork is not None:
+        # Specific fork requested
+        forks_to_prune = [convert_fork_to_enum(args.fork)]
+    else:
+        # All forks by default
+        forks_to_prune = [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]
+
+    # First, do a dry run to see what would be pruned
+    all_to_prune: dict[ForkName, list[str]] = {}
+
+    for fork in forks_to_prune:
+        kept, to_prune = fetcher.prune_releases(
+            extract_dir, fork, keep=args.keep, dry_run=True
+        )
+        all_to_prune[fork] = to_prune
+
+    # Check if there's anything to prune
+    total_to_prune = sum(len(v) for v in all_to_prune.values())
+
+    if total_to_prune == 0:
+        print("No unmanaged releases to prune")
+        print("Success")
+        return
+
+    # Show summary of what would be pruned
+    print(f"\nWould prune {total_to_prune} old version(s):")
+    for fork in forks_to_prune:
+        for version in all_to_prune[fork]:
+            print(f"  ○ {version}")
+    print()
+
+    # If --dry-run, skip confirmation and exit
+    if args.dry_run:
+        print("Dry run complete - no changes made")
+        print("Success")
+        return
+
+    # Warn about potential prefix breakage
+    print("⚠️  WARNING: Pruning old releases may break Steam prefixes that depend on them.")
+    print("Games using pruned versions will need to be reconfigured.")
+
+    # Ask for confirmation
+    try:
+        response = input(f"\nProceed with pruning {total_to_prune} release(s)? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\nAborted")
+        raise SystemExit(1) from None
+
+    if response not in ("y", "yes"):
+        print("Aborted")
+        raise SystemExit(0)
+
+    # Perform the actual prune
+    total_pruned = 0
+    for fork in forks_to_prune:
+        if all_to_prune[fork]:
+            logger.info(f"Pruning old {fork.value} releases...")
+            kept, pruned = fetcher.prune_releases(
+                extract_dir, fork, keep=args.keep, dry_run=False
+            )
+            total_pruned += len(pruned)
+
+    print(f"\nPruned {total_pruned} release(s)")
     print("Success")
 
 
@@ -486,6 +601,11 @@ def main() -> None:
         # Handle --rm flag
         if args.rm:
             _handle_rm_operation_flow(fetcher, args, extract_dir)
+            return
+
+        # Handle --prune flag
+        if args.prune:
+            _handle_prune_operation_flow(fetcher, args, extract_dir)
             return
 
         # Handle --check flag

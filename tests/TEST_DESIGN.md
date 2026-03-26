@@ -132,22 +132,23 @@ uv run pytest --cov=protonfetcher --cov-report=term-missing
 
 ## Test Organization
 
-### Directory Structure (Streamlined)
+### Directory Structure (Current)
 
 ```
 tests/
-├── conftest.py              # Shared fixtures and configuration (streamlined)
-├── test_cli.py              # CLI interface tests (merged: CLI + check mode + dry-run)
-├── test_github_fetcher.py   # Main orchestrator unit tests
-├── test_link_manager.py     # Symlink management tests
-├── test_release_manager.py  # Release discovery tests
+├── conftest.py              # Shared fixtures and configuration
+├── test_cli.py              # CLI interface tests (all operations)
+├── test_github_fetcher.py   # Main orchestrator tests
+├── test_link_manager_e2e.py # Symlink management E2E tests
+├── test_release_manager_e2e.py # Release discovery E2E tests
 ├── test_extraction.py       # Archive extraction tests
-├── test_integration.py      # Integration tests (network + spinner)
-├── TEST_DESIGN.md           # This document
-└── STREAMLINING_PLAN.md     # Streamlining implementation plan
+├── test_integration.py      # Integration tests
+├── test_utils.py            # Utility function tests (version parsing)
+├── test_prune.py            # Prune operation tests (NEW)
+└── TEST_DESIGN.md           # This document
 ```
 
-**Note:** The test suite was streamlined in 2026-02 to reduce redundancy and improve maintainability. The original structure had 10 test files; the streamlined structure has 7 files with ~33% fewer lines of code while maintaining coverage.
+**Note:** The test suite continues to evolve. In 2026-03, `test_prune.py` was added to test the new `--prune` feature with 27 comprehensive tests covering argument parsing, operation flow, LinkManager integration, and end-to-end scenarios.
 
 ### Original Structure (Pre-Streamlining)
 
@@ -170,26 +171,27 @@ tests/
 
 | Category | Purpose | Files |
 |----------|---------|-------|
-| **Unit Tests** | Component-specific method testing | Embedded in test files |
+| **Unit Tests** | Component-specific method testing | `test_utils.py`, embedded in E2E files |
 | **Integration Tests** | Component interaction testing | `test_integration.py` |
-| **End-to-End Tests** | Complete workflow testing | `test_cli.py`, `test_github_fetcher.py` |
+| **End-to-End Tests** | Complete workflow testing | `test_cli.py`, `test_github_fetcher.py`, `test_prune.py` |
 | **CLI Tests** | Command-line interface testing | `test_cli.py` |
+| **Feature Tests** | New feature testing (comprehensive) | `test_prune.py` |
 
-### Streamlining Benefits
+### Test Suite Statistics (2026-03)
 
-| Metric | Before | After | Reduction |
-|--------|--------|-------|-----------|
-| Test files | 10 | 7 | 30% |
-| Total lines | 8,294 | ~5,550 | 33% |
-| Test functions | 272 | ~180 | 34% |
-| conftest.py lines | 1,155 | ~750 | 35% |
+| Metric | Count |
+|--------|-------|
+| Test files | 9 |
+| Total tests | 260+ |
+| Test coverage | ~85% |
+| Newest feature tests | `test_prune.py` (27 tests) |
 
-**Key improvements:**
-- ✅ Consolidated CLI tests (3 files → 1) with better parametrization
-- ✅ Factory-based fixtures replace multiple specialized mocks
-- ✅ Removed duplicate workflow tests between CLI and orchestrator
-- ✅ Merged integration tests for better organization
-- ✅ Maintained comprehensive coverage of user-facing functionality
+**Key improvements since streamlining:**
+- ✅ Added comprehensive prune feature tests (27 tests)
+- ✅ Real filesystem testing for symlink operations (where mocks fail)
+- ✅ Enhanced CLI operation flow testing
+- ✅ Better integration between LinkManager and filesystem
+- ✅ Maintained fast test execution (<1 second for full suite)
 
 ## Core Testing Principles
 
@@ -223,21 +225,40 @@ Tests mock external dependencies to ensure reliability:
 | subprocess | `subprocess.run` patch | `mock_subprocess_tar` |
 | builtins.open | `builtins.open` patch | `mock_builtin_open` |
 
-### 3. No Real I/O in Tests
+### 3. Real Filesystem for Symlink Operations
 
-All tests avoid real file I/O, network calls, and system operations:
+Tests use the real filesystem for symlink operations where mocks don't properly handle `resolve()`:
 
 ```python
-# ❌ Avoid: Real file creation
-Path("/tmp/test.txt").write_text("data")
+# ✅ Prefer: Real filesystem for symlink testing (in tmp_path)
+from protonfetcher.filesystem import FileSystemClient
+from protonfetcher.link_manager import LinkManager
 
-# ✅ Prefer: Mocked filesystem
-mock_filesystem_client.write.assert_called_with(expected_path, expected_data)
+def test_prune_releases_protects_linked_versions(tmp_path: Path):
+    extract_dir = tmp_path / "compatibilitytools.d"
+    extract_dir.mkdir()
+    
+    # Create real directories and symlinks
+    fs = FileSystemClient()
+    link_manager = LinkManager(fs)
+    
+    # Test with real symlink operations
+    result = link_manager.prune_releases(...)
 ```
+
+**When to use real vs. mocked filesystem:**
+
+| Scenario | Approach | Reason |
+|----------|----------|--------|
+| Symlink creation/resolution | Real filesystem | Mocks don't handle `resolve()` properly |
+| Directory iteration | Real filesystem | Mocks require complex side_effect setup |
+| File write/read | Mocked | Faster, no I/O |
+| Network calls | Always mocked | External dependency |
+| tarfile operations | Mocked | Complex archive handling |
 
 ## Golden Rules
 
-The ProtonFetcher test suite follows three fundamental rules. All contributors must adhere to these principles.
+The ProtonFetcher test suite follows four fundamental rules. All contributors must adhere to these principles.
 
 ### Rule 1: Do Not Mock the SUT (System Under Test)
 
@@ -263,7 +284,43 @@ def test_fetcher(mock_network_client: Any, mock_filesystem_client: Any):
 
 **When to break this rule:** Only when testing at a higher integration level where the "SUT" is a complete workflow and you're verifying component interaction.
 
-### Rule 2: Leverage pytest/pytest-mock Features Fully
+### Rule 2: Use Real Filesystem for Symlink Operations
+
+**Never mock symlink creation or resolution.** The mock `FileSystemClientProtocol` doesn't properly implement `resolve()`, which breaks symlink testing.
+
+```python
+# ❌ WRONG: Using mocked filesystem for symlinks
+def test_symlink_with_mock(mock_filesystem_client: Any):
+    link_manager = LinkManager(mock_filesystem_client)
+    # resolve() returns MagicMock, not actual path - assertions fail!
+
+# ✅ CORRECT: Use real filesystem in tmp_path
+def test_symlink_with_real_fs(tmp_path: Path):
+    from protonfetcher.filesystem import FileSystemClient
+    from protonfetcher.link_manager import LinkManager
+    
+    extract_dir = tmp_path / "compatibilitytools.d"
+    extract_dir.mkdir()
+    
+    fs = FileSystemClient()  # Real filesystem
+    link_manager = LinkManager(fs)
+    
+    # Create real symlink
+    main_link.symlink_to(version_dir)
+    
+    # resolve() works correctly
+    assert main_link.resolve() == version_dir
+```
+
+**Rationale:** Mocking `resolve()` requires complex `side_effect` chains that are brittle and error-prone. Real filesystem operations in `tmp_path` are fast, reliable, and test actual behavior.
+
+**Scope:** This rule applies specifically to symlink operations. Continue mocking:
+- Network calls (external dependency)
+- File read/write (faster with mocks)
+- tarfile operations (complex archive handling)
+- subprocess calls (external tools)
+
+### Rule 3: Leverage pytest/pytest-mock Features Fully
 
 **Use pytest's built-in features before writing custom test logic.** This includes parametrization, fixtures, markers, and built-in assertions.
 
@@ -553,18 +610,59 @@ def test_list_releases_operation(
     # Arrange: Mock fetcher
     mock_fetcher = mocker.MagicMock()
     mock_fetcher.release_manager.list_recent_releases.return_value = [...]
-    
+
     mocker.patch("protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher)
     mocker.patch("protonfetcher.cli.sys.argv", ["protonfetcher", "--list"])
-    
+
     # Act
     main()
-    
+
     # Assert
     captured = capsys.readouterr()
     assert "GE-Proton10-20" in captured.out
     assert "Success" in captured.out
 ```
+
+### Pattern 7: Feature Test with Multiple Test Types
+
+New features should include comprehensive test coverage across multiple test types:
+
+```python
+# test_prune.py - Example feature test structure
+
+class TestPruneArgumentParsing:
+    """Test CLI argument parsing for --prune flag."""
+    
+    def test_parse_prune_flag(self) -> None: ...
+    def test_parse_prune_with_keep(self) -> None: ...
+    def test_parse_prune_mutually_exclusive_with_release(self) -> None: ...
+
+class TestPruneOperationFlow:
+    """Test the --prune operation flow."""
+    
+    def test_prune_no_unmanaged_releases(self) -> None: ...
+    def test_prune_with_dry_run(self) -> None: ...
+    def test_prune_with_confirmation_yes(self) -> None: ...
+
+class TestLinkManagerPruneIntegration:
+    """Integration tests for LinkManager.prune_releases()."""
+    
+    def test_prune_releases_protects_linked_versions(self) -> None: ...
+    def test_prune_releases_dry_run_no_deletion(self) -> None: ...
+
+class TestPruneE2E:
+    """End-to-end tests for prune functionality."""
+    
+    def test_prune_e2e_all_forks_no_prunable(self) -> None: ...
+    def test_prune_e2e_with_prunable_versions(self) -> None: ...
+```
+
+**Feature test checklist:**
+- ✅ Argument parsing tests (all flags, mutual exclusivity)
+- ✅ Operation flow tests (all scenarios, confirmation, dry-run)
+- ✅ Integration tests (real filesystem where needed)
+- ✅ E2E tests (complete workflow verification)
+- ✅ Error handling tests (edge cases, invalid inputs)
 
 ## Running Tests
 
@@ -575,22 +673,53 @@ def test_list_releases_operation(
 uv run pytest -xvs
 
 # Run specific test file
-uv run pytest tests/test_github_fetcher_e2e.py -xvs
+uv run pytest tests/test_prune.py -xvs
 
 # Run specific test class
-uv run pytest tests/test_link_manager_e2e.py::TestSymlinkCreation -xvs
+uv run pytest tests/test_prune.py::TestPruneOperationFlow -xvs
 
 # Run specific test
-uv run pytest tests/test_link_manager_e2e.py::TestSymlinkCreation::test_create_symlinks_main_only -xvs
+uv run pytest tests/test_prune.py::TestPruneOperationFlow::test_prune_with_dry_run -xvs
 
 # Run tests for specific fork
 uv run pytest tests/test_link_manager_e2e.py -k "ge_proton" -xvs
 
 # Run with coverage
 uv run pytest --cov=protonfetcher --cov-report=term-missing
+
+# Run prune tests only
+uv run pytest tests/test_prune.py -v
 ```
 
-### Test Markers
+## Testing New Features
+
+### Feature Test Template
+
+When adding a new feature, follow the `test_prune.py` template:
+
+1. **Argument Parsing Tests** - Verify CLI flags parse correctly
+2. **Operation Flow Tests** - Test the feature's main workflow
+3. **Integration Tests** - Test with real components where mocks fail
+4. **E2E Tests** - Test complete user scenarios
+
+### Example: Prune Feature Tests
+
+The `test_prune.py` file (27 tests) demonstrates comprehensive feature testing:
+
+| Test Category | Count | Purpose |
+|---------------|-------|---------|
+| Argument Parsing | 10 | CLI flag validation, mutual exclusivity |
+| Operation Flow | 8 | Dry-run, confirmation, single/all forks |
+| LinkManager Integration | 7 | Real filesystem, version protection |
+| E2E Tests | 2 | Complete workflow verification |
+
+**Key design decisions:**
+- Uses real `FileSystemClient` for symlink operations (mocks don't handle `resolve()`)
+- Tests all three forks (GE-Proton, Proton-EM, CachyOS)
+- Verifies linked version protection
+- Tests confirmation workflow (yes/no/abort)
+
+## Test Markers
 
 ```bash
 # Run only integration tests
@@ -618,6 +747,28 @@ mock_fs.exists.return_value = True
 ```python
 # ❌ Wrong: Mocking the class under test
 mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+```
+
+### DO: Use Real Filesystem for Symlinks
+
+```python
+# ✅ Correct: Real filesystem for symlink testing
+from protonfetcher.filesystem import FileSystemClient
+from protonfetcher.link_manager import LinkManager
+
+def test_symlink(tmp_path: Path):
+    fs = FileSystemClient()
+    lm = LinkManager(fs)
+    # Test with real symlinks
+```
+
+### DON'T: Mock Symlink Operations
+
+```python
+# ❌ Wrong: Mocked filesystem for symlinks
+def test_symlink(mock_filesystem_client: Any):
+    lm = LinkManager(mock_filesystem_client)
+    # resolve() returns MagicMock - assertions will fail!
 ```
 
 ### DO: Use Fixtures for Common Setups
@@ -750,17 +901,22 @@ Use real filesystem in `tmp_path` for integration tests:
 def test_symlink_creation(tmp_path: Path):
     extract_dir = tmp_path / "compatibilitytools.d"
     extract_dir.mkdir()
-    
+
     # Use real FileSystemClient
     fs = FileSystemClient()
     link_manager = LinkManager(fs)
-    
+
     # Create real symlink
     link_manager.create_symlinks(...)
-    
+
     # Verify real symlink
     assert (extract_dir / "GE-Proton").is_symlink()
 ```
+
+**For prune-specific testing, see `test_prune.py`:**
+- `TestLinkManagerPruneIntegration` - Real filesystem for symlink protection tests
+- `TestPruneE2E` - End-to-end workflow with real directories
+- All tests use `tmp_path` for isolation
 
 ## CI/CD Integration
 

@@ -33,6 +33,8 @@ The architecture uses Protocol-based dependency injection for easy testing and c
 - **Intelligent version parsing** for proper Proton release sorting
 - **Comprehensive error handling** with specific exception hierarchy
 - **Modern Python 3.11+ features**: StrEnum, protocols, ExceptionGroup, type hints
+- **Release pruning** with configurable retention and linked version protection
+- **Enhanced link listing** showing managed symlinks and prunable versions
 
 ## Core Components
 
@@ -47,7 +49,7 @@ The architecture uses Protocol-based dependency injection for easy testing and c
 - `release_manager.py` - Release discovery and asset management
 - `asset_downloader.py` - Download operations with caching
 - `archive_extractor.py` - Archive extraction with fallbacks
-- `link_manager.py` - Symbolic link management with intelligent status checking
+- `link_manager.py` - Symbolic link management, version enumeration, and release pruning
 - `github_fetcher.py` - Main orchestrator with optimized link management
 - `cli.py` - CLI interface and argument parsing
 - `entry.py` - Entry point for distribution (located in `src/entry.py`)
@@ -57,13 +59,14 @@ The architecture uses Protocol-based dependency injection for easy testing and c
 Main orchestrator with methods for:
 
 - Complete workflow coordination (`fetch_and_extract`)
-- Link management (`list_links`, `remove_release`)
+- Link management (`list_links`, `remove_release`, `prune_releases`)
 - Release discovery (`list_recent_releases`)
 - Environment validation and process flow management
 - Relink operations (`relink_fork`)
 - Dry-run preview (`fetch_and_extract` with `dry_run=True`)
 - Multi-fork updates (`update_all_managed_forks`)
 - Update checking (`check_for_updates`)
+- Release pruning (`prune_releases` with configurable retention)
 
 ### ReleaseManager
 
@@ -105,6 +108,9 @@ Manages symbolic links with intelligent version sorting and optimized link manag
 - **Manual release handling**: Special logic for manually specified releases
 - **Intelligent link status checking**: `are_links_up_to_date()` method prevents unnecessary symlink recreation
 - **Managed link detection**: `has_managed_links()` method checks if fork has active symlinks
+- **Version enumeration**: `get_installed_versions()` lists all detected versions for a fork
+- **Link target tracking**: `get_linked_versions()` returns versions currently referenced by symlinks
+- **Release pruning**: `prune_releases()` removes old unmanaged versions while protecting linked ones
 - **Performance optimization**: Only updates symlinks when targets change or links are broken
 - **Error handling**: Comprehensive error handling for filesystem operations
 - **Directory validation**: Pattern-based validation to exclude non-Proton directories
@@ -133,7 +139,7 @@ Provides command-line functionality:
 
 - Argument parsing with validation
 - Logging configuration
-- Operation flow handling (fetch, list, remove, links, relink, dry-run)
+- Operation flow handling (fetch, list, remove, links, relink, prune, dry-run)
 - Fork name conversion and validation
 
 ## CLI Interface
@@ -148,14 +154,17 @@ Provides command-line functionality:
 - `--ls`: List managed symbolic links (default behavior)
 - `--rm`: Remove specific release and update links
 - `--relink`: Force recreation of symbolic links without downloading or extracting (requires `--fork`)
+- `--prune`: Remove old unmanaged releases across all forks, keeping the N newest (default: 3)
+- `--keep`: Number of newest versions to retain when pruning (default: 3)
 - `--check`, `-c`: Check if newer releases are available for managed forks (script-friendly output, requires `--fork`)
-- `--dry-run`, `-n`: Show what would be downloaded/extracted/linked without making any changes
+- `--dry-run`, `-n`: Show what would be downloaded/extracted/linked/pruned without making any changes
 - `--debug`: Enable debug logging
 
 ### Validation and Constraints
 
-- Mutually exclusive flags: `--list`/`--release`, `--ls`/`--release`, `--rm`/`--release`, `--relink`/`--release`, `--check`/(`--list`, `--ls`, `--rm`, `--relink`, `--dry-run`), `--dry-run`/(`--list`, `--ls`, `--rm`, `--relink`)
+- Mutually exclusive flags: `--list`/`--release`, `--ls`/`--release`, `--rm`/`--release`, `--relink`/`--release`, `--prune`/(`--release`, `--list`, `--ls`, `--rm`, `--relink`, `--check`), `--check`/(`--list`, `--ls`, `--rm`, `--relink`, `--dry-run`), `--dry-run`/(`--list`, `--ls`, `--rm`, `--relink`, `--check`)
 - `--relink` requires explicit `--fork` flag
+- `--prune` supports optional `--fork` (defaults to all forks)
 - Path validation and directory permission checks
 - Fork name validation using ForkName enum
 - Environment validation for required tools (curl)
@@ -165,9 +174,10 @@ Provides command-line functionality:
 
 - **Default (no flags)**: Lists managed symbolic links for all forks
 - **List releases (`--list`)**: Fetches and displays recent releases from GitHub API
-- **List links (`--ls`)**: Displays managed symbolic links and targets (all forks or specific fork with `--fork`)
+- **List links (`--ls`)**: Displays managed symbolic links and prunable versions (all forks or specific fork with `--fork`)
 - **Remove release (`--rm`)**: Removes specified release directory and updates symlinks
 - **Relink (`--relink`)**: Forces recreation of symbolic links without downloading or extracting
+- **Prune (`--prune`)**: Removes old unmanaged releases, keeping the N newest versions
 - **Fetch and extract (with `--fork` or `--release`)**: Downloads and extracts the specified release
 - **Update all managed forks (`-f` without value)**: Updates all forks that have managed symbolic links
 
@@ -342,6 +352,111 @@ $ echo $?
 
 This allows automation scripts to efficiently check for updates and trigger downloads only when needed.
 
+#### Prune Operation
+
+The `--prune` flag removes old unmanaged Proton releases, keeping only the newest versions:
+
+- **Purpose**: Clean up disk space by removing old Proton versions that are not actively managed by symlinks
+- **Use Case**: Maintenance after multiple updates, freeing disk space while preserving active versions
+- **Behavior**:
+  - Used alone (`--prune`): Scans all forks (GE-Proton, Proton-EM, CachyOS)
+  - With `--fork <name>` (`--prune -f <name>`): Prunes specific fork only
+  - With `--keep N`: Retains N newest versions instead of default 3
+  - With `--dry-run`: Shows what would be pruned without confirmation or changes
+  - Protects linked versions from pruning (prevents breaking active prefixes)
+  - Shows preview and requires confirmation before deleting
+- **Mutual Exclusivity**: Cannot be used with `--release`, `--list`, `--ls`, `--rm`, `--relink`, or `--check`
+- **Safety Features**:
+  - Never prunes versions currently referenced by symlinks
+  - Keeps the N newest versions by default (matching symlink strategy)
+  - Requires explicit user confirmation before deletion
+  - Warns about potential Steam prefix breakage
+
+**Example Usage:**
+
+```bash
+# Preview what would be pruned across all forks
+protonfetcher --prune --dry-run
+
+# Prune all forks, keeping 3 newest (default, with confirmation)
+protonfetcher --prune
+
+# Prune specific fork, keeping 5 newest
+protonfetcher --prune --fork Proton-EM --keep 5
+
+# Preview single fork prune
+protonfetcher --prune -f GE-Proton --dry-run
+```
+
+**Example Output:**
+
+```bash
+# Dry run with prunable versions:
+$ protonfetcher --prune --dry-run
+
+Would prune 2 old version(s):
+  ○ proton-cachyos-10.0-20260227-slr-x86_64
+  ○ proton-cachyos-10.0-20260207-slr-x86_64
+
+Dry run complete - no changes made
+Success
+
+# Interactive prune (after dry run):
+$ protonfetcher --prune
+
+Would prune 2 old version(s):
+  ○ proton-cachyos-10.0-20260227-slr-x86_64
+  ○ proton-cachyos-10.0-20260207-slr-x86_64
+
+⚠️  WARNING: Pruning old releases may break Steam prefixes that depend on them.
+Games using pruned versions will need to be reconfigured.
+
+Proceed with pruning 2 release(s)? [y/N]: y
+
+Pruned 2 release(s)
+Success
+```
+
+#### Enhanced Link Listing
+
+The `--ls` flag now shows both managed symlinks and prunable versions:
+
+- **Purpose**: Provide visibility into which versions are managed vs. candidates for pruning
+- **Behavior**:
+  - Shows all managed symlinks and their targets
+  - Lists prunable versions below each fork's links (versions beyond top 3, not linked)
+  - Helps users understand disk usage and pruning impact
+
+**Example Output:**
+
+```
+Listing recognized links and their associated Proton fork folders...
+Links for GE-Proton:
+  GE-Proton -> GE-Proton10-34
+  GE-Proton-Fallback -> GE-Proton10-32
+  GE-Proton-Fallback2 -> GE-Proton10-30
+
+Links for Proton-EM:
+  Proton-EM -> proton-EM-10.0-36-HDRTEST
+  Proton-EM-Fallback -> proton-EM-10.0-34
+  Proton-EM-Fallback2 -> proton-EM-10.0-33
+
+Prunable Proton-EM versions (2):
+  ○ proton-EM-10.0-32
+  ○ proton-EM-10.0-30
+
+Links for CachyOS:
+  CachyOS -> proton-cachyos-10.0-20260321-slr-x86_64
+  CachyOS-Fallback -> proton-cachyos-10.0-20260320-slr-x86_64
+  CachyOS-Fallback2 -> proton-cachyos-10.0-20260228-slr-x86_64
+
+Prunable CachyOS versions (2):
+  ○ proton-cachyos-10.0-20260227-slr-x86_64
+  ○ proton-cachyos-10.0-20260207-slr-x86_64
+
+Success
+```
+
 ## Fork Configuration System
 
 Supports multiple Proton forks with structured configuration:
@@ -483,6 +598,8 @@ Code quality thresholds enforced by complexity regression tests:
 - **Asset verification**: Size-based caching to avoid redundant downloads
 - **Comprehensive error handling**: Specific exceptions with detailed context
 - **Multi-fork support**: GE-Proton, Proton-EM, and CachyOS with fork-specific handling
+- **Release pruning**: Configurable retention with linked version protection
+- **Enhanced visibility**: `--ls` shows managed symlinks and prunable versions
 
 ## Protocol Specifications
 

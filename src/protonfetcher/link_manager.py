@@ -1029,3 +1029,108 @@ class LinkManager:
         # Extract tag names from directory paths
         # Use the directory name as the tag
         return [path.name for _, path in candidates]
+
+    def get_linked_versions(self, extract_dir: Path, fork: ForkName) -> set[str]:
+        """
+        Get set of version directories currently referenced by symlinks.
+
+        This method resolves all managed symlinks for the fork and returns
+        the directory names they point to.
+
+        Args:
+            extract_dir: Directory to search for symlinks
+            fork: The Proton fork name
+
+        Returns:
+            Set of directory names currently linked
+        """
+        linked: set[str] = set()
+        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
+
+        for link_path in (main, fb1, fb2):
+            if self.file_system_client.is_symlink(link_path):
+                try:
+                    target = self.file_system_client.resolve(link_path)
+                    linked.add(target.name)
+                except OSError:
+                    # Broken symlink, skip
+                    continue
+
+        return linked
+
+    def prune_releases(
+        self,
+        extract_dir: Path,
+        fork: ForkName,
+        keep: int = 3,
+        dry_run: bool = False,
+    ) -> tuple[list[str], list[str]]:
+        """
+        Remove old unmanaged Proton releases, keeping the N newest versions.
+
+        This method identifies installed versions that are not currently
+        referenced by symlinks and removes them, keeping only the newest
+        versions (default: 3, matching symlink strategy).
+
+        Args:
+            extract_dir: Directory containing Proton installations
+            fork: The Proton fork name to prune
+            keep: Number of newest versions to retain (default: 3)
+            dry_run: If True, only report what would be removed
+
+        Returns:
+            Tuple of (kept_versions, pruned_versions) lists
+
+        Raises:
+            ValueError: If keep is less than 1
+        """
+        if keep < 1:
+            raise ValueError("keep must be at least 1")
+
+        # Get all installed versions (sorted newest first)
+        all_versions = self.get_installed_versions(extract_dir, fork)
+
+        if not all_versions:
+            logger.info(f"No {fork.value} installations found to prune")
+            return [], []
+
+        # Get currently linked versions (these should never be pruned)
+        linked_versions = self.get_linked_versions(extract_dir, fork)
+
+        # Determine which versions to keep and prune
+        # Always keep the newest N versions
+        kept_versions: list[str] = all_versions[:keep]
+
+        # Versions beyond the newest N are candidates for pruning
+        prune_candidates = all_versions[keep:]
+
+        # Never prune linked versions, even if they're old
+        # (this protects against breaking active prefixes)
+        pruned_versions: list[str] = [
+            v for v in prune_candidates if v not in linked_versions
+        ]
+
+        # Report any linked versions that would have been pruned
+        protected_versions = [v for v in prune_candidates if v in linked_versions]
+        if protected_versions:
+            logger.debug(
+                f"Protected {len(protected_versions)} linked version(s) from pruning: "
+                f"{', '.join(protected_versions)}"
+            )
+
+        if not pruned_versions:
+            return kept_versions, []
+
+        if dry_run:
+            return kept_versions, pruned_versions
+
+        # Actually remove the pruned versions using existing remove_release
+        logger.info(f"Pruning {len(pruned_versions)} old {fork.value} release(s)...")
+        for version in pruned_versions:
+            try:
+                self.remove_release(extract_dir, version, fork)
+                logger.info(f"  Removed: {version}")
+            except LinkManagementError as e:
+                logger.warning(f"  Failed to remove {version}: {e}")
+
+        return kept_versions, pruned_versions
