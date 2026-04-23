@@ -21,7 +21,6 @@ from protonfetcher.cli import (
 from protonfetcher.common import ForkName
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
-
 # =============================================================================
 # Argument Parsing Tests
 # =============================================================================
@@ -45,9 +44,7 @@ class TestPruneArgumentParsing:
         import sys
         from unittest.mock import patch
 
-        with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--keep", "5"]
-        ):
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--keep", "5"]):
             args = parse_arguments()
             assert args.prune is True
             assert args.keep == 5
@@ -69,9 +66,7 @@ class TestPruneArgumentParsing:
         import sys
         from unittest.mock import patch
 
-        with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--dry-run"]
-        ):
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--dry-run"]):
             args = parse_arguments()
             assert args.prune is True
             assert args.dry_run is True
@@ -101,9 +96,7 @@ class TestPruneArgumentParsing:
         import sys
         from unittest.mock import patch
 
-        with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--list"]
-        ):
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--list"]):
             with pytest.raises(SystemExit) as exc_info:
                 parse_arguments()
             assert exc_info.value.code == 1
@@ -116,9 +109,7 @@ class TestPruneArgumentParsing:
         import sys
         from unittest.mock import patch
 
-        with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--ls"]
-        ):
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--ls"]):
             with pytest.raises(SystemExit) as exc_info:
                 parse_arguments()
             assert exc_info.value.code == 1
@@ -146,9 +137,7 @@ class TestPruneArgumentParsing:
         import sys
         from unittest.mock import patch
 
-        with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--relink"]
-        ):
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--relink"]):
             with pytest.raises(SystemExit) as exc_info:
                 parse_arguments()
             assert exc_info.value.code == 1
@@ -161,9 +150,7 @@ class TestPruneArgumentParsing:
         import sys
         from unittest.mock import patch
 
-        with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--check"]
-        ):
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--check"]):
             with pytest.raises(SystemExit) as exc_info:
                 parse_arguments()
             assert exc_info.value.code == 1
@@ -429,10 +416,10 @@ class TestLinkManagerPruneIntegration:
         # Use real filesystem client for symlink operations
         from protonfetcher.filesystem import FileSystemClient
         from protonfetcher.link_manager import LinkManager
-        
+
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
-        
+
         # Create symlink pointing to GE-Proton10-2 (older, outside top 3)
         # This version would normally be pruned, but should be protected
         main_link = extract_dir / "GE-Proton"
@@ -452,10 +439,12 @@ class TestLinkManagerPruneIntegration:
         assert "GE-Proton10-5" in kept
         assert "GE-Proton10-4" in kept
         assert "GE-Proton10-3" in kept
-        
+
         # GE-Proton10-2 should NOT be in pruned (it's protected by being linked)
         # pruned contains directory names as strings
-        assert "GE-Proton10-2" not in pruned, f"GE-Proton10-2 should be protected: pruned={pruned}"
+        assert "GE-Proton10-2" not in pruned, (
+            f"GE-Proton10-2 should be protected: pruned={pruned}"
+        )
         assert "GE-Proton10-1" in pruned
 
     def test_prune_releases_dry_run_no_deletion(
@@ -477,10 +466,10 @@ class TestLinkManagerPruneIntegration:
         # Use real filesystem client
         from protonfetcher.filesystem import FileSystemClient
         from protonfetcher.link_manager import LinkManager
-        
+
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
-        
+
         # Act
         kept, pruned = real_link_manager.prune_releases(
             extract_dir, ForkName.GE_PROTON, keep=3, dry_run=True
@@ -506,7 +495,7 @@ class TestLinkManagerPruneIntegration:
         # Use real filesystem client
         from protonfetcher.filesystem import FileSystemClient
         from protonfetcher.link_manager import LinkManager
-        
+
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
 
@@ -538,7 +527,7 @@ class TestLinkManagerPruneIntegration:
         # Use real filesystem client
         from protonfetcher.filesystem import FileSystemClient
         from protonfetcher.link_manager import LinkManager
-        
+
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
 
@@ -565,7 +554,7 @@ class TestLinkManagerPruneIntegration:
         # Use real filesystem client
         from protonfetcher.filesystem import FileSystemClient
         from protonfetcher.link_manager import LinkManager
-        
+
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
 
@@ -594,7 +583,7 @@ class TestLinkManagerPruneIntegration:
         # Use real filesystem client
         from protonfetcher.filesystem import FileSystemClient
         from protonfetcher.link_manager import LinkManager
-        
+
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
 
@@ -627,7 +616,7 @@ class TestLinkManagerPruneIntegration:
         # Use real filesystem client
         from protonfetcher.filesystem import FileSystemClient
         from protonfetcher.link_manager import LinkManager
-        
+
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
 

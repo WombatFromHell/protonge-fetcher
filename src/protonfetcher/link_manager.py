@@ -284,7 +284,9 @@ class LinkManager:
                 # CachyOS directories should match pattern: proton-cachyos-{major}.{minor}-{date}-slr-x86_64
                 # or cachyos-{major}.{minor}-{date}-slr (with or without -x86_64 suffix)
                 # Allow optional suffixes after the base pattern
-                cachyos_pattern1 = r"^proton-cachyos-\d+\.\d+-\d+-slr(?:-x86_64)?(?:-.*)?$"
+                cachyos_pattern1 = (
+                    r"^proton-cachyos-\d+\.\d+-\d+-slr(?:-x86_64)?(?:-.*)?$"
+                )
                 cachyos_pattern2 = r"^cachyos-\d+\.\d+-\d+-slr(?:-.*)?$"
                 return bool(
                     re.match(cachyos_pattern1, entry.name)

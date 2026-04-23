@@ -6,42 +6,40 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-    }:
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+  }:
     flake-utils.lib.eachDefaultSystem (
-      system:
-      let
+      system: let
         pkgs = nixpkgs.legacyPackages.${system};
         # Read Python version from .python-version file (strip newline and dot)
-        pythonVersion = builtins.replaceStrings [ "\n" ] [ "" ] (builtins.readFile ./.python-version);
-        pythonAttr = builtins.replaceStrings [ "." ] [ "" ] pythonVersion;
+        pythonVersion = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./.python-version);
+        pythonAttr = builtins.replaceStrings ["."] [""] pythonVersion;
         python = pkgs."python${pythonAttr}";
-      in
-      {
+      in {
         devShells.default = pkgs.mkShell {
           name = "protonfetcher";
 
-          buildInputs = [
+          packages = with pkgs; [
+            bashInteractive
+            coreutils
+            findutils
+            git
+            gawk
+            gnugrep
+            gnutar
+            gnused
+            jq
+            less
+            prettier
             python
-            pkgs.uv
-            pkgs.zip
-            pkgs.rsync
-            pkgs.gnused
-            pkgs.gnugrep
-            pkgs.coreutils
-            pkgs.prettier
-            pkgs.gnutar
-            pkgs.which
-            pkgs.gawk
-            pkgs.jq
-            pkgs.util-linux # provides readlink, blockdev, etc.
-            pkgs.git # git commands in shell hooks
-            pkgs.less # pager
-            pkgs.findutils # find, locate, updatedb
+            rsync
+            util-linux
+            uv
+            which
+            zip
           ];
 
           shellHook = ''

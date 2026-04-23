@@ -284,8 +284,7 @@ def _print_links_for_fork(
         linked = link_manager.get_linked_versions(extract_dir, fork)
 
         # Find prunable versions (installed but not linked and not in top 3)
-        prunable = [v for i, v in enumerate(installed, 1) 
-                    if v not in linked and i > 3]
+        prunable = [v for i, v in enumerate(installed, 1) if v not in linked and i > 3]
 
         if prunable:
             print(f"\nPrunable {fork.value} versions ({len(prunable)}):")
@@ -305,7 +304,9 @@ def handle_ls_operation(
     forks_to_check = _get_forks_to_list(args, list_all_forks)
 
     for fork in forks_to_check:
-        _print_links_for_fork(fetcher.link_manager, extract_dir, fork, show_versions=True)
+        _print_links_for_fork(
+            fetcher.link_manager, extract_dir, fork, show_versions=True
+        )
 
 
 def _handle_ls_operation_flow(
@@ -365,7 +366,7 @@ def _handle_prune_operation_flow(
 
     Prunes old unmanaged releases, keeping the N newest versions.
     Includes confirmation prompt to warn about potential prefix breakage.
-    
+
     When used without --fork, prunes all forks.
     When used with --dry-run, shows what would be pruned without confirmation.
     """
@@ -408,12 +409,18 @@ def _handle_prune_operation_flow(
         return
 
     # Warn about potential prefix breakage
-    print("⚠️  WARNING: Pruning old releases may break Steam prefixes that depend on them.")
+    print(
+        "⚠️  WARNING: Pruning old releases may break Steam prefixes that depend on them."
+    )
     print("Games using pruned versions will need to be reconfigured.")
 
     # Ask for confirmation
     try:
-        response = input(f"\nProceed with pruning {total_to_prune} release(s)? [y/N]: ").strip().lower()
+        response = (
+            input(f"\nProceed with pruning {total_to_prune} release(s)? [y/N]: ")
+            .strip()
+            .lower()
+        )
     except (EOFError, KeyboardInterrupt):
         print("\nAborted")
         raise SystemExit(1) from None
