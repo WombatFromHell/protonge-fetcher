@@ -56,6 +56,12 @@ def test_data() -> dict[str, Any]:
                 "example_asset": "proton-cachyos-10.0-20260207-slr-x86_64.tar.xz",
                 "archive_format": ".tar.xz",
             },
+            ForkName.DW_PROTON: {
+                "repo": "dawn-winery/dwproton",
+                "example_tag": "dwproton-10.0-26",
+                "example_asset": "dwproton-10.0-26-x86_64.tar.xz",
+                "archive_format": ".tar.xz",
+            },
         },
         "CLI_OUTPUTS": {
             "success": "Success",
@@ -391,6 +397,13 @@ def installed_proton_versions(tmp_path: Path, fork: ForkName) -> list[Path]:
     elif fork == ForkName.PROTON_EM:
         # Use actual directory naming convention (with proton- prefix)
         version_names = ["proton-EM-10.0-30", "proton-EM-10.0-29", "proton-EM-10.0-28"]
+    elif fork == ForkName.DW_PROTON:
+        # DW-Proton uses {tag}-x86_64 directory naming
+        version_names = [
+            "dwproton-10.0-26-x86_64",
+            "dwproton-10.0-25-x86_64",
+            "dwproton-10.0-24-x86_64",
+        ]
     else:
         # Use actual directory naming convention (with proton- prefix and -x86_64 suffix)
         version_names = [
@@ -424,6 +437,14 @@ def symlink_environment(tmp_path: Path, fork: ForkName) -> dict[str, Any]:
         # Use actual directory naming convention (with proton- prefix)
         version_names = ["proton-EM-10.0-30", "proton-EM-10.0-29", "proton-EM-10.0-28"]
         link_names = ["Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"]
+    elif fork == ForkName.DW_PROTON:
+        # DW-Proton uses {tag}-x86_64 directory naming
+        version_names = [
+            "dwproton-10.0-26-x86_64",
+            "dwproton-10.0-25-x86_64",
+            "dwproton-10.0-24-x86_64",
+        ]
+        link_names = ["DW-Proton", "DW-Proton-Fallback", "DW-Proton-Fallback2"]
     else:
         # Use actual directory naming convention (with proton- prefix and -x86_64 suffix)
         version_names = [
@@ -464,7 +485,14 @@ def symlink_environment(tmp_path: Path, fork: ForkName) -> dict[str, Any]:
 # =============================================================================
 
 
-@pytest.fixture(params=[ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS])
+@pytest.fixture(
+    params=[
+        ForkName.GE_PROTON,
+        ForkName.PROTON_EM,
+        ForkName.CACHYOS,
+        ForkName.DW_PROTON,
+    ]
+)
 def fork(request: pytest.FixtureRequest) -> ForkName:
     """Parametrized fixture for testing all forks."""
     return request.param

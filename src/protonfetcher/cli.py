@@ -9,23 +9,19 @@ from typing import Any, Union
 from .__version__ import __version__
 from .common import DEFAULT_FORK, ForkName
 from .exceptions import ProtonFetcherError
+from .forgejo_fetcher import ForgejoReleaseFetcher
 from .github_fetcher import GitHubReleaseFetcher
 
 logger = logging.getLogger(__name__)
 
 
 def _set_default_fork(args: argparse.Namespace) -> argparse.Namespace:
-    """Set default fork if not provided (but not for --ls/--check/--prune which should handle all forks).
-
-    When -f is provided without a value, args.fork will be None, indicating
-    that all forks with managed links should be updated.
-    """
+    """Set default fork if not provided (but not for --ls/--check/--prune)."""
     if not hasattr(args, "fork") and not args.ls and not args.check and not args.prune:
         args.fork = DEFAULT_FORK
     elif not hasattr(args, "fork") and (args.ls or args.check or args.prune):
-        args.fork = None  # Will be handled specially for --ls/--check/--prune
+        args.fork = None
     elif hasattr(args, "fork") and args.fork is None:
-        # -f was provided without a value - this means update all managed forks
         pass  # Keep args.fork as None to signal multi-fork update
     return args
 
@@ -73,11 +69,7 @@ def _was_flag_passed_explicitly(flag_short: str, flag_long: str) -> bool:
 
 
 def _validate_relink_requires_fork(args: argparse.Namespace) -> bool:
-    """Validate that --relink was used with explicit --fork flag.
-
-    Returns:
-        True if validation passes, False otherwise
-    """
+    """Validate that --relink was used with explicit --fork flag."""
     if not args.relink:
         return True
 
@@ -92,7 +84,6 @@ def _validate_relink_requires_fork(args: argparse.Namespace) -> bool:
 
 def _validate_mutually_exclusive_args(args: argparse.Namespace) -> None:
     """Validate mutually exclusive arguments."""
-    # Check standard conflict rules
     for flag_name, conflicting_flags, error_msg in _CONFLICT_RULES:
         if getattr(args, flag_name, False):
             conflicts = [cf for cf in conflicting_flags if getattr(args, cf, False)]
@@ -100,7 +91,6 @@ def _validate_mutually_exclusive_args(args: argparse.Namespace) -> None:
                 print(f"Error: {error_msg}")
                 raise SystemExit(1)
 
-    # Validate --relink requires explicit --fork
     _validate_relink_requires_fork(args)
 
 
@@ -136,14 +126,19 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--fork",
         "-f",
-        default=argparse.SUPPRESS,  # Don't set a default, check for attribute existence
-        nargs="?",  # Make the fork value optional
-        const=None,  # When -f is provided without a value, set to None
+        default=argparse.SUPPRESS,
+        nargs="?",
+        const=None,
         choices=[
             fork.value
-            for fork in [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]
+            for fork in [
+                ForkName.GE_PROTON,
+                ForkName.PROTON_EM,
+                ForkName.CACHYOS,
+                ForkName.DW_PROTON,
+            ]
         ],
-        help=f"ProtonGE fork to download (default: {DEFAULT_FORK.value}, available: {', '.join([fork.value for fork in [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]])}). Use -f without a value to update all forks with managed links.",
+        help=f"ProtonGE fork to download (default: {DEFAULT_FORK.value}, available: {', '.join([fork.value for fork in [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS, ForkName.DW_PROTON]])}). Use -f without a value to update all forks with managed links.",
     )
     parser.add_argument(
         "--list",
@@ -197,37 +192,23 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     args = parser.parse_args()
-
     args = _set_default_fork(args)
     _validate_mutually_exclusive_args(args)
-
     return args
 
 
 def setup_logging(debug: bool) -> None:
     """Set up logging based on debug flag."""
     log_level = logging.DEBUG if debug else logging.INFO
-
-    # Configure logging but ensure it works with pytest caplog
-    logging.basicConfig(
-        level=log_level,
-        format="%(message)s",
-    )
-
-    # For pytest compatibility, also ensure the root logger has the right level
+    logging.basicConfig(level=log_level, format="%(message)s")
     logging.getLogger().setLevel(log_level)
-
-    # Log if debug mode is enabled
     if debug:
-        # Check if we're in a test environment (pytest would have certain characteristics)
-        # If running test, log to make sure it's captured by caplog
         logger.debug("Debug logging enabled")
 
 
 def convert_fork_to_enum(fork_arg: Union[str, ForkName, None]) -> ForkName:
     """Convert fork argument to ForkName enum."""
     if isinstance(fork_arg, str):
-        # Convert string to ForkName enum
         try:
             return ForkName(fork_arg)
         except ValueError:
@@ -236,25 +217,20 @@ def convert_fork_to_enum(fork_arg: Union[str, ForkName, None]) -> ForkName:
     elif fork_arg is None:
         return DEFAULT_FORK
     else:
-        # It's already a ForkName enum
         return fork_arg
 
 
 def _get_forks_to_list(
     args: argparse.Namespace, list_all_forks: bool
 ) -> list[ForkName]:
-    """Determine which forks to list based on arguments.
-
-    Args:
-        args: Parsed command line arguments
-        list_all_forks: Whether to list all forks regardless of args
-
-    Returns:
-        List of ForkName enums to list
-    """
+    """Determine which forks to list based on arguments."""
     if list_all_forks or (not hasattr(args, "fork") or args.fork is None):
-        return [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]
-
+        return [
+            ForkName.GE_PROTON,
+            ForkName.PROTON_EM,
+            ForkName.CACHYOS,
+            ForkName.DW_PROTON,
+        ]
     fork_enum = convert_fork_to_enum(args.fork)
     return [fork_enum]
 
@@ -262,14 +238,7 @@ def _get_forks_to_list(
 def _print_links_for_fork(
     link_manager: Any, extract_dir: Path, fork: ForkName, show_versions: bool = False
 ) -> None:
-    """Print links for a single fork.
-
-    Args:
-        link_manager: LinkManager instance
-        extract_dir: Directory to search for links
-        fork: Proton fork name
-        show_versions: Whether to also show prunable versions
-    """
+    """Print links for a single fork."""
     links_info = link_manager.list_links(extract_dir, fork)
     print(f"Links for {fork.value}:")
     for link_name, target_path in links_info.items():
@@ -279,142 +248,153 @@ def _print_links_for_fork(
             print(f"  {link_name} -> (not found)")
 
     if show_versions:
-        # Get installed versions and linked versions
         installed = link_manager.get_installed_versions(extract_dir, fork)
         linked = link_manager.get_linked_versions(extract_dir, fork)
-
-        # Find prunable versions (installed but not linked and not in top 3)
         prunable = [v for i, v in enumerate(installed, 1) if v not in linked and i > 3]
-
         if prunable:
             print(f"\nPrunable {fork.value} versions ({len(prunable)}):")
             for version in prunable:
                 print(f"  ○ {version}")
 
 
-def handle_ls_operation(
+# ------------------------------------------------------------------
+# Operation handlers
+# ------------------------------------------------------------------
+
+
+def _handle_ls_operation(
     fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
     args: argparse.Namespace,
     extract_dir: Path,
     list_all_forks: bool = False,
 ) -> None:
     """Handle the --ls operation to list symbolic links."""
     print("Listing recognized links and their associated Proton fork folders...")
-
     forks_to_check = _get_forks_to_list(args, list_all_forks)
-
     for fork in forks_to_check:
-        _print_links_for_fork(
-            fetcher.link_manager, extract_dir, fork, show_versions=True
+        lm = (
+            forgejo_fetcher.link_manager
+            if fork == ForkName.DW_PROTON
+            else fetcher.link_manager
         )
-
-
-def _handle_ls_operation_flow(
-    fetcher: GitHubReleaseFetcher,
-    args: argparse.Namespace,
-    extract_dir: Path,
-    list_all_forks: bool = False,
-) -> None:
-    """Handle the --ls operation flow."""
-    handle_ls_operation(fetcher, args, extract_dir, list_all_forks)
+        _print_links_for_fork(lm, extract_dir, fork, show_versions=True)
     print("Success")
 
 
-def _handle_list_operation_flow(fetcher: GitHubReleaseFetcher, repo: str) -> None:
+def _handle_list_operation(
+    fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
+    args: argparse.Namespace,
+    extract_dir: Path,
+) -> None:
     """Handle the --list operation flow."""
-    logger.info("Fetching recent releases...")
-    tags = fetcher.release_manager.list_recent_releases(repo)
+    if not hasattr(args, "fork") or args.fork is None:
+        args.fork = DEFAULT_FORK
+
+    target_fork: ForkName = convert_fork_to_enum(args.fork)
+    from .common import FORKS
+
+    repo = FORKS[target_fork].repo
+    logger.info(f"Using fork: {target_fork} ({repo})")
+
+    if target_fork == ForkName.DW_PROTON:
+        tags = forgejo_fetcher.list_recent_releases(repo)
+    else:
+        tags = fetcher.list_recent_releases(repo)
     print("Recent releases:")
     for tag in tags:
         print(f"  {tag}")
-    print("Success")  # Print success to maintain consistency
+    print("Success")
 
 
-def _handle_relink_operation_flow(
-    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path
+def _handle_relink_operation(
+    fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
+    args: argparse.Namespace,
+    extract_dir: Path,
 ) -> None:
     """Handle the --relink operation flow."""
-    # Use the provided fork
     relink_fork = convert_fork_to_enum(
         args.fork if hasattr(args, "fork") and args.fork is not None else None
     )
     logger.info(f"Relinking {relink_fork} symlinks")
-    fetcher.relink_fork(extract_dir, relink_fork)
+    if relink_fork == ForkName.DW_PROTON:
+        forgejo_fetcher.relink_fork(extract_dir, relink_fork)
+    else:
+        fetcher.relink_fork(extract_dir, relink_fork)
     print("Success")
 
 
-def _handle_rm_operation_flow(
-    fetcher: GitHubReleaseFetcher, args: argparse.Namespace, extract_dir: Path
+def _handle_rm_operation(
+    fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
+    args: argparse.Namespace,
+    extract_dir: Path,
 ) -> None:
     """Handle the --rm operation flow."""
-    # Use the provided fork or default to DEFAULT_FORK
     rm_fork = convert_fork_to_enum(
         args.fork if hasattr(args, "fork") and args.fork is not None else None
     )
     logger.info(f"Removing release: {args.rm}")
-    fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
+    if rm_fork == ForkName.DW_PROTON:
+        forgejo_fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
+    else:
+        fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
     print("Success")
 
 
-def _handle_prune_operation_flow(
+def _handle_prune_operation(
     fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
     args: argparse.Namespace,
     extract_dir: Path,
 ) -> None:
-    """
-    Handle the --prune operation flow.
-
-    Prunes old unmanaged releases, keeping the N newest versions.
-    Includes confirmation prompt to warn about potential prefix breakage.
-
-    When used without --fork, prunes all forks.
-    When used with --dry-run, shows what would be pruned without confirmation.
-    """
-    # Determine which forks to prune
+    """Handle the --prune operation flow."""
     if hasattr(args, "fork") and args.fork is not None:
-        # Specific fork requested
         forks_to_prune = [convert_fork_to_enum(args.fork)]
     else:
-        # All forks by default
-        forks_to_prune = [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]
+        forks_to_prune = [
+            ForkName.GE_PROTON,
+            ForkName.PROTON_EM,
+            ForkName.CACHYOS,
+            ForkName.DW_PROTON,
+        ]
 
-    # First, do a dry run to see what would be pruned
     all_to_prune: dict[ForkName, list[str]] = {}
-
     for fork in forks_to_prune:
-        kept, to_prune = fetcher.prune_releases(
-            extract_dir, fork, keep=args.keep, dry_run=True
-        )
+        if fork == ForkName.DW_PROTON:
+            kept, to_prune = forgejo_fetcher.prune_releases(
+                extract_dir, fork, keep=args.keep, dry_run=True
+            )
+        else:
+            kept, to_prune = fetcher.prune_releases(
+                extract_dir, fork, keep=args.keep, dry_run=True
+            )
         all_to_prune[fork] = to_prune
 
-    # Check if there's anything to prune
     total_to_prune = sum(len(v) for v in all_to_prune.values())
-
     if total_to_prune == 0:
         print("No unmanaged releases to prune")
         print("Success")
         return
 
-    # Show summary of what would be pruned
     print(f"\nWould prune {total_to_prune} old version(s):")
     for fork in forks_to_prune:
         for version in all_to_prune[fork]:
             print(f"  ○ {version}")
     print()
 
-    # If --dry-run, skip confirmation and exit
     if args.dry_run:
         print("Dry run complete - no changes made")
         print("Success")
         return
 
-    # Warn about potential prefix breakage
     print(
         "⚠️  WARNING: Pruning old releases may break Steam prefixes that depend on them."
     )
     print("Games using pruned versions will need to be reconfigured.")
 
-    # Ask for confirmation
     try:
         response = (
             input(f"\nProceed with pruning {total_to_prune} release(s)? [y/N]: ")
@@ -429,68 +409,61 @@ def _handle_prune_operation_flow(
         print("Aborted")
         raise SystemExit(0)
 
-    # Perform the actual prune
     total_pruned = 0
     for fork in forks_to_prune:
         if all_to_prune[fork]:
             logger.info(f"Pruning old {fork.value} releases...")
-            kept, pruned = fetcher.prune_releases(
-                extract_dir, fork, keep=args.keep, dry_run=False
-            )
+            if fork == ForkName.DW_PROTON:
+                kept, pruned = forgejo_fetcher.prune_releases(
+                    extract_dir, fork, keep=args.keep, dry_run=False
+                )
+            else:
+                kept, pruned = fetcher.prune_releases(
+                    extract_dir, fork, keep=args.keep, dry_run=False
+                )
             total_pruned += len(pruned)
 
     print(f"\nPruned {total_pruned} release(s)")
     print("Success")
 
 
-def _handle_check_operation_flow(
+def _handle_check_operation(
     fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
     args: argparse.Namespace,
     extract_dir: Path,
-) -> int:
-    """
-    Handle the --check operation flow.
-
-    Checks for newer releases for the specified fork(s) and prints
-    script-friendly output.
-
-    When used without --fork, checks all forks with managed links.
-
-    Args:
-        fetcher: GitHubReleaseFetcher instance
-        args: Parsed command line arguments
-        extract_dir: Directory to search for installed versions
-
-    Returns:
-        Exit code: 0 if updates available, 1 if none available
-    """
+) -> None:
+    """Handle the --check operation flow."""
     updates_available = False
-    forks_checked = 0
 
-    # Determine which forks to check
-    # When --check is used without --fork, or with -f without value, check all managed forks
     if not hasattr(args, "fork") or args.fork is None:
-        # No fork specified or -f without value: check all forks with managed links
-        logger.debug("Checking all forks with managed links")
-        forks_to_check = [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]
+        forks_to_check = [
+            ForkName.GE_PROTON,
+            ForkName.PROTON_EM,
+            ForkName.CACHYOS,
+            ForkName.DW_PROTON,
+        ]
         check_managed_only = True
     else:
-        # Specific fork provided
         forks_to_check = [convert_fork_to_enum(args.fork)]
         check_managed_only = False
 
     for fork in forks_to_check:
-        # Skip if checking managed only and fork has no managed links
         if check_managed_only:
-            if not fetcher.link_manager.has_managed_links(extract_dir, fork):
+            lm = (
+                forgejo_fetcher.link_manager
+                if fork == ForkName.DW_PROTON
+                else fetcher.link_manager
+            )
+            if not lm.has_managed_links(extract_dir, fork):
                 logger.debug(f"Skipping {fork}: no managed links found")
                 continue
 
-        forks_checked += 1
-
-        # Check for updates
         try:
-            newer_release = fetcher.check_for_updates(extract_dir, fork)
+            if fork == ForkName.DW_PROTON:
+                newer_release = forgejo_fetcher.check_for_updates(extract_dir, fork)
+            else:
+                newer_release = fetcher.check_for_updates(extract_dir, fork)
             if newer_release:
                 print(f"New release available for {fork}: {newer_release}!")
                 updates_available = True
@@ -498,24 +471,23 @@ def _handle_check_operation_flow(
                 print(f"{fork}: up-to-date")
         except ProtonFetcherError as e:
             logger.error(f"Failed to check {fork}: {e}")
-            # Continue checking other forks
 
-    return 0 if updates_available else 1
+    if updates_available:
+        raise SystemExit(0)
+    raise SystemExit(1)
 
 
-def _handle_default_operation_flow(
+def _handle_default_fetch(
     fetcher: GitHubReleaseFetcher,
     repo: str,
     output_dir: Path,
     extract_dir: Path,
     args: argparse.Namespace,
 ) -> None:
-    """Handle the default fetch and extract operation flow."""
-    # For operations that continue after --ls/--list/--rm, ensure fork is set
+    """Handle the default fetch and extract operation flow (GitHub forks only)."""
     actual_fork = convert_fork_to_enum(
         args.fork if hasattr(args, "fork") and args.fork is not None else None
     )
-
     result = fetcher.fetch_and_extract(
         repo,
         output_dir,
@@ -524,154 +496,189 @@ def _handle_default_operation_flow(
         fork=actual_fork,
         dry_run=args.dry_run,
     )
-
-    # Print success message (dry-run message is already logged by fetcher)
     if result is not None:
         print("Success")
 
 
+def _handle_fetch_with_fork(
+    fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
+    args: argparse.Namespace,
+    output_dir: Path,
+    extract_dir: Path,
+    fork: ForkName,
+) -> None:
+    """Handle fetch operation for a single fork."""
+    from .common import FORKS
+
+    repo = FORKS[fork].repo
+    logger.info(f"Using fork: {fork} ({repo})")
+
+    if fork == ForkName.DW_PROTON:
+        result = forgejo_fetcher.fetch_and_extract(
+            repo,
+            output_dir,
+            extract_dir,
+            release_tag=args.release,
+            fork=fork,
+            dry_run=args.dry_run,
+        )
+        if result is not None:
+            print("Success")
+    else:
+        _handle_default_fetch(fetcher, repo, output_dir, extract_dir, args)
+
+
+def _handle_multi_fork_update(
+    fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
+    output_dir: Path,
+    extract_dir: Path,
+    dry_run: bool,
+) -> None:
+    """Handle multi-fork update mode (-f without value)."""
+    from .common import FORKS
+
+    logger.info("Updating all forks with managed links...")
+    results = fetcher.update_all_managed_forks(output_dir, extract_dir, dry_run=dry_run)
+
+    if forgejo_fetcher.link_manager.has_managed_links(extract_dir, ForkName.DW_PROTON):
+        logger.info("Updating DW-Proton: fetching latest release...")
+        try:
+            dw_repo = FORKS[ForkName.DW_PROTON].repo
+            dw_result = forgejo_fetcher.fetch_and_extract(
+                dw_repo,
+                output_dir,
+                extract_dir,
+                fork=ForkName.DW_PROTON,
+                dry_run=dry_run,
+            )
+            results[ForkName.DW_PROTON] = dw_result
+            logger.debug("Successfully updated DW-Proton")
+        except ProtonFetcherError as e:
+            logger.error(f"Failed to update DW-Proton: {e}")
+            results[ForkName.DW_PROTON] = None
+
+    success_count = sum(1 for r in results.values() if r is not None)
+    if success_count > 0:
+        print(f"Successfully updated {success_count} fork(s)")
+    else:
+        print("No forks were updated")
+
+
+# ------------------------------------------------------------------
+# Dispatch
+# ------------------------------------------------------------------
+
+
+def _get_explicit_flags(argv_list: list[str]) -> dict[str, bool]:
+    """Check which flags were explicitly passed on the command line."""
+    return {
+        "ls": "--ls" in argv_list,
+        "list": "--list" in argv_list or "-l" in argv_list,
+        "rm": "--rm" in argv_list or any(a.startswith("--rm=") for a in argv_list),
+        "fork": "--fork" in argv_list
+        or "-f" in argv_list
+        or any(a.startswith("--fork=") or a.startswith("-f=") for a in argv_list),
+        "release": "--release" in argv_list
+        or "-r" in argv_list
+        or any(a.startswith("--release=") or a.startswith("-r=") for a in argv_list),
+    }
+
+
+def _get_operation_from_args(args: argparse.Namespace) -> str | None:
+    """Determine which operation was requested from parsed args."""
+    if args.ls:
+        return "ls"
+    if args.list:
+        return "list"
+    if args.relink:
+        return "relink"
+    if args.rm:
+        return "rm"
+    if args.prune:
+        return "prune"
+    if args.check:
+        return "check"
+    return None
+
+
+def _dispatch(
+    fetcher: GitHubReleaseFetcher,
+    forgejo_fetcher: ForgejoReleaseFetcher,
+    args: argparse.Namespace,
+    extract_dir: Path,
+    output_dir: Path,
+    explicit_flags: dict[str, bool],
+) -> int:
+    """Dispatch to the appropriate handler based on operation flags."""
+    operation = _get_operation_from_args(args)
+
+    handlers: dict[str, Any] = {
+        "ls": lambda: _handle_ls_operation(
+            fetcher,
+            forgejo_fetcher,
+            args,
+            extract_dir,
+            list_all_forks=not explicit_flags["fork"],
+        ),
+        "list": lambda: _handle_list_operation(
+            fetcher, forgejo_fetcher, args, extract_dir
+        ),
+        "relink": lambda: _handle_relink_operation(
+            fetcher, forgejo_fetcher, args, extract_dir
+        ),
+        "rm": lambda: _handle_rm_operation(fetcher, forgejo_fetcher, args, extract_dir),
+        "prune": lambda: _handle_prune_operation(
+            fetcher, forgejo_fetcher, args, extract_dir
+        ),
+        "check": lambda: _handle_check_operation(
+            fetcher, forgejo_fetcher, args, extract_dir
+        ),
+    }
+
+    if operation in handlers:
+        handlers[operation]()
+        return 0
+
+    # No explicit operation: default to fetch or ls based on functional flags
+    if explicit_flags["fork"] or explicit_flags["release"]:
+        if hasattr(args, "fork") and args.fork is None:
+            _handle_multi_fork_update(
+                fetcher, forgejo_fetcher, output_dir, extract_dir, args.dry_run
+            )
+        else:
+            fork = convert_fork_to_enum(
+                args.fork if hasattr(args, "fork") and args.fork is not None else None
+            )
+            _handle_fetch_with_fork(
+                fetcher, forgejo_fetcher, args, output_dir, extract_dir, fork
+            )
+    else:
+        _handle_ls_operation(
+            fetcher, forgejo_fetcher, args, extract_dir, list_all_forks=True
+        )
+
+    return 0
+
+
 def main() -> None:
     """CLI entry point."""
-    import sys
-
-    # Check for explicit flags in sys.argv before full parsing to determine default behavior
     argv_list = sys.argv[1:]
+    explicit_flags = _get_explicit_flags(argv_list)
 
-    # Check if operation flags were explicitly provided in sys.argv
-    has_explicit_ls = any(arg in ["--ls"] for arg in argv_list)
-    has_explicit_list = any(arg in ["--list", "-l"] for arg in argv_list)
-    has_explicit_rm = any(arg in ["--rm"] for arg in argv_list) or any(
-        arg.startswith("--rm=") for arg in argv_list
-    )
-
-    # Check if functional flags were explicitly provided in sys.argv
-    has_explicit_fork = any(arg in ["--fork", "-f"] for arg in argv_list) or any(
-        arg.startswith("--fork=") or arg.startswith("-f=") for arg in argv_list
-    )
-    has_explicit_release = any(arg in ["--release", "-r"] for arg in argv_list) or any(
-        arg.startswith("--release=") or arg.startswith("-r=") for arg in argv_list
-    )
-
-    # Parse the arguments
     args = parse_arguments()
-
-    # Expand user home directory (~) in paths
     extract_dir = Path(args.extract_dir).expanduser()
     output_dir = Path(args.output).expanduser()
-
-    # Set up logging
     setup_logging(args.debug)
 
     try:
         fetcher = GitHubReleaseFetcher()
+        forgejo_fetcher = ForgejoReleaseFetcher()
 
-        # Check if any explicit operation flag is provided
-        has_operation_flag = (
-            has_explicit_ls
-            or has_explicit_list
-            or has_explicit_rm
-            or args.check  # Include --check flag
+        _dispatch(
+            fetcher, forgejo_fetcher, args, extract_dir, output_dir, explicit_flags
         )
-
-        # Check if functional flags were provided originally (before _set_default_fork)
-        has_functional_flags = has_explicit_fork or has_explicit_release
-
-        # Handle --ls flag (explicitly set)
-        if args.ls:
-            # For explicit --ls flag, list all forks if no specific fork was provided in the command
-            _handle_ls_operation_flow(
-                fetcher, args, extract_dir, list_all_forks=not has_explicit_fork
-            )
-            return
-
-        # Handle --list flag
-        if args.list:
-            # Set default fork if not provided
-            if not hasattr(args, "fork") or args.fork is None:
-                args.fork = DEFAULT_FORK
-
-            # Get the repo based on selected fork - handle string-to-enum conversion
-            target_fork: ForkName = convert_fork_to_enum(args.fork)
-            from .common import FORKS
-
-            repo = FORKS[target_fork].repo
-            logger.info(f"Using fork: {target_fork} ({repo})")
-
-            _handle_list_operation_flow(fetcher, repo)
-            return
-
-        # Handle --relink flag
-        if args.relink:
-            _handle_relink_operation_flow(fetcher, args, extract_dir)
-            return
-
-        # Handle --rm flag
-        if args.rm:
-            _handle_rm_operation_flow(fetcher, args, extract_dir)
-            return
-
-        # Handle --prune flag
-        if args.prune:
-            _handle_prune_operation_flow(fetcher, args, extract_dir)
-            return
-
-        # Handle --check flag
-        if args.check:
-            exit_code = _handle_check_operation_flow(fetcher, args, extract_dir)
-            raise SystemExit(exit_code)
-
-        # If no explicit operation flags (not --ls, --list, --rm), default to either ls or fetch based on presence of functional flags
-        if not has_operation_flag:
-            # If functional flags were provided (--fork or --release), proceed with fetch operation
-            if has_functional_flags:
-                # Check if -f was provided without a value (multi-fork update mode)
-                if hasattr(args, "fork") and args.fork is None:
-                    # -f without a value: update all forks with managed links
-                    logger.info("Updating all forks with managed links...")
-                    results = fetcher.update_all_managed_forks(
-                        output_dir, extract_dir, dry_run=args.dry_run
-                    )
-                    # Print summary
-                    success_count = sum(1 for r in results.values() if r is not None)
-                    if success_count > 0:
-                        print(f"Successfully updated {success_count} fork(s)")
-                    else:
-                        print("No forks were updated")
-                    return
-
-                # Use the fork specified by the user or default if not specified
-                actual_fork = convert_fork_to_enum(
-                    args.fork
-                    if hasattr(args, "fork") and args.fork is not None
-                    else None
-                )
-                from .common import FORKS
-
-                repo = FORKS[actual_fork].repo
-                logger.info(f"Using fork: {actual_fork} ({repo})")
-
-                _handle_default_operation_flow(
-                    fetcher, repo, output_dir, extract_dir, args
-                )
-                return
-            else:
-                # No operation flags and no functional flags - default to listing all links
-                _handle_ls_operation_flow(
-                    fetcher, args, extract_dir, list_all_forks=True
-                )
-                return
-
-        # Handle default operation (fetch and extract) - fallback, though shouldn't reach here due to operation flag logic
-        # This fallback is here to make sure we handle any remaining cases
-        actual_fork = convert_fork_to_enum(
-            args.fork if hasattr(args, "fork") and args.fork is not None else None
-        )
-        from .common import FORKS
-
-        repo = FORKS[actual_fork].repo
-        logger.info(f"Using fork: {actual_fork} ({repo})")
-
-        _handle_default_operation_flow(fetcher, repo, output_dir, extract_dir, args)
 
     except ProtonFetcherError as e:
         print(f"Error: {e}")

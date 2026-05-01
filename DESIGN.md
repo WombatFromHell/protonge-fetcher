@@ -2,15 +2,91 @@
 
 ## Overview
 
-ProtonFetcher is a Python module designed to fetch and extract ProtonGE GitHub release assets. It supports multiple Proton forks (GE-Proton, Proton-EM, and CachyOS) with functionality for downloading, verifying, extracting, and managing symbolic links with progress indication.
+ProtonFetcher is a Python module designed to fetch and extract Proton release assets from GitHub and Forgejo hosts. It supports multiple Proton forks (GE-Proton, Proton-EM, CachyOS, and DW-Proton) with functionality for downloading, verifying, extracting, and managing symbolic links with progress indication.
+
+## Code Navigation Map
+
+```
+src/protonfetcher/
+├── __init__.py          # Package marker
+├── __version__.py       # Version management (embedded + metadata fallback)
+├── common.py            # Types, enums, protocols, constants, fork config
+├── exceptions.py        # Exception hierarchy
+├── utils.py             # Version parsing, asset naming, protocol validation
+├── network.py           # NetworkClient (curl-based, implements NetworkClientProtocol)
+├── filesystem.py        # FileSystemClient (pathlib-based, implements FileSystemClientProtocol)
+├── spinner.py           # Progress indication (Spinner + standalone formatting)
+├── release_manager.py   # Release discovery, asset resolution, XDG caching
+├── asset_downloader.py  # Download with size caching, spinner progress
+├── archive_extractor.py # tar.gz / tar.xz extraction with fallback
+├── link_manager.py      # Symlink management, version enum, pruning
+├── base_release_fetcher.py  # Abstract orchestrator (shared workflow)
+├── github_fetcher.py    # GitHubReleaseFetcher (GE-Proton, Proton-EM, CachyOS)
+├── forgejo_fetcher.py   # ForgejoReleaseFetcher (DW-Proton)
+└── cli.py               # CLI parsing, validation, operation dispatch
+
+src/entry.py             # Distribution entry point
+```
+
+## Dependency Graph
+
+```
+cli.py
+├── github_fetcher.py (GitHubReleaseFetcher)
+│   └── base_release_fetcher.py (BaseReleaseFetcher)
+│       ├── release_manager.py (ReleaseManager)
+│       │   ├── network.py (NetworkClient)
+│       │   └── filesystem.py (FileSystemClient)
+│       ├── asset_downloader.py (AssetDownloader)
+│       │   ├── network.py (NetworkClient)
+│       │   ├── filesystem.py (FileSystemClient)
+│       │   └── spinner.py (Spinner)
+│       ├── archive_extractor.py (ArchiveExtractor)
+│       │   ├── filesystem.py (FileSystemClient)
+│       │   └── spinner.py (Spinner)
+│       └── link_manager.py (LinkManager)
+│           └── filesystem.py (FileSystemClient)
+└── forgejo_fetcher.py (ForgejoReleaseFetcher)
+    └── base_release_fetcher.py (same shared components)
+
+common.py ← imported by all modules (types, protocols, constants, fork config)
+exceptions.py ← imported by fetchers, managers, downloader, extractor
+utils.py ← imported by fetchers, link_manager, release_manager
+```
+
+### Dependency Layers
+
+```
+Layer 1 (Protocols):      common.py (NetworkClientProtocol, FileSystemClientProtocol)
+Layer 2 (Clients):        network.py, filesystem.py
+Layer 3 (Components):     release_manager.py, asset_downloader.py, archive_extractor.py, link_manager.py, spinner.py
+Layer 4 (Orchestrators):  base_release_fetcher.py → github_fetcher.py, forgejo_fetcher.py
+Layer 5 (Interface):      cli.py, entry.py
+```
 
 ## Architecture
 
-The module follows a modular design with clear separation of concerns and dependency injection, organized under `src/protonfetcher/`.
+The module follows a modular design with clear separation of concerns, dependency injection, and a template-method pattern for platform-specific release fetching, organized under `src/protonfetcher/`.
+
+### Fetcher Hierarchy
+
+The fetcher architecture uses an abstract base class with concrete platform-specific subclasses:
+
+```
+BaseReleaseFetcher (abstract)
+├── GitHubReleaseFetcher  ← GE-Proton, Proton-EM, CachyOS (GitHub-hosted)
+└── ForgejoReleaseFetcher ← DW-Proton (Forgejo/Gitea-hosted on dawn.wine)
+```
+
+- **BaseReleaseFetcher**: Abstract base class providing shared infrastructure — directory management, symlink handling, extraction, download orchestration, environment validation, multi-fork updates, update checking, and release pruning. Delegates platform-specific behavior (URL construction, API calls, directory naming) to abstract methods implemented by subclasses.
+- **GitHubReleaseFetcher**: Concrete subclass for GitHub-hosted forks. Implements redirect-based tag fetching, GitHub API asset resolution, and fork-specific directory naming.
+- **ForgejoReleaseFetcher**: Concrete subclass for Forgejo-hosted forks (DW-Proton on dawn.wine). Implements Forgejo API calls (Gitea-compatible `/api/v1/repos/`), HTML fallback parsing, and DW-Proton-specific directory naming (`{tag}-x86_64` suffix).
 
 ### Core Components
 
-- **GitHubReleaseFetcher**: Main orchestrator coordinating workflow, environment validation, and process flow
+- **BaseReleaseFetcher**: Abstract orchestrator with shared workflow logic and abstract platform methods
+- **GitHubReleaseFetcher**: GitHub-specific release fetching (GE-Proton, Proton-EM, CachyOS)
+- **ForgejoReleaseFetcher**: Forgejo-specific release fetching (DW-Proton)
 - **ReleaseManager**: Handles release discovery, GitHub API interactions, asset resolution, and XDG-compliant caching
 - **AssetDownloader**: Manages downloads with progress indication and file size comparison caching
 - **ArchiveExtractor**: Handles extraction for `.tar.gz` and `.tar.xz` formats with fallback mechanisms
@@ -40,33 +116,54 @@ The architecture uses Protocol-based dependency injection for easy testing and c
 
 ### Module Structure
 
-- `common.py` - Shared types, enums, protocols, and constants
+- `common.py` - Shared types, enums, protocols, constants, and fork configuration
 - `exceptions.py` - Custom exception hierarchy
-- `utils.py` - Utility functions and protocol validation
-- `network.py` - Network client implementation
-- `filesystem.py` - File system client implementation
-- `spinner.py` - Progress indication with FPS limiting
-- `release_manager.py` - Release discovery and asset management
-- `asset_downloader.py` - Download operations with caching
-- `archive_extractor.py` - Archive extraction with fallbacks
-- `link_manager.py` - Symbolic link management, version enumeration, and release pruning
-- `github_fetcher.py` - Main orchestrator with optimized link management
-- `cli.py` - CLI interface and argument parsing
+- `utils.py` - Version parsing, asset naming, protocol validation, and byte formatting
+- `network.py` - Network client implementation (curl-based)
+- `filesystem.py` - File system client implementation (pathlib-based)
+- `spinner.py` - Progress indication with FPS limiting and standalone formatting functions
+- `release_manager.py` - Release discovery, asset resolution, and XDG-compliant caching
+- `asset_downloader.py` - Download operations with size-based caching and spinner progress
+- `archive_extractor.py` - Archive extraction with tarfile/system tar fallback
+- `link_manager.py` - Symbolic link management, version enumeration, release pruning, and fork-aware directory resolution
+- `base_release_fetcher.py` - Abstract base orchestrator with shared workflow logic
+- `github_fetcher.py` - GitHub-specific fetcher (GE-Proton, Proton-EM, CachyOS)
+- `forgejo_fetcher.py` - Forgejo-specific fetcher (DW-Proton on dawn.wine)
+- `cli.py` - CLI interface, argument parsing, and operation dispatch
 - `entry.py` - Entry point for distribution (located in `src/entry.py`)
+- `__version__.py` - Version management with embedded value and package metadata fallback
+
+### BaseReleaseFetcher
+
+Abstract base orchestrator providing shared infrastructure:
+
+- **Complete workflow coordination** (`fetch_and_extract`) — download, extract, link
+- **Link management** (`list_links`, `remove_release`, `prune_releases`)
+- **Release discovery** (`list_recent_releases`)
+- **Environment validation** — tool availability and directory permission checks
+- **Relink operations** (`relink_fork`) — force recreation of symlinks
+- **Dry-run preview** (`fetch_and_extract` with `dry_run=True`)
+- **Multi-fork updates** (`update_all_managed_forks`) — update all forks with managed links
+- **Update checking** (`check_for_updates`) — script-friendly update detection
+- **Release pruning** (`prune_releases` with configurable retention)
+- **Abstract platform methods** — `fetch_latest_tag`, `find_asset_by_name`, `get_remote_asset_size`, `list_recent_releases`, `_build_download_url`, `_get_expected_directories`, `_check_existing_directory`, `_find_extracted_directory`
 
 ### GitHubReleaseFetcher
 
-Main orchestrator with methods for:
+Concrete subclass for GitHub-hosted forks (GE-Proton, Proton-EM, CachyOS):
 
-- Complete workflow coordination (`fetch_and_extract`)
-- Link management (`list_links`, `remove_release`, `prune_releases`)
-- Release discovery (`list_recent_releases`)
-- Environment validation and process flow management
-- Relink operations (`relink_fork`)
-- Dry-run preview (`fetch_and_extract` with `dry_run=True`)
-- Multi-fork updates (`update_all_managed_forks`)
-- Update checking (`check_for_updates`)
-- Release pruning (`prune_releases` with configurable retention)
+- Redirect-based tag fetching via `/releases/latest`
+- GitHub API asset resolution with HTML fallback
+- Fork-specific directory naming (GE-Proton: `{tag}`, Proton-EM: `proton-{tag}`, CachyOS: `proton-{tag}-x86_64`)
+
+### ForgejoReleaseFetcher
+
+Concrete subclass for Forgejo-hosted forks (DW-Proton on dawn.wine):
+
+- Forgejo API tag fetching via `/api/v1/repos/{owner}/{repo}/releases/latest`
+- API-based asset resolution with HTML fallback
+- DW-Proton-specific directory naming (`{tag}-x86_64` suffix)
+- URL construction via `_api_url()` and `_host_url()` helpers
 
 ### ReleaseManager
 
@@ -127,11 +224,12 @@ The LinkManager includes intelligent link status checking to improve performance
 
 #### Version Parsing
 
-The LinkManager uses fork-specific version parsing:
+The LinkManager and `utils.py` use data-driven fork-specific version parsing via `_VERSION_PATTERNS`:
 
-- **GE-Proton**: `GE-Proton{major}-{minor}` format (e.g., `GE-Proton10-20`)
-- **Proton-EM**: `EM-{major}.{minor}-{patch}` format (e.g., `EM-10.0-30`)
-- **CachyOS**: `cachyos-{major}.{minor}-{date}-slr` format (e.g., `cachyos-10.0-20260207-slr`)
+- **GE-Proton**: `GE-Proton(\d+)-(\d+)` → `(prefix, major, 0, minor)` (e.g., `GE-Proton10-20`)
+- **Proton-EM**: `(?:proton-)?EM-(\d+)\.(\d+)-(\d+)` → `(prefix, major, minor, patch)` (e.g., `EM-10.0-30`)
+- **CachyOS**: `(?:proton-)?cachyos-(\d+)\.(\d+)-(\d+)-slr(?:-x86_64)?` → `(prefix, major, minor, patch)` (e.g., `cachyos-10.0-20260207-slr`)
+- **DW-Proton**: `dwproton-(\d+)\.(\d+)-(\d+)` → `(prefix, major, minor, patch)` (e.g., `dwproton-10.0-26`)
 
 ### CLI Interface
 
@@ -141,6 +239,8 @@ Provides command-line functionality:
 - Logging configuration
 - Operation flow handling (fetch, list, remove, links, relink, prune, dry-run)
 - Fork name conversion and validation
+- Dispatch between `GitHubReleaseFetcher` and `ForgejoReleaseFetcher` based on fork
+- DW-Proton support in all operations (ls, list, relink, rm, prune, check, fetch)
 
 ## CLI Interface
 
@@ -149,7 +249,7 @@ Provides command-line functionality:
 - `--extract-dir`, `-x`: Extract directory (default: `~/.steam/steam/compatibilitytools.d/`)
 - `--output`, `-o`: Download directory (default: `~/Downloads/`)
 - `--release`, `-r`: Specify release tag instead of latest
-- `--fork`, `-f`: Fork to download (GE-Proton, Proton-EM, CachyOS). Use `-f` without a value to update all forks with managed links
+- `--fork`, `-f`: Fork to download (GE-Proton, Proton-EM, CachyOS, DW-Proton). Use `-f` without a value to update all forks with managed links
 - `--list`, `-l`: List recent releases
 - `--ls`: List managed symbolic links (default behavior)
 - `--rm`: Remove specific release and update links
@@ -188,10 +288,11 @@ The `-f` flag can be used without a value to update all forks that have managed 
 - **Purpose**: Automatically update all Proton forks that are already in use (have managed symlinks)
 - **Use Case**: Keep all installed Proton forks up-to-date with a single command
 - **Behavior**:
-  - Scans all supported forks (GE-Proton, Proton-EM, CachyOS)
+  - Scans all supported forks (GE-Proton, Proton-EM, CachyOS, DW-Proton)
   - For each fork, checks if any managed symlinks exist
   - For forks with managed symlinks, fetches and installs the latest release
   - Skips forks without managed symlinks
+  - Uses `GitHubReleaseFetcher` for GitHub-hosted forks, `ForgejoReleaseFetcher` for DW-Proton
 - **Output**: Shows which forks were updated and which were skipped
 
 **Example Usage:**
@@ -239,6 +340,9 @@ protonfetcher --relink --fork Proton-EM
 
 # Force relinking of CachyOS symlinks
 protonfetcher --relink --fork CachyOS
+
+# Force relinking of DW-Proton symlinks
+protonfetcher --relink --fork DW-Proton
 ```
 
 This provides users with fine-grained control over symlink management while preserving the automatic optimization for normal operations.
@@ -359,7 +463,7 @@ The `--prune` flag removes old unmanaged Proton releases, keeping only the newes
 - **Purpose**: Clean up disk space by removing old Proton versions that are not actively managed by symlinks
 - **Use Case**: Maintenance after multiple updates, freeing disk space while preserving active versions
 - **Behavior**:
-  - Used alone (`--prune`): Scans all forks (GE-Proton, Proton-EM, CachyOS)
+  - Used alone (`--prune`): Scans all forks (GE-Proton, Proton-EM, CachyOS, DW-Proton)
   - With `--fork <name>` (`--prune -f <name>`): Prunes specific fork only
   - With `--keep N`: Retains N newest versions instead of default 3
   - With `--dry-run`: Shows what would be pruned without confirmation or changes
@@ -466,6 +570,7 @@ Supports multiple Proton forks with structured configuration:
 - `GE_PROTON = "GE-Proton"`
 - `PROTON_EM = "Proton-EM"`
 - `CACHYOS = "CachyOS"`
+- `DW_PROTON = "DW-Proton"`
 
 ### ForkConfig Dataclass
 
@@ -474,6 +579,8 @@ Supports multiple Proton forks with structured configuration:
 class ForkConfig:
     repo: str
     archive_format: str
+    api_base: str = "https://api.github.com"
+    host_base: str = "https://github.com"
 ```
 
 ### Forks Dictionary
@@ -492,6 +599,12 @@ FORKS: dict[ForkName, ForkConfig] = {
         repo="CachyOS/proton-cachyos",
         archive_format=".tar.xz",
     ),
+    ForkName.DW_PROTON: ForkConfig(
+        repo="dawn-winery/dwproton",
+        archive_format=".tar.xz",
+        api_base="https://dawn.wine/api/v1",
+        host_base="https://dawn.wine",
+    ),
 }
 ```
 
@@ -500,24 +613,55 @@ FORKS: dict[ForkName, ForkConfig] = {
 - **GE-Proton**: `.tar.gz`
 - **Proton-EM**: `.tar.xz`
 - **CachyOS**: `.tar.xz`
+- **DW-Proton**: `.tar.xz`
 
 ### Asset Naming Conventions
 
 - **GE-Proton**: `{tag}.tar.gz` (e.g., `GE-Proton10-20.tar.gz`)
 - **Proton-EM**: `proton-{tag}.tar.xz` (e.g., `proton-EM-10.0-30.tar.xz`)
 - **CachyOS**: `proton-{tag}-x86_64.tar.xz` (e.g., `proton-cachyos-10.0-20260207-slr-x86_64.tar.xz`)
+- **DW-Proton**: `{tag}-x86_64.tar.xz` (e.g., `dwproton-10.0-26-x86_64.tar.xz`)
 
 ### Extraction Directory Naming
 
 - **GE-Proton**: `{tag}` (e.g., `GE-Proton10-20`)
 - **Proton-EM**: `proton-{tag}` (e.g., `proton-EM-10.0-30`)
 - **CachyOS**: `proton-{tag}-x86_64` (e.g., `proton-cachyos-10.0-20260207-slr-x86_64`)
+- **DW-Proton**: `{tag}-x86_64` (e.g., `dwproton-10.0-26-x86_64`)
 
 ### Symlink Naming
 
 - **GE-Proton**: `GE-Proton`, `GE-Proton-Fallback`, `GE-Proton-Fallback2`
 - **Proton-EM**: `Proton-EM`, `Proton-EM-Fallback`, `Proton-EM-Fallback2`
 - **CachyOS**: `CachyOS`, `CachyOS-Fallback`, `CachyOS-Fallback2`
+- **DW-Proton**: `DW-Proton`, `DW-Proton-Fallback`, `DW-Proton-Fallback2`
+
+## Forgejo Platform Support
+
+DW-Proton is hosted on a Forgejo instance (dawn.wine) which uses a Gitea-compatible API. The `ForgejoReleaseFetcher` handles platform differences:
+
+### API Differences
+
+- **API base URL**: `/api/v1/repos/{owner}/{repo}/` (not `/repos/{owner}/{repo}/`)
+- **No `/releases/latest` redirect**: Must use the API endpoint directly (`/releases/latest`)
+- **Download URL**: `/{owner}/{repo}/releases/download/{tag}/{filename}`
+- **User-Agent**: Requires browser-like User-Agent header for API access
+
+### URL Construction
+
+- `_api_url(repo, *paths)` — Builds API URLs: `https://dawn.wine/api/v1/repos/{owner}/{repo}/{paths}`
+- `_host_url(repo, *paths)` — Builds web/download URLs: `https://dawn.wine/{owner}/{repo}/{paths}`
+
+### Asset Resolution
+
+- **Primary**: Forgejo API (`/releases/tags/{tag}`) — returns JSON with `assets` array
+- **Fallback**: HTML parsing of release page (`/releases/tag/{tag}`)
+- **Asset selection**: Looks for `.tar.xz` extension, prefers x86_64 variant
+
+### Directory Resolution
+
+- DW-Proton archives extract to `{tag}-x86_64` directories (e.g., `dwproton-10.0-26-x86_64`)
+- `_find_extracted_directory` checks `{tag}-x86_64` first, then `{tag}` as fallback
 
 ## Error Handling
 
@@ -550,7 +694,9 @@ The test suite employs multiple testing strategies:
 - **Separation of Concerns**: Clear separation between unit, integration, and workflow tests
 - **Consistent Naming**: `test_<module_name>.py` pattern
 - **Coverage Integration**: Coverage tests integrated into respective module files
-- **Fork Parametrization**: Systematic parametrization across all three Proton forks
+- **Fork Parametrization**: Systematic parametrization across all four Proton forks
+- **End-to-End Tests**: `test_link_manager_e2e.py` and `test_release_manager_e2e.py` for full workflow validation
+- **Platform Tests**: `test_github_fetcher.py` and `test_forgejo_fetcher.py` for platform-specific behavior
 
 ### Complexity Regression Test Thresholds
 
@@ -591,13 +737,15 @@ Code quality thresholds enforced by complexity regression tests:
 - **Configurable progress**: FPS-limited progress indication (default: 10 FPS)
 - **Environment validation**: Tool availability and directory permission checks
 - **Protocol-based architecture**: Abstract protocols with documentation and versioning
+- **Template-method pattern**: `BaseReleaseFetcher` abstract class with platform-specific subclasses
 - **Dual extraction methods**: tarfile library + system tar fallback
-- **Intelligent version parsing**: Sophisticated version comparison for proper sorting
+- **Intelligent version parsing**: Data-driven fork-specific version comparison
 - **Symlink management**: Automated creation with fallback chains and optimization
-- **Network resilience**: GitHub API fallbacks including HTML parsing
+- **Network resilience**: GitHub API and Forgejo API fallbacks including HTML parsing
 - **Asset verification**: Size-based caching to avoid redundant downloads
 - **Comprehensive error handling**: Specific exceptions with detailed context
-- **Multi-fork support**: GE-Proton, Proton-EM, and CachyOS with fork-specific handling
+- **Multi-fork support**: GE-Proton, Proton-EM, CachyOS, and DW-Proton with fork-specific handling
+- **Multi-platform support**: GitHub (api.github.com) and Forgejo (dawn.wine) hosts
 - **Release pruning**: Configurable retention with linked version protection
 - **Enhanced visibility**: `--ls` shows managed symlinks and prunable versions
 
@@ -659,6 +807,12 @@ The module defines several type aliases for clarity and maintainability:
 - `VersionGroups = dict[VersionTuple, list[Path]]`
 - `LinkSpecList = list[SymlinkSpec]`
 
+## Data Classes
+
+- **`ForkConfig`** (frozen): `repo`, `archive_format`, `api_base`, `host_base`
+- **`SymlinkSpec`**: `link_path`, `target_path`, `priority` (0=main, 1=fallback, 2=fallback2)
+- **`SpinnerConfig`**: `iterable`, `total`, `desc`, `unit`, `unit_scale`, `disable`, `fps_limit`, `width`, `show_progress`, `show_file_details`
+
 ## Constants
 
 - `DEFAULT_TIMEOUT = 30` (seconds for network operations)
@@ -677,9 +831,11 @@ The ReleaseManager implements XDG-compliant caching:
 
 ## Progress Indication
 
-The Spinner class provides configurable progress indication:
+The `spinner.py` module provides configurable progress indication with standalone formatting functions:
 
-- **Braille Spinner Characters**: Smooth animation with 6 characters
+### Spinner Class
+
+- **Braille Spinner Characters**: Smooth animation with 6 characters (`SPINNER_CHARS`)
 - **FPS Limiting**: Configurable (default: 10 FPS) to prevent excessive terminal updates
 - **Progress Bar**: Optional bar display when total is known
 - **Rate Calculation**: Shows transfer rate (B/s, KB/s, MB/s, GB/s)
@@ -687,15 +843,32 @@ The Spinner class provides configurable progress indication:
 - **Context Manager Support**: Can be used with `with` statement
 - **Iterable Wrapping**: Can wrap iterables for automatic progress tracking
 
+### Standalone Formatting Functions
+
+- `format_progress_bar(percent, width)` — Formats progress bar string
+- `format_bytes_rate(rate)` — Formats byte rate with SI prefix
+- `format_rate(current, start_time, unit, unit_scale, mode)` — Formats data-transfer rate
+- `build_display_line(desc, spinner_char, current, total, unit, unit_scale, show_progress, width, start_time)` — Builds full display string
+
 ## Directory Validation
 
 The LinkManager implements pattern-based directory validation:
 
-- **GE-Proton Pattern**: `^GE-Proton\d+-\d+$`
-- **Proton-EM Patterns**: `^proton-EM-\d+\.\d+-\d+$` or `^EM-\d+\.\d+-\d+$`
-- **CachyOS Patterns**: `^proton-cachyos-\d+\.\d+-\d+-slr(-x86_64)?$` or `^cachyos-\d+\.\d+-\d+-slr$`
+- **GE-Proton Pattern**: `^GE-Proton\d+-\d+(?:-.*)?$`
+- **Proton-EM Patterns**: `^proton-EM-\d+\.\d+-\d+(?:-.*)?$` or `^EM-\d+\.\d+-\d+(?:-.*)?$`
+- **CachyOS Patterns**: `^proton-cachyos-\d+\.\d+-\d+-slr(?:-x86_64)?(?:-.*)?$` or `^cachyos-\d+\.\d+-\d+-slr(?:-.*)?$`
+- **DW-Proton Pattern**: `^dwproton-\d+\.\d+-\d+-x86_64(?:-.*)?$`
 
 This prevents non-Proton directories (e.g., "LegacyRuntime") from being included in version candidates.
+
+## Skip Prefixes
+
+The LinkManager uses fork-specific skip prefixes to exclude directories belonging to other forks:
+
+- **GE-Proton skips**: `EM-`, `proton-EM-`, `cachyos-`, `proton-cachyos-`, `dwproton-`
+- **Proton-EM skips**: `GE-Proton`, `cachyos-`, `proton-cachyos-`, `dwproton-`
+- **CachyOS skips**: `GE-Proton`, `EM-`, `proton-EM-`, `dwproton-`
+- **DW-Proton skips**: `GE-Proton`, `EM-`, `cachyos-`, `proton-cachyos-`, `proton-EM-`
 
 ## Duplicate Handling
 

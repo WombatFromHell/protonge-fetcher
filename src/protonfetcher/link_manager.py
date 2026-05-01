@@ -21,6 +21,34 @@ from .utils import parse_version
 
 logger = logging.getLogger(__name__)
 
+# Data-driven link naming: ForkName → (main, fallback1, fallback2) suffixes
+_LINK_NAMES: dict[ForkName, tuple[str, str, str]] = {
+    ForkName.GE_PROTON: ("GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"),
+    ForkName.PROTON_EM: ("Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"),
+    ForkName.CACHYOS: ("CachyOS", "CachyOS-Fallback", "CachyOS-Fallback2"),
+    ForkName.DW_PROTON: ("DW-Proton", "DW-Proton-Fallback", "DW-Proton-Fallback2"),
+}
+
+# Data-driven skip prefixes: ForkName → set of tag prefixes to skip
+_SKIP_PREFIXES: dict[ForkName, set[str]] = {
+    ForkName.GE_PROTON: {
+        "EM-",
+        "proton-EM-",
+        "cachyos-",
+        "proton-cachyos-",
+        "dwproton-",
+    },
+    ForkName.PROTON_EM: {"GE-Proton", "cachyos-", "proton-cachyos-", "dwproton-"},
+    ForkName.CACHYOS: {"GE-Proton", "EM-", "proton-EM-", "dwproton-"},
+    ForkName.DW_PROTON: {
+        "GE-Proton",
+        "EM-",
+        "cachyos-",
+        "proton-cachyos-",
+        "proton-EM-",
+    },
+}
+
 
 class LinkManager:
     """Manages symbolic links for Proton installations."""
@@ -47,32 +75,12 @@ class LinkManager:
         Returns:
             Tuple of three Path objects: (main, fallback1, fallback2)
         """
-        match fork:
-            case ForkName.PROTON_EM:
-                return (
-                    extract_dir / "Proton-EM",
-                    extract_dir / "Proton-EM-Fallback",
-                    extract_dir / "Proton-EM-Fallback2",
-                )
-            case ForkName.CACHYOS:
-                return (
-                    extract_dir / "CachyOS",
-                    extract_dir / "CachyOS-Fallback",
-                    extract_dir / "CachyOS-Fallback2",
-                )
-            case ForkName.GE_PROTON:
-                return (
-                    extract_dir / "GE-Proton",
-                    extract_dir / "GE-Proton-Fallback",
-                    extract_dir / "GE-Proton-Fallback2",
-                )
-            case _:  # Handle any unhandled cases
-                # This shouldn't happen with ForkName, but added for exhaustiveness
-                return (
-                    extract_dir / "",
-                    extract_dir / "",
-                    extract_dir / "",
-                )
+        suffixes = _LINK_NAMES[fork]
+        return (
+            extract_dir / suffixes[0],
+            extract_dir / suffixes[1],
+            extract_dir / suffixes[2],
+        )
 
     def _find_ge_proton_tag_directory(self, extract_dir: Path, tag: str) -> Path:
         """Find tag directory for GE-Proton.
@@ -164,6 +172,38 @@ class LinkManager:
             f"Manual release directory not found: {extract_dir / tag}, {cachyos_dir}, or {cachyos_dir_no_suffix}"
         )
 
+    def _find_dwproton_tag_directory(self, extract_dir: Path, tag: str) -> Path:
+        """Find tag directory for DW-Proton.
+
+        Args:
+            extract_dir: Directory to search
+            tag: Release tag
+
+        Returns:
+            Path to the found directory
+
+        Raises:
+            LinkManagementError: If directory not found
+        """
+        # DW-Proton archives extract to directory with -x86_64 suffix
+        # e.g., tag 'dwproton-10.0-26' extracts to 'dwproton-10.0-26-x86_64'
+        dwproton_dir = extract_dir / f"{tag}-x86_64"
+        if self.file_system_client.exists(
+            dwproton_dir
+        ) and self.file_system_client.is_dir(dwproton_dir):
+            return dwproton_dir
+
+        # If not found, also try without -x86_64 suffix
+        tag_dir_path = extract_dir / tag
+        if self.file_system_client.exists(
+            tag_dir_path
+        ) and self.file_system_client.is_dir(tag_dir_path):
+            return tag_dir_path
+
+        raise LinkManagementError(
+            f"Manual release directory not found: {extract_dir / tag} or {dwproton_dir}"
+        )
+
     def _validate_find_tag_inputs(
         self,
         extract_dir: Path,
@@ -218,11 +258,13 @@ class LinkManager:
             return self._find_cachyos_tag_directory(extract_dir, tag)
         elif fork == ForkName.GE_PROTON:
             return self._find_ge_proton_tag_directory(extract_dir, tag)
+        elif fork == ForkName.DW_PROTON:
+            return self._find_dwproton_tag_directory(extract_dir, tag)
         else:
             raise ValueError(f"Unsupported fork: {fork}")
 
     def _get_tag_name(self, entry: Path, fork: ForkName) -> str:
-        """Get the tag name from the directory entry, handling Proton-EM prefix."""
+        """Get the tag name from the directory entry, handling fork-specific prefixes."""
         if fork == ForkName.PROTON_EM and entry.name.startswith("proton-"):
             return entry.name[7:]  # Remove "proton-" prefix
         elif fork == ForkName.CACHYOS and entry.name.startswith("proton-"):
@@ -231,35 +273,17 @@ class LinkManager:
             if name.endswith("-x86_64"):
                 name = name[:-7]  # Remove "-x86_64" suffix
             return name
+        elif fork == ForkName.DW_PROTON and entry.name.endswith("-x86_64"):
+            # Remove "-x86_64" suffix for DW-Proton
+            return entry.name[:-7]
         else:
             return entry.name
 
     def _should_skip_directory(self, tag_name: str, fork: ForkName) -> bool:
         """Check if directory should be skipped based on fork."""
-        if fork == ForkName.PROTON_EM and tag_name.startswith("GE-Proton"):
-            # Skip GE-Proton directories when processing Proton-EM
-            return True
-        elif fork == ForkName.CACHYOS and tag_name.startswith("GE-Proton"):
-            # Skip GE-Proton directories when processing CachyOS
-            return True
-        elif fork == ForkName.GE_PROTON and (
-            tag_name.startswith("EM-")
-            or (tag_name.startswith("proton-") and "EM-" in tag_name)
-        ):
-            # Skip Proton-EM directories when processing GE-Proton
-            return True
-        elif fork == ForkName.GE_PROTON and (
-            tag_name.startswith("cachyos-")
-            or (tag_name.startswith("proton-") and "cachyos" in tag_name.lower())
-        ):
-            # Skip CachyOS directories when processing GE-Proton
-            return True
-        elif fork == ForkName.PROTON_EM and (
-            tag_name.startswith("cachyos-")
-            or (tag_name.startswith("proton-") and "cachyos" in tag_name.lower())
-        ):
-            # Skip CachyOS directories when processing Proton-EM
-            return True
+        for prefix in _SKIP_PREFIXES[fork]:
+            if tag_name.startswith(prefix):
+                return True
         return False
 
     def _is_valid_proton_directory(self, entry: Path, fork: ForkName) -> bool:
@@ -292,6 +316,11 @@ class LinkManager:
                     re.match(cachyos_pattern1, entry.name)
                     or re.match(cachyos_pattern2, entry.name)
                 )
+            case ForkName.DW_PROTON:
+                # DW-Proton directories should match pattern: dwproton-{major}.{minor}-{patch}-x86_64
+                # Allow optional suffixes (e.g., -HDRTEST, -RC1)
+                dwproton_pattern = r"^dwproton-\d+\.\d+-\d+-x86_64(?:-.*)?$"
+                return bool(re.match(dwproton_pattern, entry.name))
 
     def find_version_candidates(
         self, extract_dir: Path, fork: ForkName
@@ -432,7 +461,24 @@ class LinkManager:
         Raises:
             LinkManagementError: If target directory doesn't exist
         """
-        return self._create_symlinks_from_test(extract_dir, target_path, fork)
+        # Check if target directory exists
+        if not self.file_system_client.exists(
+            target_path
+        ) or not self.file_system_client.is_dir(target_path):
+            raise LinkManagementError(f"Target directory does not exist: {target_path}")
+
+        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
+
+        # Build top_3 with the same target for all entries
+        from .common import VersionTuple
+
+        top_3: list[tuple[VersionTuple, Path]] = [
+            (("test", 0, 0, 0), target_path),
+            (("test", 0, 0, 0), target_path),
+            (("test", 0, 0, 0), target_path),
+        ]
+
+        return self.create_symlinks(main, fb1, fb2, top_3)
 
     def _create_symlinks_internal(
         self,
@@ -444,61 +490,6 @@ class LinkManager:
         """Internal implementation for creating symlinks with 4 parameters."""
         # Create SymlinkSpec objects for all symlinks we want to create
         wanted_specs = self._create_symlink_specs(main, fb1, fb2, top_3)
-
-        # Build a mapping from link path to target path
-        wants: Dict[Path, Path] = {
-            spec.link_path: spec.target_path for spec in wanted_specs
-        }
-
-        # First pass: Remove unwanted symlinks and any real directories that conflict with wanted symlinks
-        self._cleanup_unwanted_links(main, fb1, fb2, wants)
-
-        for link, target in wants.items():
-            self._cleanup_existing_path_before_symlink(link, target)
-            # Calculate relative path from the link location to the target for relative symlinks
-            # If target is not in a subdirectory of link's parent, use absolute path
-            try:
-                relative_target = target.relative_to(link.parent)
-            except ValueError:
-                # If target is not a subpath of link.parent, use absolute path
-                relative_target = target
-            # Use target_is_directory=True to correctly handle directory symlinks
-            try:
-                self.file_system_client.symlink_to(
-                    link, relative_target, target_is_directory=True
-                )
-                logger.info("Created symlink %s -> %s", link.name, relative_target)
-            except OSError as e:
-                logger.error(
-                    "Failed to create symlink %s -> %s: %s", link.name, target.name, e
-                )
-                # Don't re-raise to handle gracefully as expected by test
-                # The function should complete without crashing even if symlink creation fails
-                continue  # Continue to the next link instead of failing the entire function
-
-        return True
-
-    def _create_symlinks_from_test(
-        self,
-        extract_dir: Path,
-        target_path: Path,
-        fork: ForkName,
-    ) -> bool:
-        """Implementation for test usage: creating all 3 symlinks to the same target."""
-        # Check if target directory exists - if not, raise LinkManagementError as expected by tests
-        if not self.file_system_client.exists(
-            target_path
-        ) or not self.file_system_client.is_dir(target_path):
-            raise LinkManagementError(f"Target directory does not exist: {target_path}")
-
-        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
-
-        # Create all 3 symlinks to the same target_path
-        wanted_specs = [
-            SymlinkSpec(link_path=main, target_path=target_path, priority=0),
-            SymlinkSpec(link_path=fb1, target_path=target_path, priority=1),
-            SymlinkSpec(link_path=fb2, target_path=target_path, priority=2),
-        ]
 
         # Build a mapping from link path to target path
         wants: Dict[Path, Path] = {

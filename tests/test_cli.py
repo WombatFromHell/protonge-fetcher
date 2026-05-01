@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from protonfetcher.cli import (
-    _handle_check_operation_flow,
+    _handle_check_operation,
     convert_fork_to_enum,
     main,
     parse_arguments,
@@ -561,7 +561,7 @@ class TestCheckForUpdates:
 
 
 class TestCheckOperationFlow:
-    """Tests for _handle_check_operation_flow() CLI handler."""
+    """Tests for _handle_check_operation() CLI handler."""
 
     def test_check_single_fork_update_available(
         self,
@@ -595,9 +595,12 @@ class TestCheckOperationFlow:
         args.fork = "GE-Proton"
         args.check = True
 
-        exit_code = _handle_check_operation_flow(fetcher, args, extract_dir)
+        forgejo_fetcher = mocker.MagicMock()
 
-        assert exit_code == 0
+        with pytest.raises(SystemExit) as exc_info:
+            _handle_check_operation(fetcher, forgejo_fetcher, args, extract_dir)
+        assert exc_info.value.code == 0
+
         captured = capsys.readouterr()
         assert "New release available for GE-Proton: GE-Proton10-21!" in captured.out
 
@@ -635,9 +638,12 @@ class TestCheckOperationFlow:
         args.fork = "GE-Proton"
         args.check = True
 
-        exit_code = _handle_check_operation_flow(fetcher, args, extract_dir)
+        forgejo_fetcher = mocker.MagicMock()
 
-        assert exit_code == 1
+        with pytest.raises(SystemExit) as exc_info:
+            _handle_check_operation(fetcher, forgejo_fetcher, args, extract_dir)
+        assert exc_info.value.code == 1
+
         captured = capsys.readouterr()
         assert "GE-Proton: up-to-date" in captured.out
 
@@ -693,6 +699,13 @@ class TestCheckCLI:
 
         mocker.patch.object(GitHubReleaseFetcher, "__init__", mock_init)
 
+        # Mock ForgejoReleaseFetcher
+        mock_forgejo = mocker.MagicMock()
+        mock_forgejo.link_manager.has_managed_links.return_value = False
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo
+        )
+
         with pytest.raises(SystemExit) as exc_info:
             main()
 
@@ -742,6 +755,12 @@ class TestCheckCLI:
             self.link_manager.file_system_client = fs
 
         mocker.patch.object(GitHubReleaseFetcher, "__init__", mock_init)
+
+        # Mock ForgejoReleaseFetcher
+        mock_forgejo = mocker.MagicMock()
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo
+        )
 
         with pytest.raises(SystemExit) as exc_info:
             main()
@@ -811,7 +830,7 @@ class TestDryRunWorkflow:
             mock_fetcher.link_manager, "find_version_candidates", return_value=[]
         )
         mocker.patch(
-            "protonfetcher.github_fetcher.parse_version",
+            "protonfetcher.base_release_fetcher.parse_version",
             return_value=("GE-Proton", 10, 20, 0),
         )
         mocker.patch.object(
@@ -855,7 +874,7 @@ class TestDryRunWorkflow:
             mock_fetcher.link_manager, "find_version_candidates", return_value=[]
         )
         mocker.patch(
-            "protonfetcher.github_fetcher.parse_version",
+            "protonfetcher.base_release_fetcher.parse_version",
             return_value=("GE-Proton", 10, 20, 0),
         )
         mocker.patch.object(
@@ -918,7 +937,7 @@ class TestDryRunWorkflow:
             mock_fetcher.link_manager, "find_version_candidates", return_value=[]
         )
         mocker.patch(
-            "protonfetcher.github_fetcher.parse_version",
+            "protonfetcher.base_release_fetcher.parse_version",
             return_value=("GE-Proton", 10, 20, 0),
         )
         mocker.patch.object(
@@ -983,7 +1002,7 @@ class TestDryRunOutput:
             mock_fetcher.link_manager, "find_version_candidates", return_value=[]
         )
         mocker.patch(
-            "protonfetcher.github_fetcher.parse_version",
+            "protonfetcher.base_release_fetcher.parse_version",
             return_value=("GE-Proton", 10, 20, 0),
         )
         mocker.patch.object(
@@ -1035,7 +1054,7 @@ class TestDryRunOutput:
             mock_fetcher.link_manager, "find_version_candidates", return_value=[]
         )
         mocker.patch(
-            "protonfetcher.github_fetcher.parse_version",
+            "protonfetcher.base_release_fetcher.parse_version",
             return_value=("GE-Proton", 10, 20, 0),
         )
         mocker.patch.object(
@@ -1092,10 +1111,14 @@ class TestDryRunIntegration:
     ) -> None:
         """Test CLI --dry-run flag works end-to-end."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.fetch_and_extract.return_value = None
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch("shutil.which", return_value="/usr/bin/curl")
         mocker.patch("protonfetcher.cli.sys.argv", argv)
@@ -1136,10 +1159,14 @@ class TestListReleasesOperation:
     ) -> None:
         """Test listing recent releases."""
         mock_fetcher = mocker.MagicMock()
-        mock_fetcher.release_manager.list_recent_releases.return_value = expected_tags
+        mock_forgejo_fetcher = mocker.MagicMock()
+        mock_fetcher.list_recent_releases.return_value = expected_tags
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv", ["protonfetcher", "--list", "-f", fork]
@@ -1161,14 +1188,29 @@ class TestListLinksOperation:
     ) -> None:
         """Test listing links for all forks (default behavior)."""
         mock_fetcher = mocker.MagicMock()
-        mock_fetcher.link_manager.list_links.side_effect = [
-            {"GE-Proton": "/path/to/GE-Proton10-20"},
-            {"Proton-EM": None},
-            {"CachyOS": None},
-        ]
+        mock_forgejo_fetcher = mocker.MagicMock()
+
+        def list_links_side_effect(extract_dir, fork):
+            if fork == ForkName.GE_PROTON:
+                return {"GE-Proton": "/path/to/GE-Proton10-20"}
+            elif fork == ForkName.PROTON_EM:
+                return {"Proton-EM": None}
+            elif fork == ForkName.CACHYOS:
+                return {"CachyOS": None}
+            elif fork == ForkName.DW_PROTON:
+                return {"DW-Proton": None}
+            return {}
+
+        mock_fetcher.link_manager.list_links.side_effect = list_links_side_effect
+        mock_forgejo_fetcher.link_manager.list_links.side_effect = (
+            list_links_side_effect
+        )
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch("protonfetcher.cli.sys.argv", ["protonfetcher"])
 
@@ -1178,6 +1220,7 @@ class TestListLinksOperation:
         assert "GE-Proton" in captured.out
         assert "Proton-EM" in captured.out
         assert "CachyOS" in captured.out
+        assert "DW-Proton" in captured.out
         assert "Success" in captured.out
 
     def test_list_links_specific_fork(
@@ -1185,6 +1228,7 @@ class TestListLinksOperation:
     ) -> None:
         """Test listing links for a specific fork."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.link_manager.list_links.return_value = {
             "GE-Proton": "/path/to/GE-Proton10-20",
             "GE-Proton-Fallback": "/path/to/GE-Proton10-19",
@@ -1193,6 +1237,9 @@ class TestListLinksOperation:
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv", ["protonfetcher", "--ls", "-f", "GE-Proton"]
@@ -1225,10 +1272,14 @@ class TestRemoveOperation:
     ) -> None:
         """Test removing a release."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.link_manager.remove_release.return_value = True
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv",
@@ -1257,10 +1308,14 @@ class TestRelinkOperation:
     ) -> None:
         """Test relinking symlinks."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.relink_fork.return_value = True
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv",
@@ -1285,12 +1340,16 @@ class TestDownloadOperation:
     ) -> None:
         """Test downloading with --fork flag."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.fetch_and_extract.return_value = (
             temp_environment["extract_dir"] / "GE-Proton10-20"
         )
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv",
@@ -1319,12 +1378,16 @@ class TestDownloadOperation:
     ) -> None:
         """Test downloading specific release with --release flag."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.fetch_and_extract.return_value = (
             temp_environment["extract_dir"] / "GE-Proton10-15"
         )
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv",
@@ -1358,12 +1421,16 @@ class TestForkFlagWithoutValue:
     ) -> None:
         """Test that -f without a value calls update_all_managed_forks."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.update_all_managed_forks.return_value = {
             ForkName.GE_PROTON: temp_environment["extract_dir"] / "GE-Proton10-20"
         }
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv",
@@ -1392,10 +1459,15 @@ class TestForkFlagWithoutValue:
     ) -> None:
         """Test that -f without value and -n shows dry run message."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.update_all_managed_forks.return_value = {ForkName.GE_PROTON: None}
+        mock_forgejo_fetcher.link_manager.has_managed_links.return_value = False
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv",
@@ -1426,12 +1498,16 @@ class TestForkFlagWithoutValue:
     ) -> None:
         """Test that -f with a specific fork value uses fetch_and_extract."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.fetch_and_extract.return_value = (
             temp_environment["extract_dir"] / "GE-Proton10-20"
         )
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch(
             "protonfetcher.cli.sys.argv",
@@ -1478,10 +1554,14 @@ class TestErrorHandling:
     ) -> None:
         """Test handling of ProtonFetcherError and NetworkError."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.fetch_and_extract.side_effect = exception_type(exception_message)
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch("protonfetcher.cli.sys.argv", ["protonfetcher", "-f", "GE-Proton"])
 
@@ -1503,10 +1583,14 @@ class TestDebugLogging:
     ) -> None:
         """Test that --debug flag enables debug logging."""
         mock_fetcher = mocker.MagicMock()
+        mock_forgejo_fetcher = mocker.MagicMock()
         mock_fetcher.link_manager.list_links.return_value = {}
 
         mocker.patch(
             "protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher
+        )
+        mocker.patch(
+            "protonfetcher.cli.ForgejoReleaseFetcher", return_value=mock_forgejo_fetcher
         )
         mocker.patch("protonfetcher.cli.sys.argv", ["protonfetcher", "--debug"])
 

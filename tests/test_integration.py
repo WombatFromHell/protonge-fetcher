@@ -314,7 +314,7 @@ class TestSpinnerDirect:
         spinner = Spinner(fps_limit=fps_limit, disable=True)
         spinner._last_update_time = 0.0
 
-        result = spinner._should_update_display(test_time)
+        result = spinner._should_update(test_time)
 
         if fps_limit is None:
             assert result is True

@@ -100,6 +100,12 @@ class ArchiveExtractor:
         except ProtonFetcherError:
             return fallback_method(archive_path, target_dir)
 
+    # Format → fallback method name mapping (resolved at runtime via getattr)
+    _EXTRACT_METHODS: dict[str, str] = {
+        "tar.gz": "extract_gz_archive",
+        "tar.xz": "extract_xz_archive",
+    }
+
     def extract_archive(
         self,
         archive_path: Path,
@@ -123,31 +129,18 @@ class ArchiveExtractor:
             FetchError: If extraction fails
         """
         format_type = self._get_archive_format(archive_path)
-
-        if format_type == "tar.gz":
-            return self._extract_with_fallback(
-                archive_path,
-                target_dir,
-                show_progress,
-                show_file_details,
-                self.extract_gz_archive,
-            )
-        elif format_type == "tar.xz":
-            return self._extract_with_fallback(
-                archive_path,
-                target_dir,
-                show_progress,
-                show_file_details,
-                self.extract_xz_archive,
-            )
+        method_name = self._EXTRACT_METHODS.get(format_type)
+        if method_name:
+            fallback = getattr(self, method_name)
         else:
-            return self._extract_with_fallback(
-                archive_path,
-                target_dir,
-                show_progress,
-                show_file_details,
-                self._extract_with_system_tar,
-            )
+            fallback = self._extract_with_system_tar
+        return self._extract_with_fallback(
+            archive_path,
+            target_dir,
+            show_progress,
+            show_file_details,
+            fallback,
+        )
 
     def _extract_with_system_tar(self, archive_path: Path, target_dir: Path) -> Path:
         """Extract archive using system tar command."""

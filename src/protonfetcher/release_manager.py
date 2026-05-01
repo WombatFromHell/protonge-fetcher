@@ -51,15 +51,19 @@ class ReleaseManager:
         # Create cache directory if it doesn't exist
         self.file_system_client.mkdir(self._cache_dir, parents=True, exist_ok=True)
 
-    def _parse_redirect_location(self, response_stdout: str) -> Optional[str]:
-        """Parse redirect URL from Location header in response.
+    def _extract_redirect_url(self, response_stdout: str, original_url: str) -> str:
+        """Extract the redirected URL from HEAD response headers.
+
+        Tries Location header first, falls back to URL: field, then original URL.
 
         Args:
             response_stdout: stdout from the HEAD request
+            original_url: Original URL as final fallback
 
         Returns:
-            Extracted redirect path if found, None otherwise
+            Redirected URL path or original URL
         """
+        # Try Location header first
         location_match = re.search(
             r"Location: [^\r\n]*?(/releases/tag/[^/?#\r\n]+)",
             response_stdout,
@@ -67,45 +71,16 @@ class ReleaseManager:
         )
         if location_match:
             return location_match.group(1)
-        return None
 
-    def _parse_redirect_url_fallback(
-        self, response_stdout: str, original_url: str
-    ) -> str:
-        """Fallback URL parsing when Location header not found.
-
-        Tries to extract URL from response and parse its path portion.
-
-        Args:
-            response_stdout: stdout from the HEAD request
-            original_url: Original URL as fallback
-
-        Returns:
-            Extracted redirect path or original URL
-        """
+        # Fallback: try URL: field
         url_match = re.search(
             r"URL:\s*(https?://[^\s\r\n]+)", response_stdout, re.IGNORECASE
         )
         if url_match:
             full_url = url_match.group(1).strip()
-            parsed_url = urllib.parse.urlparse(full_url)
-            return parsed_url.path
+            return urllib.parse.urlparse(full_url).path
+
         return original_url
-
-    def _extract_redirected_url(self, response_stdout: str, original_url: str) -> str:
-        """Extract the redirected URL from response headers.
-
-        Args:
-            response_stdout: stdout from the HEAD request
-            original_url: Original URL as fallback
-
-        Returns:
-            Redirected URL path or original URL
-        """
-        redirected_url = self._parse_redirect_location(response_stdout)
-        if redirected_url is None:
-            return self._parse_redirect_url_fallback(response_stdout, original_url)
-        return redirected_url
 
     def _extract_tag_from_url(self, url_path: str) -> str:
         """Extract tag name from GitHub releases URL path.
@@ -147,20 +122,26 @@ class ReleaseManager:
             raise NetworkError(f"Failed to fetch latest tag for {repo}: {e}")
 
         # Extract redirected URL from response
-        redirected_url = self._extract_redirected_url(response.stdout, url)
+        redirected_url = self._extract_redirect_url(response.stdout, url)
 
         # Extract tag from URL
         tag = self._extract_tag_from_url(redirected_url)
         logger.debug(f"Found latest tag: {tag}")
         return tag
 
-    def _get_cache_key(self, repo: str, tag: str, asset_name: str) -> str:
-        """Generate a cache key for the given asset."""
-        key_data = f"{repo}_{tag}_{asset_name}_size"
-        return hashlib.md5(key_data.encode()).hexdigest()
+    def _get_cache_path(self, repo: str, tag: str, asset_name: str) -> Path:
+        """Get the cache file path for a given asset.
 
-    def _get_cache_path(self, cache_key: str) -> Path:
-        """Get the cache file path for a given key."""
+        Args:
+            repo: Repository in format 'owner/repo'
+            tag: Release tag
+            asset_name: Asset filename
+
+        Returns:
+            Path to the cache file
+        """
+        key_data = f"{repo}_{tag}_{asset_name}_size"
+        cache_key = hashlib.md5(key_data.encode()).hexdigest()
         return self._cache_dir / cache_key
 
     def _is_cache_valid(self, cache_path: Path, max_age: int = 3600) -> bool:
@@ -175,8 +156,7 @@ class ReleaseManager:
         self, repo: str, tag: str, asset_name: str
     ) -> Optional[int]:
         """Get cached asset size if available and not expired."""
-        cache_key = self._get_cache_key(repo, tag, asset_name)
-        cache_path = self._get_cache_path(cache_key)
+        cache_path = self._get_cache_path(repo, tag, asset_name)
 
         if self._is_cache_valid(cache_path):
             try:
@@ -195,8 +175,7 @@ class ReleaseManager:
         self, repo: str, tag: str, asset_name: str, size: int
     ) -> None:
         """Cache the asset size."""
-        cache_key = self._get_cache_key(repo, tag, asset_name)
-        cache_path = self._get_cache_path(cache_key)
+        cache_path = self._get_cache_path(repo, tag, asset_name)
 
         try:
             cache_data = {
@@ -390,22 +369,6 @@ class ReleaseManager:
                 # Re-raise other errors
                 raise fallback_error
 
-    def _check_for_error_in_response(
-        self, result: ProcessResult, asset_name: str
-    ) -> None:
-        """Check if the response contains an error (404, not found, etc.) and raise exception if found."""
-        stdout_content = getattr(result, "stdout", "")
-        stderr_content = getattr(result, "stderr", "")
-
-        if isinstance(stdout_content, str) and (
-            "404" in stdout_content or "not found" in stdout_content.lower()
-        ):
-            raise NetworkError(f"Remote asset not found: {asset_name}")
-        if isinstance(stderr_content, str) and (
-            "404" in stderr_content or "not found" in stderr_content.lower()
-        ):
-            raise NetworkError(f"Remote asset not found: {asset_name}")
-
     def _extract_size_from_response(self, response_text: str) -> Optional[int]:
         """Extract content-length from response headers.
 
@@ -464,8 +427,17 @@ class ReleaseManager:
                 # Make another HEAD request to the redirect URL
                 result = self.network_client.head(redirect_url, follow_redirects=False)
                 if result.returncode == 0:
-                    # Check for 404 or similar errors in redirect response too
-                    self._check_for_error_in_response(result, asset_name)
+                    # Check for 404 or similar errors in redirect response
+                    stdout_content = getattr(result, "stdout", "")
+                    stderr_content = getattr(result, "stderr", "")
+                    if isinstance(stdout_content, str) and (
+                        "404" in stdout_content or "not found" in stdout_content.lower()
+                    ):
+                        raise NetworkError(f"Remote asset not found: {asset_name}")
+                    if isinstance(stderr_content, str) and (
+                        "404" in stderr_content or "not found" in stderr_content.lower()
+                    ):
+                        raise NetworkError(f"Remote asset not found: {asset_name}")
 
                     size = self._extract_size_from_response(result.stdout)
                     if size:
@@ -474,29 +446,6 @@ class ReleaseManager:
                         if not in_test:
                             self._cache_asset_size(repo, tag, asset_name, size)
                         return size
-        return None
-
-    def _is_in_test(self) -> bool:
-        """Check if running in a test environment."""
-        return "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
-
-    def _try_get_cached_size(
-        self, repo: str, tag: str, asset_name: str
-    ) -> Optional[int]:
-        """Try to get cached asset size.
-
-        Returns:
-            Cached size if available and not in test mode, None otherwise
-        """
-        if self._is_in_test():
-            return None
-
-        cached_size = self._get_cached_asset_size(repo, tag, asset_name)
-        if cached_size is not None:
-            logger.debug(
-                f"Using cached size for {asset_name}: {format_bytes(cached_size)}"
-            )
-            return cached_size
         return None
 
     def _fetch_size_with_head_request(self, url: str, asset_name: str) -> ProcessResult:
@@ -517,7 +466,16 @@ class ReleaseManager:
             )
 
         # Check for 404 or similar errors even if returncode is 0
-        self._check_for_error_in_response(result, asset_name)
+        stdout_content = getattr(result, "stdout", "")
+        stderr_content = getattr(result, "stderr", "")
+        if isinstance(stdout_content, str) and (
+            "404" in stdout_content or "not found" in stdout_content.lower()
+        ):
+            raise NetworkError(f"Remote asset not found: {asset_name}")
+        if isinstance(stderr_content, str) and (
+            "404" in stderr_content or "not found" in stderr_content.lower()
+        ):
+            raise NetworkError(f"Remote asset not found: {asset_name}")
         return result
 
     def _extract_and_cache_size(
@@ -536,13 +494,14 @@ class ReleaseManager:
         size = self._extract_size_from_response(result.stdout)
         if size:
             logger.debug(f"Remote asset size: {format_bytes(size)}")
-            if not self._is_in_test():
+            if "pytest" not in sys.modules and "PYTEST_CURRENT_TEST" not in os.environ:
                 self._cache_asset_size(repo, tag, asset_name, size)
             return size
 
         # If content-length not available, try following redirects
+        in_test = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
         size = self._follow_redirect_and_get_size(
-            result, url, repo, tag, asset_name, self._is_in_test()
+            result, url, repo, tag, asset_name, in_test
         )
         return size
 
@@ -560,10 +519,14 @@ class ReleaseManager:
         Raises:
             FetchError: If unable to get asset size
         """
-        # Try cache first
-        cached_size = self._try_get_cached_size(repo, tag, asset_name)
-        if cached_size is not None:
-            return cached_size
+        # Try cache first (skip in test mode)
+        if "pytest" not in sys.modules and "PYTEST_CURRENT_TEST" not in os.environ:
+            cached_size = self._get_cached_asset_size(repo, tag, asset_name)
+            if cached_size is not None:
+                logger.debug(
+                    f"Using cached size for {asset_name}: {format_bytes(cached_size)}"
+                )
+                return cached_size
 
         url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
         logger.debug(f"Getting remote asset size from: {url}")

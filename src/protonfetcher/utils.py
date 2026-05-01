@@ -5,6 +5,19 @@ from typing import Type
 
 from .common import ForkName
 
+# Data-driven version parsing: ForkName → (regex, prefix, is_ge_proton)
+# is_ge_proton=True means minor is stored as patch-like (major, 0, minor)
+_VERSION_PATTERNS: dict[ForkName, tuple[str, str, bool]] = {
+    ForkName.GE_PROTON: (r"GE-Proton(\d+)-(\d+)", "GE-Proton", True),
+    ForkName.PROTON_EM: (r"(?:proton-)?EM-(\d+)\.(\d+)-(\d+)", "EM", False),
+    ForkName.CACHYOS: (
+        r"(?:proton-)?cachyos-(\d+)\.(\d+)-(\d+)-slr(?:-x86_64)?",
+        "cachyos",
+        False,
+    ),
+    ForkName.DW_PROTON: (r"dwproton-(\d+)\.(\d+)-(\d+)", "dwproton", False),
+}
+
 
 def validate_protocol_instance(obj: object, protocol: Type) -> bool:
     """Validate that an object implements a protocol at runtime.
@@ -66,40 +79,20 @@ def parse_version(
     Returns:
         A tuple of (prefix, major, minor, patch) for comparison purposes, or a fallback tuple if parsing fails
     """
-    match fork:
-        case ForkName.PROTON_EM:
-            # Proton-EM format: EM-10.0-30 -> prefix="EM", major=10, minor=0, patch=30
-            # Also handles directory names: proton-EM-10.0-30
-            pattern = r"(?:proton-)?EM-(\d+)\.(\d+)-(\d+)"
-            match_result = re.match(pattern, tag)
-            if match_result:
-                major, minor, patch = map(int, match_result.groups())
-                return ("EM", major, minor, patch)
-            # If no match, return a tuple that will put this tag at the end for comparison
-            return (tag, 0, 0, 0)
-        case ForkName.CACHYOS:
-            # CachyOS format: cachyos-10.0-20260207-slr -> prefix="cachyos", major=10, minor=0, patch=20260207
-            # Also handles directory names: proton-cachyos-10.0-20260207-slr-x86_64
-            pattern = r"(?:proton-)?cachyos-(\d+)\.(\d+)-(\d+)-slr(?:-x86_64)?"
-            match_result = re.match(pattern, tag)
-            if match_result:
-                major, minor, patch = map(int, match_result.groups())
-                return ("cachyos", major, minor, patch)
-            # If no match, return a tuple that will put this tag at the end for comparison
-            return (tag, 0, 0, 0)
-        case ForkName.GE_PROTON:
-            # GE-Proton format: GE-Proton10-20 -> prefix="GE-Proton", major=10, minor=20
-            pattern = r"GE-Proton(\d+)-(\d+)"
-            match_result = re.match(pattern, tag)
-            if match_result:
-                major, minor = map(int, match_result.groups())
-                # For GE-Proton, we treat the minor as a patch-like value for comparison
-                return ("GE-Proton", major, 0, minor)
-            # If no match, return a tuple that will put this tag at the end for comparison
-            return (tag, 0, 0, 0)
-        case _:
-            # If unexpected fork value, return a tuple that will put this tag at the end for comparison
-            return (tag, 0, 0, 0)
+    pattern, prefix, is_ge_proton = _VERSION_PATTERNS.get(fork, (r"", tag, False))
+    match_result = re.match(pattern, tag)
+    if match_result:
+        groups = list(map(int, match_result.groups()))
+        if is_ge_proton:
+            # GE-Proton: (major, minor) → (prefix, major, 0, minor)
+            major, minor = groups
+            return (prefix, major, 0, minor)
+        else:
+            # Others: (major, minor, patch) → (prefix, major, minor, patch)
+            major, minor, patch = groups
+            return (prefix, major, minor, patch)
+    # If no match, return a tuple that will put this tag at the end for comparison
+    return (tag, 0, 0, 0)
 
 
 def compare_versions(tag1: str, tag2: str, fork: ForkName = ForkName.GE_PROTON) -> int:
@@ -114,39 +107,17 @@ def compare_versions(tag1: str, tag2: str, fork: ForkName = ForkName.GE_PROTON) 
     Returns:
         -1 if tag1 is older than tag2, 0 if equal, 1 if tag1 is newer than tag2
     """
-    p1_prefix, p1_major, p1_minor, p1_patch = parse_version(tag1, fork)
-    p2_prefix, p2_major, p2_minor, p2_patch = parse_version(tag2, fork)
+    v1 = parse_version(tag1, fork)
+    v2 = parse_version(tag2, fork)
+    return (v1 > v2) - (v1 < v2)
 
-    if (p1_prefix, p1_major, p1_minor, p1_patch) == (
-        p2_prefix,
-        p2_major,
-        p2_minor,
-        p2_patch,
-    ):
-        return 0
 
-    # Compare component by component
-    if p1_prefix < p2_prefix:
-        return -1
-    elif p1_prefix > p2_prefix:
-        return 1
-
-    if p1_major < p2_major:
-        return -1
-    elif p1_major > p2_major:
-        return 1
-
-    if p1_minor < p2_minor:
-        return -1
-    elif p1_minor > p2_minor:
-        return 1
-
-    if p1_patch < p2_patch:
-        return -1
-    elif p1_patch > p2_patch:
-        return 1
-
-    return 0  # If all components are equal
+ASSET_TEMPLATES: dict[ForkName, str] = {
+    ForkName.GE_PROTON: "{tag}.tar.gz",
+    ForkName.PROTON_EM: "proton-{tag}.tar.xz",
+    ForkName.CACHYOS: "proton-{tag}-x86_64.tar.xz",
+    ForkName.DW_PROTON: "{tag}-x86_64.tar.xz",
+}
 
 
 def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
@@ -160,18 +131,7 @@ def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
     Returns:
         The expected asset name (e.g., 'GE-Proton10-20.tar.gz' or 'proton-EM-10.0-30.tar.xz')
     """
-    if fork == ForkName.PROTON_EM:
-        # For Proton-EM, the asset name follows pattern: proton-<tag>.tar.xz
-        # e.g., tag 'EM-10.0-30' becomes 'proton-EM-10.0-30.tar.xz'
-        return f"proton-{tag}.tar.xz"
-    elif fork == ForkName.CACHYOS:
-        # For CachyOS, the asset name follows pattern: proton-<tag>-x86_64.tar.xz
-        # e.g., tag 'cachyos-10.0-20260207-slr' becomes 'proton-cachyos-10.0-20260207-slr-x86_64.tar.xz'
-        return f"proton-{tag}-x86_64.tar.xz"
-    else:
-        # For GE-Proton, the asset name follows pattern: <tag>.tar.gz
-        # e.g., tag 'GE-Proton10-20' becomes 'GE-Proton10-20.tar.gz'
-        return f"{tag}.tar.gz"
+    return ASSET_TEMPLATES.get(fork, "{tag}.tar.gz").format(tag=tag)
 
 
 def format_bytes(bytes_value: int) -> str:

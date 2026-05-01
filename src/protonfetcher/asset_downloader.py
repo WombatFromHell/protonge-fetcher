@@ -102,8 +102,9 @@ class AssetDownloader:
         asset_name: str,
         out_path: Path,
         release_manager: ReleaseManager,
+        download_url: str | None = None,
     ) -> Path:
-        """Download a specific asset from a GitHub release with progress bar.
+        """Download a specific asset from a release with progress bar.
         If a local file with the same name and size already exists, skip download.
 
         Args:
@@ -112,6 +113,7 @@ class AssetDownloader:
             asset_name: Asset filename to download
             out_path: Path where the asset will be saved
             release_manager: ReleaseManager instance to get remote asset size
+            download_url: Optional custom download URL (defaults to GitHub URL)
 
         Returns:
             Path to the downloaded file
@@ -119,8 +121,11 @@ class AssetDownloader:
         Raises:
             FetchError: If download fails or asset not found
         """
-        url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
-        logger.info(f"Checking if asset needs download from: {url}")
+        if download_url is None:
+            download_url = (
+                f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
+            )
+        logger.info(f"Checking if asset needs download from: {download_url}")
 
         # Check if local file already exists and has the same size as remote
         if self.file_system_client.exists(out_path):
@@ -148,12 +153,12 @@ class AssetDownloader:
 
         try:
             # Use the new spinner-based download method
-            self.download_with_spinner(url, out_path, headers)
+            self.download_with_spinner(download_url, out_path, headers)
         except Exception as e:
             # Fallback to original curl method for compatibility
             logger.warning(f"Spinner download failed: {e}, falling back to curl")
             try:
-                result = self.curl_download(url, out_path, headers)
+                result = self.curl_download(download_url, out_path, headers)
                 if result.returncode != 0:
                     if "404" in result.stderr or "not found" in result.stderr.lower():
                         raise NetworkError(f"Asset not found: {asset_name}")

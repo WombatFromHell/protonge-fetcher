@@ -13,6 +13,7 @@ class ForkName(StrEnum):
     GE_PROTON = "GE-Proton"
     PROTON_EM = "Proton-EM"
     CACHYOS = "CachyOS"
+    DW_PROTON = "DW-Proton"
 
 
 # Type aliases for better readability
@@ -35,6 +36,8 @@ VersionGroups = dict[VersionTuple, list[Path]]
 class ForkConfig:
     repo: str
     archive_format: str
+    api_base: str = "https://api.github.com"
+    host_base: str = "https://github.com"
 
     def __getitem__(self, key: str) -> str:
         """Allow dict-like access for backward compatibility."""
@@ -42,6 +45,10 @@ class ForkConfig:
             return self.repo
         elif key == "archive_format":
             return self.archive_format
+        elif key == "api_base":
+            return self.api_base
+        elif key == "host_base":
+            return self.host_base
         else:
             raise KeyError(key)
 
@@ -406,6 +413,12 @@ FORKS: dict[ForkName, ForkConfig] = {
     ForkName.CACHYOS: ForkConfig(
         repo="CachyOS/proton-cachyos",
         archive_format=".tar.xz",
+    ),
+    ForkName.DW_PROTON: ForkConfig(
+        repo="dawn-winery/dwproton",
+        archive_format=".tar.xz",
+        api_base="https://dawn.wine/api/v1",
+        host_base="https://dawn.wine",
     ),
 }
 DEFAULT_FORK: ForkName = ForkName.GE_PROTON

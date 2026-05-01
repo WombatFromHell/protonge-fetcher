@@ -15,10 +15,11 @@ from typing import Any
 import pytest
 
 from protonfetcher.cli import (
-    _handle_prune_operation_flow,
+    _handle_prune_operation,
     parse_arguments,
 )
 from protonfetcher.common import ForkName
+from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
 # =============================================================================
@@ -171,7 +172,9 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test pruning when there are no unmanaged releases."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         mock_fetcher.prune_releases.return_value = ([], [])
+        mock_forgejo_fetcher.prune_releases.return_value = ([], [])
 
         args = mocker.MagicMock()
         args.fork = None  # All forks
@@ -180,7 +183,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "No unmanaged releases to prune" in captured.out
@@ -193,12 +196,14 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test pruning with --dry-run flag (no confirmation required)."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         # Simulate 2 versions to prune for CachyOS
         mock_fetcher.prune_releases.side_effect = [
             (["v3", "v2", "v1"], ["v0", "v-1"]),  # GE-Proton
             (["v3", "v2", "v1"], []),  # Proton-EM
             (["v3", "v2", "v1"], ["v0", "v-1"]),  # CachyOS
         ]
+        mock_forgejo_fetcher.prune_releases.return_value = (["v3", "v2", "v1"], [])
 
         args = mocker.MagicMock()
         args.fork = None  # All forks
@@ -207,7 +212,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "Would prune 4 old version(s)" in captured.out
@@ -223,6 +228,7 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test pruning a single fork."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         mock_fetcher.prune_releases.return_value = (
             ["v3", "v2", "v1"],
             ["v0", "v-1"],
@@ -235,7 +241,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         # Should only call prune_releases once for Proton-EM
         assert mock_fetcher.prune_releases.call_count == 1
@@ -250,7 +256,9 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test pruning all forks (default behavior)."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         mock_fetcher.prune_releases.return_value = (["v3", "v2", "v1"], [])
+        mock_forgejo_fetcher.prune_releases.return_value = (["v3", "v2", "v1"], [])
 
         args = mocker.MagicMock()
         args.fork = None  # All forks
@@ -259,14 +267,16 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
-        # Should call prune_releases for all 3 forks
+        # Should call prune_releases for all 4 forks
         assert mock_fetcher.prune_releases.call_count == 3
         calls = mock_fetcher.prune_releases.call_args_list
         assert calls[0][0][1] == ForkName.GE_PROTON
         assert calls[1][0][1] == ForkName.PROTON_EM
         assert calls[2][0][1] == ForkName.CACHYOS
+        assert mock_forgejo_fetcher.prune_releases.call_count == 1
+        assert mock_forgejo_fetcher.prune_releases.call_args[0][1] == ForkName.DW_PROTON
 
     def test_prune_with_confirmation_yes(
         self,
@@ -275,12 +285,17 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test pruning with user confirmation (yes)."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         # Only GE-Proton has versions to prune
         mock_fetcher.prune_releases.side_effect = [
             (["v3", "v2", "v1"], ["v0"]),  # GE-Proton dry run
             (["v3", "v2", "v1"], []),  # Proton-EM dry run
             (["v3", "v2", "v1"], []),  # CachyOS dry run
             (["v3", "v2", "v1"], ["v0"]),  # GE-Proton actual prune
+        ]
+        mock_forgejo_fetcher.prune_releases.side_effect = [
+            (["v3", "v2", "v1"], []),  # DW-Proton dry run
+            (["v3", "v2", "v1"], []),  # DW-Proton actual prune
         ]
 
         args = mocker.MagicMock()
@@ -293,7 +308,7 @@ class TestPruneOperationFlow:
         # Mock user input to confirm
         mocker.patch("builtins.input", return_value="y")
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         # The output shows what would be pruned and the result
@@ -309,12 +324,14 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test pruning with user declining (no)."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         # Only GE-Proton has versions to prune
         mock_fetcher.prune_releases.side_effect = [
             (["v3", "v2", "v1"], ["v0"]),  # GE-Proton dry run
             (["v3", "v2", "v1"], []),  # Proton-EM dry run
             (["v3", "v2", "v1"], []),  # CachyOS dry run
         ]
+        mock_forgejo_fetcher.prune_releases.return_value = (["v3", "v2", "v1"], [])
 
         args = mocker.MagicMock()
         args.fork = None
@@ -327,7 +344,9 @@ class TestPruneOperationFlow:
         mocker.patch("builtins.input", return_value="n")
 
         with pytest.raises(SystemExit) as exc_info:
-            _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+            _handle_prune_operation(
+                mock_fetcher, mock_forgejo_fetcher, args, extract_dir
+            )
 
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
@@ -340,12 +359,17 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test that pruning shows warning about prefix breakage."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         # Only GE-Proton has versions to prune
         mock_fetcher.prune_releases.side_effect = [
             (["v3", "v2", "v1"], ["v0"]),  # GE-Proton dry run
             (["v3", "v2", "v1"], []),  # Proton-EM dry run
             (["v3", "v2", "v1"], []),  # CachyOS dry run
             (["v3", "v2", "v1"], ["v0"]),  # GE-Proton actual prune
+        ]
+        mock_forgejo_fetcher.prune_releases.side_effect = [
+            (["v3", "v2", "v1"], []),  # DW-Proton dry run
+            (["v3", "v2", "v1"], []),  # DW-Proton actual prune
         ]
 
         args = mocker.MagicMock()
@@ -357,7 +381,7 @@ class TestPruneOperationFlow:
 
         mocker.patch("builtins.input", return_value="y")
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "WARNING" in captured.out
@@ -370,7 +394,12 @@ class TestPruneOperationFlow:
     ) -> None:
         """Test pruning with custom --keep value."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         mock_fetcher.prune_releases.return_value = (["v5", "v4", "v3", "v2", "v1"], [])
+        mock_forgejo_fetcher.prune_releases.return_value = (
+            ["v5", "v4", "v3", "v2", "v1"],
+            [],
+        )
 
         args = mocker.MagicMock()
         args.fork = None
@@ -379,10 +408,12 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         # Verify keep=5 was passed to prune_releases
         for call in mock_fetcher.prune_releases.call_args_list:
+            assert call[1]["keep"] == 5
+        for call in mock_forgejo_fetcher.prune_releases.call_args_list:
             assert call[1]["keep"] == 5
 
 
@@ -670,14 +701,16 @@ class TestPruneE2E:
         fs = FileSystemClient()
         link_manager = LinkManager(fs)
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         mock_fetcher.prune_releases = link_manager.prune_releases
+        mock_forgejo_fetcher.prune_releases = link_manager.prune_releases
 
         args = mocker.MagicMock()
         args.fork = None
         args.keep = 3
         args.dry_run = True
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "No unmanaged releases to prune" in captured.out
@@ -702,14 +735,16 @@ class TestPruneE2E:
         fs = FileSystemClient()
         link_manager = LinkManager(fs)
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
+        mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         mock_fetcher.prune_releases = link_manager.prune_releases
+        mock_forgejo_fetcher.prune_releases = link_manager.prune_releases
 
         args = mocker.MagicMock()
         args.fork = "GE-Proton"
         args.keep = 3
         args.dry_run = True
 
-        _handle_prune_operation_flow(mock_fetcher, args, extract_dir)
+        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "Would prune 2 old version(s)" in captured.out

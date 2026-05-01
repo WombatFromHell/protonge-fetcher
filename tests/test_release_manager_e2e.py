@@ -574,12 +574,11 @@ class TestAssetSizeCaching:
         try:
             # Create expired cache
             release_manager = ReleaseManager(mock_network_client, fs)
-            cache_key = release_manager._get_cache_key(
+            cache_path = release_manager._get_cache_path(
                 "GloriousEggroll/proton-ge-custom",
                 "GE-Proton10-20",
                 "GE-Proton10-20.tar.gz",
             )
-            cache_path = release_manager._get_cache_path(cache_key)
 
             import json
             import time

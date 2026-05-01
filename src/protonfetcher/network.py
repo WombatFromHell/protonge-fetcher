@@ -33,6 +33,13 @@ class NetworkClient:
         )
         return cmd
 
+    def _add_headers(self, cmd: list[str], headers: Optional[Headers]) -> list[str]:
+        """Add headers to a curl command if headers are provided."""
+        if headers is not None:
+            for key, value in headers.items():
+                cmd.extend(["-H", f"{key}: {value}"])
+        return cmd
+
     def get(
         self, url: str, headers: Optional[Headers] = None, stream: bool = False
     ) -> ProcessResult:
@@ -42,12 +49,7 @@ class NetworkClient:
             "-S",  # Show errors
             "-f",  # Fail on HTTP error
         ]
-
-        # Add headers if provided explicitly (not None)
-        if headers is not None:
-            for key, value in headers.items():
-                base_cmd.extend(["-H", f"{key}: {value}"])
-        # When headers is None (default), we don't add any headers for backward compatibility
+        base_cmd = self._add_headers(base_cmd, headers)
 
         if stream:
             # For streaming, we'll handle differently
@@ -75,10 +77,7 @@ class NetworkClient:
         if follow_redirects:
             base_cmd.insert(0, "-L")  # Follow redirects
 
-        if headers:
-            for key, value in headers.items():
-                base_cmd.extend(["-H", f"{key}: {value}"])
-
+        base_cmd = self._add_headers(base_cmd, headers)
         base_cmd.append(url)
         cmd = self._build_curl_cmd(base_cmd)
 
@@ -97,10 +96,7 @@ class NetworkClient:
             str(output_path),  # Output file
         ]
 
-        if headers:
-            for key, value in headers.items():
-                base_cmd.extend(["-H", f"{key}: {value}"])
-
+        base_cmd = self._add_headers(base_cmd, headers)
         base_cmd.append(url)
         cmd = self._build_curl_cmd(base_cmd)
 
