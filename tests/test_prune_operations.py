@@ -162,8 +162,8 @@ class TestComputePrunePlan:
         assert "GE-Proton10-2" in pruned
         assert "GE-Proton10-1" in pruned
 
-    def test_protects_linked_versions(self, tmp_path: Path) -> None:
-        """Test that linked versions outside top-N are protected from pruning."""
+    def test_prunes_linked_versions(self, tmp_path: Path) -> None:
+        """Test that linked versions outside top-N are NOT protected from pruning."""
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
@@ -187,9 +187,9 @@ class TestComputePrunePlan:
         assert "GE-Proton10-4" in kept
         assert "GE-Proton10-3" in kept
 
-        # GE-Proton10-2 should NOT be pruned (it's linked)
-        assert "GE-Proton10-2" not in pruned
-        # GE-Proton10-1 should be pruned
+        # GE-Proton10-2 IS now pruned (symlinks are no longer protected)
+        assert "GE-Proton10-2" in pruned
+        # GE-Proton10-1 should also be pruned
         assert "GE-Proton10-1" in pruned
 
     def test_empty_directory(self, tmp_path: Path) -> None:
@@ -205,7 +205,7 @@ class TestComputePrunePlan:
         assert pruned == []
 
     def test_all_versions_linked(self, tmp_path: Path) -> None:
-        """Test when all versions are linked — nothing to prune."""
+        """Test when all versions are within the keep count — nothing to prune."""
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 

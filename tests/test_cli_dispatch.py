@@ -41,7 +41,8 @@ class TestGetExplicitFlags:
     def test_rm_flag_detected(self) -> None:
         """Test --rm flag is detected."""
         assert get_explicit_flags(["--rm", "v1"])["rm"] is True
-        assert get_explicit_flags(["-r", "v1"])["rm"] is True
+        # -r is --release, not --rm
+        assert get_explicit_flags(["-r", "v1"])["rm"] is False
 
     def test_fork_flag_detected(self) -> None:
         """Test --fork flag is detected."""

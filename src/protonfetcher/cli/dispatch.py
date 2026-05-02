@@ -57,7 +57,7 @@ def get_explicit_flags(argv_list: list[str]) -> dict[str, bool]:
     return {
         "ls": "--ls" in argv_list,
         "list": is_flag_passed(argv_list, "--list", "-l"),
-        "rm": is_flag_passed(argv_list, "--rm", "-r"),
+        "rm": "--rm" in argv_list,
         "fork": is_flag_passed(argv_list, "--fork", "-f"),
         "release": is_flag_passed(argv_list, "--release", "-r"),
     }
@@ -68,7 +68,9 @@ def has_explicit_fork(argv_list: list[str]) -> bool:
     return is_flag_passed(argv_list, "--fork", "-f")
 
 
-def get_operation_from_args(args: Any) -> str | None:
+def get_operation_from_args(
+    args: Any, argv_list: list[str] | None = None
+) -> str | None:
     """Determine which operation was requested from parsed args."""
     if args.ls:
         return "ls"
@@ -76,7 +78,7 @@ def get_operation_from_args(args: Any) -> str | None:
         return "list"
     if args.relink:
         return "relink"
-    if args.rm:
+    if args.rm or (argv_list and is_flag_passed(argv_list, "--rm", "-r")):
         return "rm"
     if args.prune:
         return "prune"
@@ -87,7 +89,7 @@ def get_operation_from_args(args: Any) -> str | None:
 
 def dispatch(ctx: CLIContext, argv_list: list[str]) -> int:
     """Dispatch to the appropriate handler based on operation flags."""
-    operation = get_operation_from_args(ctx.args)
+    operation = get_operation_from_args(ctx.args, argv_list)
 
     handlers: dict[str, Any] = {
         "ls": lambda: handle_ls_operation(

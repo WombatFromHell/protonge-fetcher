@@ -16,6 +16,7 @@ from protonfetcher.release_operations import (
     _identify_links_to_remove,
     _remove_release_directory,
     _remove_symbolic_links,
+    cleanup_stale_symlinks,
     remove_release,
 )
 
@@ -295,3 +296,66 @@ class TestRemoveRelease:
                 fork=ForkName.GE_PROTON,
                 file_system=FileSystemClient(),
             )
+
+
+class TestCleanupStaleSymlinks:
+    """Tests for symlink cleanup after --rm."""
+
+    def test_removes_dangling_symlink(self, tmp_path: Path) -> None:
+        """Test that dangling symlinks (target gone) are removed."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Create a version directory and a symlink to it
+        v1 = extract_dir / "GE-Proton10-5"
+        v1.mkdir()
+        main_link = extract_dir / "GE-Proton"
+        main_link.symlink_to(v1)
+
+        # Remove the target directory
+        v1.rmdir()
+
+        # Run cleanup
+        from protonfetcher.filesystem import FileSystemClient
+
+        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON, FileSystemClient())
+
+        # Symlink should be gone
+        assert not main_link.exists()
+        assert not main_link.is_symlink()
+
+    def test_updates_stale_symlink(self, tmp_path: Path) -> None:
+        """Test that symlinks pointing to non-top-N releases are updated."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Create two versions
+        v1 = extract_dir / "GE-Proton10-5"
+        v2 = extract_dir / "GE-Proton10-4"
+        v1.mkdir()
+        v2.mkdir()
+
+        # Symlink points to older version
+        main_link = extract_dir / "GE-Proton"
+        main_link.symlink_to(v2)
+
+        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON, FileSystemClient())
+
+        # Symlink should now point to newest version
+        assert main_link.resolve() == v1
+
+    def test_skips_valid_symlink(self, tmp_path: Path) -> None:
+        """Test that symlinks pointing to top-N releases are left alone."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        v1 = extract_dir / "GE-Proton10-5"
+        v1.mkdir()
+
+        main_link = extract_dir / "GE-Proton"
+        main_link.symlink_to(v1)
+
+        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON, FileSystemClient())
+
+        # Symlink should still point to v1
+        assert main_link.resolve() == v1

@@ -149,7 +149,7 @@ classDiagram
         +fetch_and_extract(repo, output_dir, extract_dir, release_tag, fork, show_progress, show_file_details, dry_run) Path|None
         +list_links(extract_dir, fork) dict
         +remove_release(extract_dir, tag, fork) bool
-        +prune_releases(extract_dir, fork, keep, dry_run) tuple
+        +prune_releases(extract_dir, fork, keep=1, dry_run=False) tuple
         +relink_fork(extract_dir, fork) bool
         +update_all_managed_forks(output_dir, extract_dir, dry_run) dict
         +check_for_updates(extract_dir, fork) str|None
@@ -343,9 +343,9 @@ graph TD
     ROOT --> MULTI["-f (no value)\nupdate_all_managed_forks()"]
     ROOT --> LIST["--list / -l\nlist_recent_releases()"]
     ROOT --> LS["--ls\nlist_links()"]
-    ROOT --> RM["--rm TAG\nremove_release()"]
+    ROOT --> RM["--rm TAG\nremove release + symlinks\n--rm --fork\nremove all fork symlinks"]
     ROOT --> RELINK["--relink\nrelink_fork() (requires --fork)"]
-    ROOT --> PRUNE["--prune\nprune_releases()"]
+    ROOT --> PRUNE["--prune\nprune_releases()\n--keep N (default: 1)"]
     ROOT --> CHECK["--check / -c\ncheck_for_updates()"]
     ROOT --> DRY["--dry-run / -n\ndry_run=True"]
     ROOT --> VERSION["--version / -V\nprint version, exit"]
@@ -375,7 +375,7 @@ graph TD
 
 **Dispatch logic in `_dispatch()`:** Operations are resolved by checking `args` flags in priority order: `ls` → `list` → `relink` → `rm` → `prune` → `check`. If none match, falls through to `_resolve_default_operation()` which checks for explicit `--fork`/`--release` flags or defaults to listing all forks' links.
 
-**Validation:** `_validate_mutually_exclusive_args()` enforces: `--check` vs `--dry-run`, `--check` vs `--list`/`--ls`, `--prune` vs `--check`, `--dry-run` vs read-only ops, `--relink` requires `--fork`.
+**Validation:** `_validate_mutually_exclusive_args()` enforces: `--check` vs `--dry-run`, `--check` vs `--list`/`--ls`, `--prune` vs `--check`, `--keep >= 1`, `--dry-run` vs read-only ops, `--relink` requires `--fork`. `--rm` is no longer mutually exclusive with other operations.
 
 ---
 
@@ -548,26 +548,26 @@ graph LR
 
 ## 12. Quick Navigation — "Where Do I Find…"
 
-| Question                               | File                                             | Key Symbol                                                             |
-| -------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------- |
-| Add a new fork?                        | `common.py`                                      | `ForkConfig`, `FORKS` dict, `ForkName` enum                            |
-| Add a new platform?                    | `platform_adapters.py` + new fetcher marker      | `PlatformAdapter` protocol, singleton                                  |
-| Change URL construction?               | `platform_adapters.py`                           | `build_api_url`, `build_download_url`                                  |
-| Change download logic?                 | `asset_downloader.py`                            | `download_asset()`, `download_with_spinner()`                          |
-| Change extraction?                     | `archive_extractor.py`                           | `extract_archive()`, `extract_gz_archive()`                            |
-| Change symlink behavior?               | `link_manager.py`                                | `manage_proton_links()`, `create_symlinks()`                           |
-| Directory resolution (tag → path)?     | `link_manager.py`                                | `resolve_directory()`, `resolve_directory_candidates()` (module-level) |
-| Change CLI flags?                      | `cli.py`                                         | `argparse.ArgumentParser`, `_handle_*`, `_dispatch()`                  |
-| Change version parsing?                | `utils.py` + `common.py`                         | `parse_version()`, `ForkConfig.version_pattern`                        |
-| Change caching?                        | `release_manager.py`                             | `_cache_*` methods, XDG path                                           |
-| Change progress display?               | `spinner.py`                                     | `Spinner` class, `format_progress_bar()`, `build_display_line()`       |
-| Change error types?                    | `exceptions.py`                                  | `ProtonFetcherError` hierarchy                                         |
-| Wire up a new operation?               | `base_release_fetcher.py`                        | Orchestrator methods                                                   |
-| Network calls?                         | `network.py`                                     | `NetworkClient` (curl subprocess)                                      |
-| Filesystem abstraction?                | `filesystem.py`                                  | `FileSystemClient` (pathlib wrapper)                                   |
-| Version string?                        | `__version__.py`                                 | `__version__`, `_get_version()`                                        |
-| Asset discovery (API → HTML fallback)? | `release_manager.py`                             | `_try_api_approach()`, `_try_html_fallback()`                          |
-| Multi-fork update loop?                | `base_release_fetcher.py`                        | `update_all_managed_forks()`                                           |
-| Dry-run logic?                         | `base_release_fetcher.py`                        | `_dry_run_workflow()`                                                  |
-| Pruning logic?                         | `link_manager.py`                                | `prune_releases()`, `_compute_prune_plan()`                            |
-| Update checking?                       | `base_release_fetcher.py` + `release_manager.py` | `check_for_updates()`, `check_for_newer_release()`                     |
+| Question                               | File                                             | Key Symbol                                                                          |
+| -------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Add a new fork?                        | `common.py`                                      | `ForkConfig`, `FORKS` dict, `ForkName` enum                                         |
+| Add a new platform?                    | `platform_adapters.py` + new fetcher marker      | `PlatformAdapter` protocol, singleton                                               |
+| Change URL construction?               | `platform_adapters.py`                           | `build_api_url`, `build_download_url`                                               |
+| Change download logic?                 | `asset_downloader.py`                            | `download_asset()`, `download_with_spinner()`                                       |
+| Change extraction?                     | `archive_extractor.py`                           | `extract_archive()`, `extract_gz_archive()`                                         |
+| Change symlink behavior?               | `link_manager.py`                                | `manage_proton_links()`, `create_symlinks()`                                        |
+| Directory resolution (tag → path)?     | `link_manager.py`                                | `resolve_directory()`, `resolve_directory_candidates()` (module-level)              |
+| Change CLI flags?                      | `cli.py`                                         | `argparse.ArgumentParser`, `_handle_*`, `_dispatch()`                               |
+| Change version parsing?                | `utils.py` + `common.py`                         | `parse_version()`, `ForkConfig.version_pattern`                                     |
+| Change caching?                        | `release_manager.py`                             | `_cache_*` methods, XDG path                                                        |
+| Change progress display?               | `spinner.py`                                     | `Spinner` class, `format_progress_bar()`, `build_display_line()`                    |
+| Change error types?                    | `exceptions.py`                                  | `ProtonFetcherError` hierarchy                                                      |
+| Wire up a new operation?               | `base_release_fetcher.py`                        | Orchestrator methods                                                                |
+| Network calls?                         | `network.py`                                     | `NetworkClient` (curl subprocess)                                                   |
+| Filesystem abstraction?                | `filesystem.py`                                  | `FileSystemClient` (pathlib wrapper)                                                |
+| Version string?                        | `__version__.py`                                 | `__version__`, `_get_version()`                                                     |
+| Asset discovery (API → HTML fallback)? | `release_manager.py`                             | `_try_api_approach()`, `_try_html_fallback()`                                       |
+| Multi-fork update loop?                | `base_release_fetcher.py`                        | `update_all_managed_forks()`                                                        |
+| Dry-run logic?                         | `base_release_fetcher.py`                        | `_dry_run_workflow()`                                                               |
+| Pruning logic?                         | `prune_operations.py`                            | `prune_releases()`, `compute_prune_plan()` (symlinks are candidates, not protected) |
+| Update checking?                       | `base_release_fetcher.py` + `release_manager.py` | `check_for_updates()`, `check_for_newer_release()`                                  |

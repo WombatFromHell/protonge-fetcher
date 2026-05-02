@@ -88,9 +88,6 @@ class TestValidateMutuallyExclusiveArgs:
             ["protonfetcher", "--list", "--release", "GE-Proton10-20"],
             ["protonfetcher", "--ls", "--release", "GE-Proton10-20"],
             ["protonfetcher", "--ls", "--list"],
-            ["protonfetcher", "--rm", "GE-Proton10-20", "--release", "GE-Proton10-19"],
-            ["protonfetcher", "--rm", "GE-Proton10-20", "--list"],
-            ["protonfetcher", "--rm", "GE-Proton10-20", "--ls"],
         ],
     )
     def test_mutually_exclusive_flags(self, argv: list[str]) -> None:
@@ -125,19 +122,10 @@ class TestValidateMutuallyExclusiveArgs:
             ],
             ["protonfetcher", "--relink", "--fork", "GE-Proton", "--list"],
             ["protonfetcher", "--relink", "--fork", "GE-Proton", "--ls"],
-            [
-                "protonfetcher",
-                "--relink",
-                "--fork",
-                "GE-Proton",
-                "--rm",
-                "GE-Proton10-20",
-            ],
             ["protonfetcher", "--fork", "GE-Proton", "--check", "--dry-run"],
             ["protonfetcher", "--fork", "GE-Proton", "--check", "--list"],
             ["protonfetcher", "--dry-run", "--list"],
             ["protonfetcher", "--dry-run", "--ls"],
-            ["protonfetcher", "--dry-run", "--rm", "GE-Proton10-20"],
             ["protonfetcher", "--dry-run", "--relink", "--fork", "GE-Proton"],
         ],
     )

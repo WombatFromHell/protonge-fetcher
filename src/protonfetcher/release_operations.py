@@ -157,3 +157,78 @@ def _remove_symbolic_links(
             logger.info("Removed symbolic link: %s", link)
         except Exception as e:
             logger.error("Failed to remove symbolic link %s: %s", link, e)
+
+
+def cleanup_stale_symlinks(
+    extract_dir: Path,
+    fork: ForkName,
+    file_system: FileSystemClientProtocol,
+) -> None:
+    """Remove dangling symlinks and update stale ones.
+
+    Scans all managed symlinks for the fork:
+    - Removes symlinks whose target directory no longer exists
+    - Updates symlinks pointing to non-top-N releases to point to the newest valid release
+
+    Args:
+        extract_dir: Directory containing the symlinks
+        fork: The Proton fork name to determine link naming
+        file_system: File system client
+    """
+    from .common import FORKS
+
+    suffixes = FORKS[fork].link_names
+    symlinks = [extract_dir / suffix for suffix in suffixes]
+
+    # Get installed versions sorted newest-first
+    from .prune_operations import get_installed_versions
+
+    versions = get_installed_versions(extract_dir, fork, file_system)
+    if not versions:
+        # No versions at all — remove all dangling symlinks
+        for link in symlinks:
+            if file_system.is_symlink(link):
+                try:
+                    file_system.unlink(link)
+                    logger.info("Removed dangling symlink: %s", link)
+                except OSError as e:
+                    logger.warning("Failed to remove symlink %s: %s", link, e)
+        return
+
+    # Get the top-N versions to keep (use keep=1 as default)
+    kept = versions[:1]
+    kept_set = set(kept)
+    newest = extract_dir / kept[0]
+
+    for link in symlinks:
+        if not file_system.is_symlink(link):
+            continue
+
+        try:
+            target = file_system.resolve(link)
+        except OSError:
+            # Broken symlink — remove it
+            try:
+                file_system.unlink(link)
+                logger.info("Removed broken symlink: %s", link)
+            except OSError as e:
+                logger.warning("Failed to remove symlink %s: %s", link, e)
+            continue
+
+        target_name = target.name if hasattr(target, "name") else str(target)
+
+        if not file_system.exists(target):
+            # Target directory gone — remove dangling symlink
+            try:
+                file_system.unlink(link)
+                logger.info("Removed dangling symlink: %s", link)
+            except OSError as e:
+                logger.warning("Failed to remove symlink %s: %s", link, e)
+        elif target_name not in kept_set:
+            # Target exists but is not the top-N — update to newest
+            try:
+                file_system.unlink(link)
+                file_system.symlink_to(link, newest)
+                logger.info("Updated symlink: %s -> %s", link, newest)
+            except OSError as e:
+                logger.warning("Failed to update symlink %s: %s", link, e)

@@ -287,6 +287,50 @@ class TestHandleRmOperation:
         captured = capsys.readouterr()
         assert "Success" in captured.out
 
+    def test_rm_with_fork_removes_all_symlinks(
+        self,
+        mocker: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test --rm --fork removes all symlinks for that fork."""
+        mock_fetcher = MagicMock()
+        mock_forgejo_fetcher = MagicMock()
+
+        args = MagicMock()
+        args.fork = "CachyOS"
+        args.rm = None  # No tag, just fork
+
+        handle_rm_operation(mock_fetcher, mock_forgejo_fetcher, args, tmp_path)
+
+        # Should NOT call remove_release (no tag)
+        mock_fetcher.link_manager.remove_release.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Removed all symlinks for CachyOS" in captured.out
+        assert "Success" in captured.out
+
+    def test_rm_with_tag_removes_release(
+        self,
+        mocker: Any,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test --rm <tag> removes the specific release."""
+        mock_fetcher = MagicMock()
+        mock_forgejo_fetcher = MagicMock()
+
+        args = MagicMock()
+        args.fork = "GE-Proton"
+        args.rm = "GE-Proton10-15"
+
+        handle_rm_operation(mock_fetcher, mock_forgejo_fetcher, args, tmp_path)
+
+        mock_fetcher.link_manager.remove_release.assert_called_once_with(
+            tmp_path, "GE-Proton10-15", mocker.ANY
+        )
+        captured = capsys.readouterr()
+        assert "Removed GE-Proton10-15" in captured.out
+
 
 # =============================================================================
 # handle_prune_operation Tests

@@ -86,6 +86,26 @@ def print_links_for_fork(
         print_prunable_versions(link_manager, extract_dir, fork)
 
 
+def get_link_names_for_fork(
+    extract_dir: Path, fork: ForkName
+) -> tuple[Path, Path, Path]:
+    """Get the symlink paths for a given fork.
+
+    Args:
+        extract_dir: Base directory for symlinks
+        fork: The Proton fork name
+
+    Returns:
+        Tuple of (main, fb1, fb2) Path objects
+    """
+    suffixes = FORKS[fork].link_names
+    return (
+        extract_dir / suffixes[0],
+        extract_dir / suffixes[1],
+        extract_dir / suffixes[2],
+    )
+
+
 def print_success() -> None:
     """Print the standard success message."""
     print("Success")

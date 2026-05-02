@@ -15,6 +15,7 @@ from protonfetcher.github_fetcher import GitHubReleaseFetcher
 from .fork_utils import (
     get_fork_fetcher,
     get_fork_from_args,
+    get_link_names_for_fork,
     print_success,
 )
 
@@ -72,17 +73,66 @@ def handle_relink_operation(
     print_success()
 
 
+def _remove_all_fork_symlinks(
+    extract_dir: Path,
+    fork: ForkName,
+    link_manager,
+) -> None:
+    """Remove all managed symlinks for a given fork."""
+
+    main, fb1, fb2 = get_link_names_for_fork(extract_dir, fork)
+    for link in (main, fb1, fb2):
+        if link.exists() or link.is_symlink():
+            try:
+                link.unlink()
+                logger.info(f"Removed symlink: {link}")
+            except OSError as e:
+                logger.warning(f"Failed to remove symlink {link}: {e}")
+
+
+def _cleanup_stale_symlinks(
+    extract_dir: Path,
+    fork: ForkName,
+    link_manager,
+) -> None:
+    """Remove dangling symlinks and update stale ones.
+
+    Delegates to release_operations.cleanup_stale_symlinks.
+    """
+    from protonfetcher.filesystem import FileSystemClient
+    from protonfetcher.release_operations import cleanup_stale_symlinks as _cleanup
+
+    _cleanup(extract_dir, fork, FileSystemClient())
+
+
 def handle_rm_operation(
     fetcher: GitHubReleaseFetcher,
     forgejo_fetcher: ForgejoReleaseFetcher,
     args: Any,
     extract_dir: Path,
 ) -> None:
-    """Handle the --rm operation flow."""
+    """Handle the --rm operation flow.
+
+    Two modes:
+    - --rm <tag>: remove that specific release directory + its symlinks
+    - --rm --fork <fork>: remove ALL symlinks for that fork
+    """
     rm_fork = get_fork_from_args(args) or DEFAULT_FORK
-    logger.info(f"Removing release: {args.rm}")
     fork_fetcher = get_fork_fetcher(fetcher, forgejo_fetcher, rm_fork)
-    fork_fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
+
+    if args.rm:
+        # Remove a specific release by tag
+        logger.info(f"Removing release: {args.rm}")
+        fork_fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
+        print(f"Removed {args.rm}")
+    else:
+        # Remove all symlinks for the fork
+        logger.info(f"Removing all symlinks for {rm_fork}")
+        _remove_all_fork_symlinks(extract_dir, rm_fork, fork_fetcher.link_manager)
+        print(f"Removed all symlinks for {rm_fork}")
+
+    # Always clean up dangling/stale symlinks after removal
+    _cleanup_stale_symlinks(extract_dir, rm_fork, fork_fetcher.link_manager)
     print_success()
 
 

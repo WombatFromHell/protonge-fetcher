@@ -109,6 +109,9 @@ def compute_prune_plan(
 ) -> tuple[list[str], list[str]]:
     """Compute which versions to keep and which to prune.
 
+    Keeps the N newest versions total (regardless of symlink status).
+    Symlinks are part of the keep candidates, not protected from pruning.
+
     Args:
         extract_dir: Directory containing Proton installations
         fork: The Proton fork name to prune
@@ -123,20 +126,8 @@ def compute_prune_plan(
         logger.info(f"No {fork.value} installations found to prune")
         return [], []
 
-    linked_versions = get_linked_versions(extract_dir, fork, file_system)
     kept_versions: list[str] = all_versions[:keep]
-    prune_candidates = all_versions[keep:]
-
-    # Never prune linked versions (protects active prefixes)
-    pruned_versions = [v for v in prune_candidates if v not in linked_versions]
-
-    # Report any linked versions that would have been pruned
-    protected_versions = [v for v in prune_candidates if v in linked_versions]
-    if protected_versions:
-        logger.debug(
-            f"Protected {len(protected_versions)} linked version(s) from pruning: "
-            f"{', '.join(protected_versions)}"
-        )
+    pruned_versions: list[str] = all_versions[keep:]
 
     return kept_versions, pruned_versions
 
@@ -169,20 +160,20 @@ def execute_prune_removals(
 def prune_releases(
     extract_dir: Path,
     fork: ForkName,
-    keep: int = 3,
+    keep: int = 1,
     dry_run: bool = False,
     file_system: FileSystemClientProtocol | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Remove old unmanaged Proton releases, keeping the N newest versions.
+    """Remove old Proton releases, keeping the N newest versions total.
 
-    Identifies installed versions that are not currently referenced by
-    symlinks and removes them, keeping only the newest versions
-    (default: 3, matching symlink strategy).
+    Symlinks are part of the keep candidates — they are not protected
+    from pruning. The N newest versions by version sort are kept;
+    everything beyond that is removed (default: 1).
 
     Args:
         extract_dir: Directory containing Proton installations
         fork: The Proton fork name to prune
-        keep: Number of newest versions to retain (default: 3)
+        keep: Number of newest versions to retain (default: 1)
         dry_run: If True, only report what would be removed
         file_system: File system client (uses default if None)
 

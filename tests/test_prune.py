@@ -41,7 +41,7 @@ class TestPruneArgumentParsing:
             args = parse_args(build_parser())
             args = set_default_fork(args)
             assert args.prune is True
-            assert args.keep == 3  # default
+            assert args.keep == 1  # default
 
     def test_parse_prune_with_keep(self) -> None:
         """Test parsing --prune with --keep parameter."""
@@ -124,21 +124,19 @@ class TestPruneArgumentParsing:
             # argparse uses exit code 2 for argument parsing errors
             assert exc_info.value.code == 2
 
-    def test_parse_prune_mutually_exclusive_with_rm(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Test that --prune and --rm are mutually exclusive."""
+    def test_parse_prune_and_rm_together(self) -> None:
+        """Test that --prune and --rm can be used together."""
         import sys
         from unittest.mock import patch
 
         with patch.object(
             sys, "argv", ["protonfetcher", "--prune", "--rm", "GE-Proton10-20"]
         ):
-            with pytest.raises(SystemExit) as exc_info:
-                parse_args(build_parser())
-            # argparse uses exit code 2 for argument parsing errors
-            assert exc_info.value.code == 2
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
+            # Should parse successfully — no SystemExit
+            assert args.prune is True
+            assert args.rm == "GE-Proton10-20"
 
     def test_parse_prune_mutually_exclusive_with_relink(
         self,
@@ -169,6 +167,38 @@ class TestPruneArgumentParsing:
                 validate_mutually_exclusive_args(args)
             # Validation-level conflict uses exit code 1
             assert exc_info.value.code == 1
+
+    def test_parse_prune_with_invalid_keep(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test that --keep 0 is rejected."""
+        import sys
+        from unittest.mock import patch
+
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--keep", "0"]):
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
+            with pytest.raises(SystemExit) as exc_info:
+                validate_mutually_exclusive_args(args)
+            assert exc_info.value.code == 1
+            captured = capsys.readouterr()
+            assert "--keep must be at least 1" in captured.out
+
+    def test_parse_prune_with_negative_keep(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test that --keep -1 is rejected."""
+        import sys
+        from unittest.mock import patch
+
+        with patch.object(sys, "argv", ["protonfetcher", "--prune", "--keep", "-1"]):
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
+            with pytest.raises(SystemExit) as exc_info:
+                validate_mutually_exclusive_args(args)
+            assert exc_info.value.code == 1
+            captured = capsys.readouterr()
+            assert "--keep must be at least 1" in captured.out
 
 
 # =============================================================================
@@ -439,13 +469,13 @@ class TestPruneOperationFlow:
 class TestLinkManagerPruneIntegration:
     """Integration tests for LinkManager.prune_releases()."""
 
-    def test_prune_releases_protects_linked_versions(
+    def test_prune_releases_prunes_linked_versions(
         self,
         link_manager: Any,
         mock_filesystem_client: Any,
         tmp_path: Path,
     ) -> None:
-        """Test that prune_releases protects linked versions."""
+        """Test that prune_releases does NOT protect linked versions."""
         # Arrange
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
@@ -466,7 +496,7 @@ class TestLinkManagerPruneIntegration:
         real_link_manager = LinkManager(fs)
 
         # Create symlink pointing to GE-Proton10-2 (older, outside top 3)
-        # This version would normally be pruned, but should be protected
+        # This version is now pruned (symlinks are no longer protected)
         main_link = extract_dir / "GE-Proton"
         main_link.symlink_to(versions[3])  # GE-Proton10-2
 
@@ -477,19 +507,13 @@ class TestLinkManagerPruneIntegration:
 
         # Assert
         # Top 3 newest (GE-Proton10-5, GE-Proton10-4, GE-Proton10-3) should be kept
-        # GE-Proton10-2 is linked but outside top 3, should be PROTECTED from pruning
-        # GE-Proton10-1 should be pruned
         assert len(kept) == 3
-        # kept contains directory names as strings
         assert "GE-Proton10-5" in kept
         assert "GE-Proton10-4" in kept
         assert "GE-Proton10-3" in kept
 
-        # GE-Proton10-2 should NOT be in pruned (it's protected by being linked)
-        # pruned contains directory names as strings
-        assert "GE-Proton10-2" not in pruned, (
-            f"GE-Proton10-2 should be protected: pruned={pruned}"
-        )
+        # GE-Proton10-2 IS now pruned (symlinks are no longer protected)
+        assert "GE-Proton10-2" in pruned
         assert "GE-Proton10-1" in pruned
 
     def test_prune_releases_dry_run_no_deletion(

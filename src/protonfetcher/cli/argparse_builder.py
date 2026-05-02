@@ -45,9 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--keep",
         type=int,
-        default=3,
+        default=1,
         metavar="N",
-        help="Number of newest versions to keep when pruning (default: 3)",
+        help="Number of newest versions to keep when pruning (default: 1)",
     )
     parser.add_argument(
         "--debug",
@@ -74,11 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="List recognized symbolic links and their associated Proton fork folders",
     )
     group.add_argument(
-        "--rm",
-        metavar="TAG",
-        help="Remove a given Proton fork release folder and its associated link (if one exists)",
-    )
-    group.add_argument(
         "--relink",
         action="store_true",
         help="Force recreation of symbolic links without downloading or extracting (use with --fork)",
@@ -86,7 +81,14 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument(
         "--prune",
         action="store_true",
-        help="Remove old unmanaged releases for all forks, keeping the N newest (use with --fork for specific fork)",
+        help="Remove old releases for all forks, keeping the N newest (use with --fork for specific fork)",
+    )
+
+    # --rm is not mutually exclusive; can be used with --fork
+    parser.add_argument(
+        "--rm",
+        metavar="TAG",
+        help="Remove a release directory and its symlinks. Use with --fork to remove all symlinks for that fork.",
     )
 
     parser.add_argument(

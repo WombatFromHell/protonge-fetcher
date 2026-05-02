@@ -54,10 +54,17 @@ def validate_prune_vs_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def validate_keep_value(args: argparse.Namespace) -> None:
+    """Validate --keep value is at least 1."""
+    if hasattr(args, "keep") and args.keep is not None and args.keep < 1:
+        print("Error: --keep must be at least 1")
+        raise SystemExit(1)
+
+
 def validate_dry_run_conflicts(args: argparse.Namespace) -> None:
     """Validate --dry-run conflicts with read-only operations."""
-    if args.dry_run and (args.list or args.ls or args.rm or args.relink):
-        print("Error: --dry-run cannot be used with --list, --ls, --rm, or --relink")
+    if args.dry_run and (args.list or args.ls or args.relink):
+        print("Error: --dry-run cannot be used with --list, --ls, or --relink")
         raise SystemExit(1)
 
 
@@ -66,6 +73,7 @@ def validate_mutually_exclusive_args(args: argparse.Namespace) -> None:
     validate_check_vs_dry_run(args)
     validate_check_vs_list(args)
     validate_prune_vs_check(args)
+    validate_keep_value(args)
     validate_dry_run_conflicts(args)
     validate_relink_requires_fork(args)
 
