@@ -654,6 +654,10 @@ class TestRemoveOperation:
             "sys.argv",
             ["protonfetcher", "--rm", "--release", release, "-f", fork],
         )
+        # Prevent cleanup from touching the real filesystem
+        mocker.patch(
+            "protonfetcher.cli.handlers._cleanup_stale_symlinks",
+        )
 
         main()
 
