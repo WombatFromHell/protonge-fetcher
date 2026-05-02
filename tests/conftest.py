@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 import pytest
 
@@ -21,6 +21,17 @@ from protonfetcher.common import (
     ForkName,
     NetworkClientProtocol,
 )
+
+
+class SymlinkEnvironment(TypedDict):
+    """Typed dictionary for symlink test environment fixture."""
+
+    extract_dir: Path
+    version_dirs: list[Path]
+    symlinks: dict[str, Path]
+    link_names: list[str]
+    fork: ForkName
+
 
 # =============================================================================
 # Centralized Test Data
@@ -423,7 +434,7 @@ def installed_proton_versions(tmp_path: Path, fork: ForkName) -> list[Path]:
 
 
 @pytest.fixture
-def symlink_environment(tmp_path: Path, fork: ForkName) -> dict[str, Any]:
+def symlink_environment(tmp_path: Path, fork: ForkName) -> SymlinkEnvironment:
     """Create a complete symlink testing environment."""
     from protonfetcher.filesystem import FileSystemClient
 

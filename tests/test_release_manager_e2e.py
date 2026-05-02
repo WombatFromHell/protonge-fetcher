@@ -589,6 +589,10 @@ class TestAssetSizeCaching:
             }
             cache_path.write_text(json.dumps(expired_data))
 
+            # Set file mtime to 2 hours ago to trigger cache expiration
+            old_time = time.time() - 7200
+            os.utime(cache_path, (old_time, old_time))
+
             # Mock fresh network response
             mock_head_response = subprocess.CompletedProcess(
                 args=[],
@@ -617,30 +621,25 @@ class TestAssetSizeCaching:
     def test_get_remote_asset_size_follows_redirect(
         self,
         mock_network_client: Any,
-        mock_filesystem_client: Any,
+        tmp_path: Path,
     ) -> None:
         """Test that asset size fetch follows redirects."""
-        # Arrange: First HEAD returns redirect, second returns size
-        mock_head_response_redirect = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: https://objects.githubusercontent.com/github-production-release-asset/123/GE-Proton10-20.tar.gz",
-            stderr="",
-        )
+        # Use real FileSystemClient to avoid mtime() mock issues
+        fs = FileSystemClient()
 
-        mock_head_response_final = subprocess.CompletedProcess(
+        # Arrange: curl -L follows redirects internally, so head() is called once
+        # with the final response
+        mock_head_response = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout="Content-Length: 1048576",
             stderr="",
         )
 
-        mock_network_client.head.side_effect = [
-            mock_head_response_redirect,
-            mock_head_response_final,
-        ]
+        mock_network_client.head.return_value = mock_head_response
 
-        release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
+        # Disable caching to ensure network call is made
+        release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
 
         # Act
         size = release_manager.get_remote_asset_size(
@@ -651,14 +650,17 @@ class TestAssetSizeCaching:
 
         # Assert
         assert size == 1048576
-        assert mock_network_client.head.call_count == 2
+        assert mock_network_client.head.call_count == 1
 
     def test_get_remote_asset_size_404_error(
         self,
         mock_network_client: Any,
-        mock_filesystem_client: Any,
+        tmp_path: Path,
     ) -> None:
         """Test handling 404 error when getting asset size."""
+        # Use real FileSystemClient to avoid mtime() mock issues
+        fs = FileSystemClient()
+
         # Arrange
         mock_head_response = subprocess.CompletedProcess(
             args=[],
@@ -668,7 +670,8 @@ class TestAssetSizeCaching:
         )
         mock_network_client.head.return_value = mock_head_response
 
-        release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
+        # Disable caching to ensure network call is made
+        release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
 
         # Act & Assert
         with pytest.raises(NetworkError, match="Remote asset not found"):
@@ -731,3 +734,231 @@ class TestAssetNameExtension:
         # Assert
         assert len(matching) == 2
         assert matching[0]["name"] == "GE-Proton10-20.tar.gz"
+
+
+# =============================================================================
+# ReleaseManager with forgejo_adapter (Phase 3.2)
+# =============================================================================
+
+
+class TestReleaseManagerForgejoAdapter:
+    """Tests verifying ReleaseManager works correctly with forgejo_adapter."""
+
+    def test_release_manager_uses_forgejo_adapter(
+        self,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test ReleaseManager accepts and uses forgejo_adapter."""
+        from protonfetcher.platform_adapters import forgejo_adapter
+
+        release_manager = ReleaseManager(
+            mock_network_client,
+            mock_filesystem_client,
+            platform_adapter=forgejo_adapter,
+        )
+
+        assert release_manager.platform_adapter is forgejo_adapter
+
+    def test_release_manager_uses_github_adapter(
+        self,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test ReleaseManager accepts and uses github_adapter."""
+        from protonfetcher.platform_adapters import github_adapter
+
+        release_manager = ReleaseManager(
+            mock_network_client,
+            mock_filesystem_client,
+            platform_adapter=github_adapter,
+        )
+
+        assert release_manager.platform_adapter is github_adapter
+
+    def test_forgejo_adapter_builds_correct_api_url(
+        self,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test forgejo_adapter builds correct API URLs for ReleaseManager."""
+        from protonfetcher.platform_adapters import forgejo_adapter
+
+        release_manager = ReleaseManager(
+            mock_network_client,
+            mock_filesystem_client,
+            platform_adapter=forgejo_adapter,
+        )
+
+        # list_recent_releases uses build_api_url internally
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps([{"tag_name": "dwproton-10.0-26"}]),
+            stderr="",
+        )
+
+        releases = release_manager.list_recent_releases("dawn-winery/dwproton")
+
+        assert releases == ["dwproton-10.0-26"]
+        # Verify the correct API URL was called
+        call_args = mock_network_client.get.call_args
+        assert "dawn.wine/api/v1/repos/dawn-winery/dwproton/releases" in str(call_args)
+
+    def test_github_adapter_builds_correct_api_url(
+        self,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test github_adapter builds correct API URLs for ReleaseManager."""
+        from protonfetcher.platform_adapters import github_adapter
+
+        release_manager = ReleaseManager(
+            mock_network_client,
+            mock_filesystem_client,
+            platform_adapter=github_adapter,
+        )
+
+        # list_recent_releases uses build_api_url internally
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps([{"tag_name": "GE-Proton10-20"}]),
+            stderr="",
+        )
+
+        releases = release_manager.list_recent_releases(
+            "GloriousEggroll/proton-ge-custom"
+        )
+
+        assert releases == ["GE-Proton10-20"]
+        call_args = mock_network_client.get.call_args
+        assert "api.github.com/repos/GloriousEggroll/proton-ge-custom/releases" in str(
+            call_args
+        )
+
+    def test_forgejo_adapter_download_url_differs_from_github(
+        self,
+    ) -> None:
+        """Test that forgejo_adapter and github_adapter produce different download URLs."""
+        from protonfetcher.platform_adapters import forgejo_adapter, github_adapter
+
+        forgejo_url = forgejo_adapter.build_download_url(
+            "dawn-winery/dwproton",
+            "dwproton-10.0-26",
+            "dwproton-10.0-26-x86_64.tar.xz",
+        )
+        github_url = github_adapter.build_download_url(
+            "GloriousEggroll/proton-ge-custom",
+            "GE-Proton10-20",
+            "GE-Proton10-20.tar.gz",
+        )
+
+        assert forgejo_url.startswith("https://dawn.wine/")
+        assert github_url.startswith("https://github.com/")
+        assert forgejo_url != github_url
+
+
+# =============================================================================
+# check_for_newer_release Tests (moved from test_cli.py)
+# =============================================================================
+
+
+class TestCheckForNewerRelease:
+    """Tests for ReleaseManager.check_for_newer_release() method."""
+
+    @pytest.mark.parametrize(
+        "fork,repo,current_versions,latest_tag,expected",
+        [
+            # GE-Proton tests
+            (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
+                ["GE-Proton10-20"],
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
+                ["GE-Proton10-20"],
+                "GE-Proton10-20",
+                None,
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
+                [],
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GloriousEggroll/proton-ge-custom",
+                ["GE-Proton10-18", "GE-Proton10-19", "GE-Proton10-20"],
+                "GE-Proton10-22",
+                "GE-Proton10-22",
+            ),
+            # Proton-EM tests (with directory naming convention)
+            (
+                ForkName.PROTON_EM,
+                "Etaash-mathamsetty/Proton",
+                ["proton-EM-10.0-30"],
+                "EM-10.0-31",
+                "EM-10.0-31",
+            ),
+            (
+                ForkName.PROTON_EM,
+                "Etaash-mathamsetty/Proton",
+                ["proton-EM-10.0-30"],
+                "EM-10.0-30",
+                None,
+            ),
+            # CachyOS tests (with directory naming convention)
+            (
+                ForkName.CACHYOS,
+                "CachyOS/proton-cachyos",
+                ["proton-cachyos-10.0-20260207-slr-x86_64"],
+                "cachyos-10.0-20260227-slr",
+                "cachyos-10.0-20260227-slr",
+            ),
+            (
+                ForkName.CACHYOS,
+                "CachyOS/proton-cachyos",
+                ["proton-cachyos-10.0-20260207-slr-x86_64"],
+                "cachyos-10.0-20260207-slr",
+                None,
+            ),
+        ],
+    )
+    def test_check_for_newer_release(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+        fork: ForkName,
+        repo: str,
+        current_versions: list[str],
+        latest_tag: str,
+        expected: str | None,
+    ) -> None:
+        """Test detection of newer releases for all forks."""
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=f'{{"tag_name": "{latest_tag}"}}', stderr=""
+        )
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"Location: /releases/tag/{latest_tag}",
+            stderr="",
+        )
+
+        release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
+
+        result = release_manager.check_for_newer_release(
+            repo,
+            current_versions,
+            fork,
+        )
+
+        assert result == expected

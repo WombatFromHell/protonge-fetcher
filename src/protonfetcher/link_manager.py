@@ -1,53 +1,92 @@
 """Link manager implementation for ProtonFetcher."""
 
 import logging
-import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
+from .candidate_selection import select_top_3_candidates as _select_top_3
 from .common import (
     DEFAULT_TIMEOUT,
+    FORKS,
     FileSystemClientProtocol,
     ForkName,
-    LinkSpecList,
-    SymlinkMapping,
-    SymlinkSpec,
     VersionCandidateList,
-    VersionGroups,
-    VersionTuple,
 )
 from .exceptions import LinkManagementError
-from .utils import parse_version
+from .link_status import (
+    build_expected_link_mapping as _build_expected_link_mapping,
+)
+from .link_status import (
+    compare_link_targets as _compare_link_targets,
+)
+from .link_status import (
+    has_managed_links as _has_managed_links,
+)
+from .link_status import (
+    list_links as _list_links,
+)
+from .prune_operations import prune_releases as _prune_releases
+from .release_operations import remove_release as _remove_release
+from .symlink_operations import create_symlinks as _create_symlinks
+from .version_finder import (
+    _deduplicate_candidates,
+    find_version_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
-# Data-driven link naming: ForkName → (main, fallback1, fallback2) suffixes
-_LINK_NAMES: dict[ForkName, tuple[str, str, str]] = {
-    ForkName.GE_PROTON: ("GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"),
-    ForkName.PROTON_EM: ("Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"),
-    ForkName.CACHYOS: ("CachyOS", "CachyOS-Fallback", "CachyOS-Fallback2"),
-    ForkName.DW_PROTON: ("DW-Proton", "DW-Proton-Fallback", "DW-Proton-Fallback2"),
-}
 
-# Data-driven skip prefixes: ForkName → set of tag prefixes to skip
-_SKIP_PREFIXES: dict[ForkName, set[str]] = {
-    ForkName.GE_PROTON: {
-        "EM-",
-        "proton-EM-",
-        "cachyos-",
-        "proton-cachyos-",
-        "dwproton-",
-    },
-    ForkName.PROTON_EM: {"GE-Proton", "cachyos-", "proton-cachyos-", "dwproton-"},
-    ForkName.CACHYOS: {"GE-Proton", "EM-", "proton-EM-", "dwproton-"},
-    ForkName.DW_PROTON: {
-        "GE-Proton",
-        "EM-",
-        "cachyos-",
-        "proton-cachyos-",
-        "proton-EM-",
-    },
-}
+def resolve_directory(
+    extract_dir: Path,
+    tag: str,
+    fork: ForkName,
+    file_system: FileSystemClientProtocol,
+) -> Path:
+    """Resolve the extracted directory for a release tag using fork-specific templates.
+
+    Tries each directory name template from ForkConfig in priority order.
+
+    Args:
+        extract_dir: Base directory to search
+        tag: Release tag
+        fork: The fork name
+        file_system: File system client for existence checks
+
+    Returns:
+        Path to the found directory
+
+    Raises:
+        LinkManagementError: If no template matches an existing directory
+    """
+    cfg = FORKS[fork]
+    for template in cfg.dir_name_templates:
+        candidate = extract_dir / template.format(tag=tag)
+        if file_system.exists(candidate) and file_system.is_dir(candidate):
+            return candidate
+
+    tried = ", ".join(t.format(tag=tag) for t in cfg.dir_name_templates)
+    raise LinkManagementError(f"Manual release directory not found: {tried}")
+
+
+def resolve_directory_candidates(
+    extract_dir: Path,
+    tag: str,
+    fork: ForkName,
+) -> list[Path]:
+    """Return all candidate directory paths for a tag, in priority order.
+
+    Does not check existence — just generates paths from templates.
+
+    Args:
+        extract_dir: Base directory to search
+        tag: Release tag
+        fork: The fork name
+
+    Returns:
+        List of candidate Path objects in priority order
+    """
+    cfg = FORKS[fork]
+    return [extract_dir / t.format(tag=tag) for t in cfg.dir_name_templates]
 
 
 class LinkManager:
@@ -75,19 +114,20 @@ class LinkManager:
         Returns:
             Tuple of three Path objects: (main, fallback1, fallback2)
         """
-        suffixes = _LINK_NAMES[fork]
+        suffixes = FORKS[fork].link_names
         return (
             extract_dir / suffixes[0],
             extract_dir / suffixes[1],
             extract_dir / suffixes[2],
         )
 
-    def _find_ge_proton_tag_directory(self, extract_dir: Path, tag: str) -> Path:
-        """Find tag directory for GE-Proton.
+    def _find_tag_directory(self, extract_dir: Path, tag: str, fork: ForkName) -> Path:
+        """Find tag directory using fork-specific templates.
 
         Args:
             extract_dir: Directory to search
             tag: Release tag
+            fork: The fork name
 
         Returns:
             Path to the found directory
@@ -95,114 +135,7 @@ class LinkManager:
         Raises:
             LinkManagementError: If directory not found
         """
-        tag_dir_path = extract_dir / tag
-        if self.file_system_client.exists(
-            tag_dir_path
-        ) and self.file_system_client.is_dir(tag_dir_path):
-            return tag_dir_path
-
-        raise LinkManagementError(f"Manual release directory not found: {tag_dir_path}")
-
-    def _find_proton_em_tag_directory(self, extract_dir: Path, tag: str) -> Path:
-        """Find tag directory for Proton-EM.
-
-        Args:
-            extract_dir: Directory to search
-            tag: Release tag
-
-        Returns:
-            Path to the found directory
-
-        Raises:
-            LinkManagementError: If directory not found
-        """
-        proton_em_dir = extract_dir / f"proton-{tag}"
-        if self.file_system_client.exists(
-            proton_em_dir
-        ) and self.file_system_client.is_dir(proton_em_dir):
-            return proton_em_dir
-
-        # If not found, also try without proton- prefix
-        tag_dir_path = extract_dir / tag
-        if self.file_system_client.exists(
-            tag_dir_path
-        ) and self.file_system_client.is_dir(tag_dir_path):
-            return tag_dir_path
-
-        raise LinkManagementError(
-            f"Manual release directory not found: {extract_dir / tag} or {proton_em_dir}"
-        )
-
-    def _find_cachyos_tag_directory(self, extract_dir: Path, tag: str) -> Path:
-        """Find tag directory for CachyOS.
-
-        Args:
-            extract_dir: Directory to search
-            tag: Release tag
-
-        Returns:
-            Path to the found directory
-
-        Raises:
-            LinkManagementError: If directory not found
-        """
-        # CachyOS archives extract to directory with -x86_64 suffix
-        # e.g., tag 'cachyos-10.0-20260207-slr' extracts to 'proton-cachyos-10.0-20260207-slr-x86_64'
-        cachyos_dir = extract_dir / f"proton-{tag}-x86_64"
-        if self.file_system_client.exists(
-            cachyos_dir
-        ) and self.file_system_client.is_dir(cachyos_dir):
-            return cachyos_dir
-
-        # If not found, also try without -x86_64 suffix
-        cachyos_dir_no_suffix = extract_dir / f"proton-{tag}"
-        if self.file_system_client.exists(
-            cachyos_dir_no_suffix
-        ) and self.file_system_client.is_dir(cachyos_dir_no_suffix):
-            return cachyos_dir_no_suffix
-
-        # If not found, also try without proton- prefix
-        tag_dir_path = extract_dir / tag
-        if self.file_system_client.exists(
-            tag_dir_path
-        ) and self.file_system_client.is_dir(tag_dir_path):
-            return tag_dir_path
-
-        raise LinkManagementError(
-            f"Manual release directory not found: {extract_dir / tag}, {cachyos_dir}, or {cachyos_dir_no_suffix}"
-        )
-
-    def _find_dwproton_tag_directory(self, extract_dir: Path, tag: str) -> Path:
-        """Find tag directory for DW-Proton.
-
-        Args:
-            extract_dir: Directory to search
-            tag: Release tag
-
-        Returns:
-            Path to the found directory
-
-        Raises:
-            LinkManagementError: If directory not found
-        """
-        # DW-Proton archives extract to directory with -x86_64 suffix
-        # e.g., tag 'dwproton-10.0-26' extracts to 'dwproton-10.0-26-x86_64'
-        dwproton_dir = extract_dir / f"{tag}-x86_64"
-        if self.file_system_client.exists(
-            dwproton_dir
-        ) and self.file_system_client.is_dir(dwproton_dir):
-            return dwproton_dir
-
-        # If not found, also try without -x86_64 suffix
-        tag_dir_path = extract_dir / tag
-        if self.file_system_client.exists(
-            tag_dir_path
-        ) and self.file_system_client.is_dir(tag_dir_path):
-            return tag_dir_path
-
-        raise LinkManagementError(
-            f"Manual release directory not found: {extract_dir / tag} or {dwproton_dir}"
-        )
+        return resolve_directory(extract_dir, tag, fork, self.file_system_client)
 
     def _validate_find_tag_inputs(
         self,
@@ -252,182 +185,18 @@ class LinkManager:
             return None
 
         # Dispatch to fork-specific implementation
-        if fork == ForkName.PROTON_EM:
-            return self._find_proton_em_tag_directory(extract_dir, tag)
-        elif fork == ForkName.CACHYOS:
-            return self._find_cachyos_tag_directory(extract_dir, tag)
-        elif fork == ForkName.GE_PROTON:
-            return self._find_ge_proton_tag_directory(extract_dir, tag)
-        elif fork == ForkName.DW_PROTON:
-            return self._find_dwproton_tag_directory(extract_dir, tag)
-        else:
+        if fork not in FORKS:
             raise ValueError(f"Unsupported fork: {fork}")
-
-    def _get_tag_name(self, entry: Path, fork: ForkName) -> str:
-        """Get the tag name from the directory entry, handling fork-specific prefixes."""
-        if fork == ForkName.PROTON_EM and entry.name.startswith("proton-"):
-            return entry.name[7:]  # Remove "proton-" prefix
-        elif fork == ForkName.CACHYOS and entry.name.startswith("proton-"):
-            # Remove "proton-" prefix and "-x86_64" suffix if present
-            name = entry.name[7:]  # Remove "proton-" prefix
-            if name.endswith("-x86_64"):
-                name = name[:-7]  # Remove "-x86_64" suffix
-            return name
-        elif fork == ForkName.DW_PROTON and entry.name.endswith("-x86_64"):
-            # Remove "-x86_64" suffix for DW-Proton
-            return entry.name[:-7]
-        else:
-            return entry.name
-
-    def _should_skip_directory(self, tag_name: str, fork: ForkName) -> bool:
-        """Check if directory should be skipped based on fork."""
-        for prefix in _SKIP_PREFIXES[fork]:
-            if tag_name.startswith(prefix):
-                return True
-        return False
-
-    def _is_valid_proton_directory(self, entry: Path, fork: ForkName) -> bool:
-        """Validate that the directory name matches expected pattern for the fork."""
-        match fork:
-            case ForkName.GE_PROTON:
-                # GE-Proton directories should match pattern: GE-Proton{major}-{minor}
-                # Allow optional suffixes (e.g., -RC1, -beta)
-                ge_pattern = r"^GE-Proton\d+-\d+(?:-.*)?$"
-                return bool(re.match(ge_pattern, entry.name))
-            case ForkName.PROTON_EM:
-                # Proton-EM directories should match pattern: proton-EM-{major}.{minor}-{patch}
-                # or EM-{major}.{minor}-{patch}
-                # Allow optional suffixes (e.g., -HDRTEST, -RC1)
-                em_pattern1 = r"^proton-EM-\d+\.\d+-\d+(?:-.*)?$"
-                em_pattern2 = r"^EM-\d+\.\d+-\d+(?:-.*)?$"
-                return bool(
-                    re.match(em_pattern1, entry.name)
-                    or re.match(em_pattern2, entry.name)
-                )
-            case ForkName.CACHYOS:
-                # CachyOS directories should match pattern: proton-cachyos-{major}.{minor}-{date}-slr-x86_64
-                # or cachyos-{major}.{minor}-{date}-slr (with or without -x86_64 suffix)
-                # Allow optional suffixes after the base pattern
-                cachyos_pattern1 = (
-                    r"^proton-cachyos-\d+\.\d+-\d+-slr(?:-x86_64)?(?:-.*)?$"
-                )
-                cachyos_pattern2 = r"^cachyos-\d+\.\d+-\d+-slr(?:-.*)?$"
-                return bool(
-                    re.match(cachyos_pattern1, entry.name)
-                    or re.match(cachyos_pattern2, entry.name)
-                )
-            case ForkName.DW_PROTON:
-                # DW-Proton directories should match pattern: dwproton-{major}.{minor}-{patch}-x86_64
-                # Allow optional suffixes (e.g., -HDRTEST, -RC1)
-                dwproton_pattern = r"^dwproton-\d+\.\d+-\d+-x86_64(?:-.*)?$"
-                return bool(re.match(dwproton_pattern, entry.name))
+        return self._find_tag_directory(extract_dir, tag, fork)
 
     def find_version_candidates(
         self, extract_dir: Path, fork: ForkName
     ) -> VersionCandidateList:
-        """Find all directories that look like Proton builds and parse their versions."""
-        candidates: list[tuple[VersionTuple, Path]] = []
-        for entry in self.file_system_client.iterdir(extract_dir):
-            if self.file_system_client.is_dir(
-                entry
-            ) and not self.file_system_client.is_symlink(entry):
-                tag_name = self._get_tag_name(entry, fork)
+        """Find all directories that look like Proton builds and parse their versions.
 
-                # Skip directories that clearly belong to the other fork
-                if self._should_skip_directory(tag_name, fork):
-                    continue
-
-                # For each fork, validate that the directory name matches expected pattern
-                # This prevents non-Proton directories like "LegacyRuntime" from being included
-                if self._is_valid_proton_directory(entry, fork):
-                    # use the directory name as tag for comparison
-                    candidates.append((parse_version(tag_name, fork), entry))
-        return candidates
-
-    def _create_symlink_specs(
-        self, main: Path, fb1: Path, fb2: Path, top_3: VersionCandidateList
-    ) -> LinkSpecList:
-        """Create SymlinkSpec objects for the top 3 versions."""
-        specs: LinkSpecList = []
-
-        if len(top_3) > 0:
-            specs.append(
-                SymlinkSpec(link_path=main, target_path=top_3[0][1], priority=0)
-            )
-
-        if len(top_3) > 1:
-            specs.append(
-                SymlinkSpec(link_path=fb1, target_path=top_3[1][1], priority=1)
-            )
-
-        if len(top_3) > 2:
-            specs.append(
-                SymlinkSpec(link_path=fb2, target_path=top_3[2][1], priority=2)
-            )
-
-        return specs
-
-    def _cleanup_unwanted_links(
-        self, main: Path, fb1: Path, fb2: Path, wants: SymlinkMapping
-    ) -> None:
-        """Remove unwanted symlinks and any real directories that conflict with wanted symlinks."""
-        for link in (main, fb1, fb2):
-            if self.file_system_client.is_symlink(link) and link not in wants:
-                self.file_system_client.unlink(link)
-            # If link exists but is a real directory, remove it (regardless of whether it's wanted)
-            # This handles the case where a real directory has the same name as a symlink that needs to be created
-            elif self.file_system_client.exists(
-                link
-            ) and not self.file_system_client.is_symlink(link):
-                self.file_system_client.rmtree(link)
-
-    def _compare_targets(self, current_target: Path, expected_target: Path) -> bool:
-        """Compare if two targets are the same by checking the resolved paths."""
-        try:
-            resolved_current_target = self.file_system_client.resolve(current_target)
-            resolved_expected_target = self.file_system_client.resolve(expected_target)
-            return resolved_current_target == resolved_expected_target
-        except OSError:
-            # The target directory doesn't exist yet (common case)
-            # We can't directly compare resolved paths, so return False to update the symlink
-            return False
-
-    def _handle_existing_symlink(self, link: Path, expected_target: Path) -> None:
-        """Handle an existing symlink to check if it points to the correct target."""
-        try:
-            current_target = self.file_system_client.resolve(link)
-            # The target is a directory path that may or may not exist yet
-            # If it doesn't exist, we can't resolve it, so we need special handling
-            paths_match = self._compare_targets(current_target, expected_target)
-            if paths_match:
-                return  # already correct
-            else:
-                # Paths don't match, remove symlink to update to new target
-                self.file_system_client.unlink(link)
-        except OSError:
-            # If resolve fails on the current symlink (broken symlink), remove it
-            self.file_system_client.unlink(link)
-
-    def _cleanup_existing_path_before_symlink(
-        self, link: Path, expected_target: Path
-    ) -> None:
-        """Clean up existing path before creating a symlink."""
-        # Double check: If link exists as a real directory, remove it before creating symlink
-        if self.file_system_client.exists(
-            link
-        ) and not self.file_system_client.is_symlink(link):
-            self.file_system_client.rmtree(link)
-        # If link is a symlink, check if it points to the correct target
-        elif self.file_system_client.is_symlink(link):
-            self._handle_existing_symlink(link, expected_target)
-
-        # Final check: make sure there's nothing at link path before creating symlink
-        if self.file_system_client.exists(link):
-            # This should not happen with correct logic above, but for safety
-            if self.file_system_client.is_symlink(link):
-                self.file_system_client.unlink(link)
-            else:
-                self.file_system_client.rmtree(link)
+        Delegates to the version_finder submodule.
+        """
+        return find_version_candidates(extract_dir, fork, self.file_system_client)
 
     def create_symlinks(
         self, main: Path, fb1: Path, fb2: Path, top_3: VersionCandidateList
@@ -443,92 +212,14 @@ class LinkManager:
         Returns:
             True if symlink creation was attempted (even if some failed)
         """
-        return self._create_symlinks_internal(main, fb1, fb2, top_3)
-
-    def create_symlinks_for_test(
-        self, extract_dir: Path, target_path: Path, fork: ForkName
-    ) -> bool:
-        """Create symlinks for test usage.
-
-        Args:
-            extract_dir: Directory where symlinks will be created
-            target_path: Target directory to link to
-            fork: The Proton fork name
-
-        Returns:
-            True if symlink creation was attempted
-
-        Raises:
-            LinkManagementError: If target directory doesn't exist
-        """
-        # Check if target directory exists
-        if not self.file_system_client.exists(
-            target_path
-        ) or not self.file_system_client.is_dir(target_path):
-            raise LinkManagementError(f"Target directory does not exist: {target_path}")
-
-        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
-
-        # Build top_3 with the same target for all entries
-        from .common import VersionTuple
-
-        top_3: list[tuple[VersionTuple, Path]] = [
-            (("test", 0, 0, 0), target_path),
-            (("test", 0, 0, 0), target_path),
-            (("test", 0, 0, 0), target_path),
-        ]
-
-        return self.create_symlinks(main, fb1, fb2, top_3)
-
-    def _create_symlinks_internal(
-        self,
-        main: Path,
-        fb1: Path,
-        fb2: Path,
-        top_3: VersionCandidateList,
-    ) -> bool:
-        """Internal implementation for creating symlinks with 4 parameters."""
-        # Create SymlinkSpec objects for all symlinks we want to create
-        wanted_specs = self._create_symlink_specs(main, fb1, fb2, top_3)
-
-        # Build a mapping from link path to target path
-        wants: Dict[Path, Path] = {
-            spec.link_path: spec.target_path for spec in wanted_specs
-        }
-
-        # First pass: Remove unwanted symlinks and any real directories that conflict with wanted symlinks
-        self._cleanup_unwanted_links(main, fb1, fb2, wants)
-
-        for link, target in wants.items():
-            self._cleanup_existing_path_before_symlink(link, target)
-            # Calculate relative path from the link location to the target for relative symlinks
-            # If target is not in a subdirectory of link's parent, use absolute path
-            try:
-                relative_target = target.relative_to(link.parent)
-            except ValueError:
-                # If target is not a subpath of link.parent, use absolute path
-                relative_target = target
-            # Use target_is_directory=True to correctly handle directory symlinks
-            try:
-                self.file_system_client.symlink_to(
-                    link, relative_target, target_is_directory=True
-                )
-                logger.info("Created symlink %s -> %s", link.name, relative_target)
-            except OSError as e:
-                logger.error(
-                    "Failed to create symlink %s -> %s: %s", link.name, target.name, e
-                )
-                # Don't re-raise to handle gracefully as expected by test
-                # The function should complete without crashing even if symlink creation fails
-                continue  # Continue to the next link instead of failing the entire function
-
-        return True
+        return _create_symlinks(main, fb1, fb2, top_3, self.file_system_client)
 
     def list_links(
         self, extract_dir: Path, fork: ForkName = ForkName.GE_PROTON
     ) -> dict[str, str | None]:
-        """
-        List recognized symbolic links and their associated Proton fork folders.
+        """List recognized symbolic links and their associated Proton fork folders.
+
+        Delegates to the link_status submodule.
 
         Args:
             extract_dir: Directory to search for links
@@ -537,32 +228,14 @@ class LinkManager:
         Returns:
             Dictionary mapping link names to their target paths (or None if link doesn't exist)
         """
-        # Get symlink names for the fork
-        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
-
-        links_info: dict[str, str | None] = {}
-
-        # Check each link and get its target
-        for link_name in [main, fb1, fb2]:
-            if self.file_system_client.exists(
-                link_name
-            ) and self.file_system_client.is_symlink(link_name):
-                try:
-                    target_path = self.file_system_client.resolve(link_name)
-                    links_info[link_name.name] = str(target_path)
-                except OSError:
-                    # Broken symlink, return None
-                    links_info[link_name.name] = None
-            else:
-                links_info[link_name.name] = None
-
-        return links_info
+        return _list_links(extract_dir, fork, self.file_system_client)
 
     def has_managed_links(
         self, extract_dir: Path, fork: ForkName = ForkName.GE_PROTON
     ) -> bool:
-        """
-        Check if a fork has any managed symbolic links.
+        """Check if a fork has any managed symbolic links.
+
+        Delegates to the link_status submodule.
 
         Args:
             extract_dir: Directory to search for links
@@ -571,94 +244,14 @@ class LinkManager:
         Returns:
             True if at least one managed symlink exists for the fork, False otherwise
         """
-        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
-
-        for link in [main, fb1, fb2]:
-            if self.file_system_client.exists(
-                link
-            ) and self.file_system_client.is_symlink(link):
-                return True
-
-        return False
-
-    def _determine_release_path(
-        self, extract_dir: Path, tag: str, fork: ForkName
-    ) -> Path:
-        """Determine the correct release path, considering Proton-EM format."""
-        release_path = extract_dir / tag
-
-        # Also handle Proton-EM and CachyOS format with "proton-" prefix
-        if fork in (ForkName.PROTON_EM, ForkName.CACHYOS):
-            proton_prefixed_path = extract_dir / f"proton-{tag}"
-            if not self.file_system_client.exists(
-                release_path
-            ) and self.file_system_client.exists(proton_prefixed_path):
-                release_path = proton_prefixed_path
-
-            # For CachyOS, also check with -x86_64 suffix
-            if fork == ForkName.CACHYOS:
-                cachyos_path = extract_dir / f"proton-{tag}-x86_64"
-                if not self.file_system_client.exists(
-                    release_path
-                ) and self.file_system_client.exists(cachyos_path):
-                    release_path = cachyos_path
-
-        return release_path
-
-    def _check_release_exists(self, release_path: Path) -> None:
-        """Check if the release directory exists, raise error if not."""
-        if not self.file_system_client.exists(release_path):
-            raise LinkManagementError(
-                f"Release directory does not exist: {release_path}"
-            )
-
-    def _identify_links_to_remove(
-        self, extract_dir: Path, release_path: Path, fork: ForkName
-    ) -> list[Path]:
-        """Identify symbolic links that point to the release directory."""
-        # Get symlink names for the fork to check if they point to this release
-        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
-
-        # Identify links that point to this release directory
-        links_to_remove: list[Path] = []
-        for link in [main, fb1, fb2]:
-            if self.file_system_client.exists(
-                link
-            ) and self.file_system_client.is_symlink(link):
-                try:
-                    target_path = self.file_system_client.resolve(link)
-                    if target_path == release_path:
-                        links_to_remove.append(link)
-                except OSError:
-                    # Broken symlink - remove it if it points to the release directory
-                    links_to_remove.append(link)
-
-        return links_to_remove
-
-    def _remove_release_directory(self, release_path: Path) -> None:
-        """Remove the release directory."""
-        try:
-            self.file_system_client.rmtree(release_path)
-            logger.info(f"Removed release directory: {release_path}")
-        except Exception as e:
-            raise LinkManagementError(
-                f"Failed to remove release directory {release_path}: {e}"
-            )
-
-    def _remove_symbolic_links(self, links_to_remove: list[Path]) -> None:
-        """Remove the associated symbolic links."""
-        for link in links_to_remove:
-            try:
-                self.file_system_client.unlink(link)
-                logger.info(f"Removed symbolic link: {link}")
-            except Exception as e:
-                logger.error(f"Failed to remove symbolic link {link}: {e}")
+        return _has_managed_links(extract_dir, fork, self.file_system_client)
 
     def remove_release(
         self, extract_dir: Path, tag: str, fork: ForkName = ForkName.GE_PROTON
     ) -> bool:
-        """
-        Remove a specific Proton fork release folder and its associated symbolic links.
+        """Remove a specific Proton fork release folder and its associated symlinks.
+
+        Delegates to the release_operations submodule.
 
         Args:
             extract_dir: Directory containing the release folder
@@ -668,26 +261,19 @@ class LinkManager:
         Returns:
             True if the removal was successful, False otherwise
         """
-        release_path = self._determine_release_path(extract_dir, tag, fork)
-
-        # Check if the release directory exists
-        self._check_release_exists(release_path)
-
-        # Identify links that point to this release directory
-        links_to_remove = self._identify_links_to_remove(
-            extract_dir, release_path, fork
-        )
-
-        # Remove the release directory
-        self._remove_release_directory(release_path)
-
-        # Remove the associated symbolic links that point to this release
-        self._remove_symbolic_links(links_to_remove)
-
+        _remove_release(extract_dir, tag, fork, self.file_system_client)
         # Regenerate the link management system to ensure consistency
         self.manage_proton_links(extract_dir, tag, fork)
-
         return True
+
+    def _deduplicate_candidates(
+        self, candidates: VersionCandidateList
+    ) -> VersionCandidateList:
+        """Remove duplicate versions, preferring standard naming.
+
+        Delegates to the version_finder submodule.
+        """
+        return _deduplicate_candidates(candidates)
 
     def _get_link_names(
         self, extract_dir: Path, fork: ForkName
@@ -711,18 +297,12 @@ class LinkManager:
         if fork == ForkName.GE_PROTON:
             return extract_dir / tag
         elif fork == ForkName.CACHYOS:
-            # CachyOS uses "proton-" prefix and "-x86_64" suffix
             return extract_dir / f"proton-{tag}-x86_64"
         else:
-            # Proton-EM uses "proton-" prefix
             return extract_dir / f"proton-{tag}"
 
     def _log_manual_release_warning(self, expected_path: Path) -> None:
-        """Log a warning when expected manual release directory is not found.
-
-        Args:
-            expected_path: The expected directory path that was not found
-        """
+        """Log a warning when expected manual release directory is not found."""
         logger.warning("Expected extracted directory does not exist: %s", expected_path)
 
     def _handle_manual_release_directory(
@@ -760,102 +340,6 @@ class LinkManager:
 
         return tag_dir
 
-    def _deduplicate_candidates(
-        self, candidates: VersionCandidateList
-    ) -> VersionCandidateList:
-        """Remove duplicate versions, preferring directories with standard naming over prefixed naming."""
-        # Group candidates by parsed version
-        version_groups: VersionGroups = {}
-        for parsed_version, directory_path in candidates:
-            if parsed_version not in version_groups:
-                version_groups[parsed_version] = []
-            version_groups[parsed_version].append(directory_path)
-
-        # For each group of directories with the same version, prefer the canonical name
-        unique_candidates: VersionCandidateList = []
-        for parsed_version, directories in version_groups.items():
-            # Prefer directories without "proton-" prefix for Proton-EM, or standard names in general
-            # Sort by directory name to have a consistent preference - shorter/simpler names first
-            preferred_dir = min(
-                directories,
-                key=lambda d: (
-                    # Prefer directories without 'proton-' prefix
-                    1 if d.name.startswith("proton-") else 0,
-                    # Then by name length (shorter names preferred)
-                    len(d.name),
-                    # Then by name itself for consistent ordering
-                    d.name,
-                ),
-            )
-            unique_candidates.append((parsed_version, preferred_dir))
-
-        return unique_candidates
-
-    def _handle_manual_release_candidates(
-        self,
-        tag: str,
-        fork: ForkName,
-        candidates: VersionCandidateList,
-        tag_dir: Optional[Path],
-    ) -> VersionCandidateList:
-        """Handle candidates for manual releases."""
-        # For manual releases, add the manual tag to candidates and sort
-        tag_version = parse_version(tag, fork)
-
-        # Check if this version is already in candidates to avoid duplicates
-        existing_versions: set[VersionTuple] = {
-            candidate[0] for candidate in candidates
-        }
-        if tag_version not in existing_versions and tag_dir is not None:
-            candidates.append((tag_version, tag_dir))
-
-        # Sort all candidates including the manual tag
-        candidates.sort(key=lambda t: t[0], reverse=True)
-
-        # Take top 3
-        top_3: list[tuple[VersionTuple, Path]] = candidates[:3]
-        return top_3
-
-    def _handle_regular_release_candidates(
-        self, candidates: VersionCandidateList
-    ) -> VersionCandidateList:
-        """Handle candidates for regular releases."""
-        # sort descending by version (newest first)
-        candidates.sort(key=lambda t: t[0], reverse=True)
-        top_3: VersionCandidateList = candidates[:3]
-        return top_3
-
-    def _get_top_3_candidates(
-        self,
-        extract_dir: Path,
-        tag: str,
-        fork: ForkName,
-        is_manual_release: bool,
-        tag_dir: Optional[Path],
-    ) -> Optional[VersionCandidateList]:
-        """Get the top 3 version candidates for symlinks.
-
-        Returns:
-            List of top 3 (version, path) tuples, or None if no candidates found
-        """
-        candidates = self.find_version_candidates(extract_dir, fork)
-        if not candidates:
-            return None
-
-        candidates = self._deduplicate_candidates(candidates)
-
-        if is_manual_release and tag_dir is not None:
-            top_3 = self._handle_manual_release_candidates(
-                tag, fork, candidates, tag_dir
-            )
-        else:
-            top_3 = self._handle_regular_release_candidates(candidates)
-
-        if not top_3:
-            return None
-
-        return top_3
-
     def _build_expected_link_mapping(
         self,
         link_names: tuple[Path, Path, Path],
@@ -863,13 +347,9 @@ class LinkManager:
     ) -> dict[str, str]:
         """Build expected link mapping from link names and top 3 candidates.
 
-        Returns:
-            Dict mapping link name to expected target path
+        Delegates to the link_status submodule.
         """
-        expected_links: dict[str, str] = {}
-        for link_name, (version, target_path) in zip(link_names, top_3):
-            expected_links[link_name.name] = str(target_path)
-        return expected_links
+        return _build_expected_link_mapping(link_names, top_3)
 
     def _compare_link_targets(
         self,
@@ -878,24 +358,9 @@ class LinkManager:
     ) -> bool:
         """Compare current vs expected link targets.
 
-        Returns:
-            True if all links match expected targets, False otherwise
+        Delegates to the link_status submodule.
         """
-        for link_name, expected_target in expected_links.items():
-            current_target = current_links.get(link_name)
-
-            if current_target is None:
-                return False
-
-            try:
-                expected_path = Path(expected_target).resolve()
-                current_path = Path(current_target).resolve()
-                if expected_path != current_path:
-                    return False
-            except OSError:
-                return False
-
-        return True
+        return _compare_link_targets(current_links, expected_links)
 
     def are_links_up_to_date(
         self,
@@ -904,11 +369,9 @@ class LinkManager:
         fork: ForkName = ForkName.GE_PROTON,
         is_manual_release: bool = False,
     ) -> bool:
-        """
-        Check if existing symlinks are already correct and up-to-date.
+        """Check if existing symlinks are already correct and up-to-date.
 
-        This method determines what the symlinks should point to and compares
-        it with the current state, returning True if no changes are needed.
+        Orchestrates: manual release check → candidate selection → link comparison.
 
         Args:
             extract_dir: Directory containing the Proton installations
@@ -922,7 +385,6 @@ class LinkManager:
         main, fb1, fb2 = self._get_link_names(extract_dir, fork)
         link_names = (main, fb1, fb2)
 
-        # For manual releases, check if target directory exists
         tag_dir = self._handle_manual_release_directory(
             extract_dir, tag, fork, is_manual_release
         )
@@ -930,20 +392,15 @@ class LinkManager:
         if is_manual_release and tag_dir is None:
             return False
 
-        # Get top 3 candidates
-        top_3 = self._get_top_3_candidates(
-            extract_dir, tag, fork, is_manual_release, tag_dir
+        top_3 = _select_top_3(
+            extract_dir, fork, is_manual_release, tag_dir, self.file_system_client
         )
         if top_3 is None:
             return False
 
-        # Get current link status
         current_links = self.list_links(extract_dir, fork)
-
-        # Build expected mapping
         expected_links = self._build_expected_link_mapping(link_names, top_3)
 
-        # Compare current vs expected
         return self._compare_link_targets(current_links, expected_links)
 
     def manage_proton_links(
@@ -953,52 +410,36 @@ class LinkManager:
         fork: ForkName = ForkName.GE_PROTON,
         is_manual_release: bool = False,
     ) -> bool:
-        """
-        Ensure the three symlinks always point to the three *newest* extracted
-        versions, regardless of the order in which they were downloaded.
+        """Ensure the three symlinks always point to the three newest extracted versions.
+
+        Orchestrates: manual release check → candidate selection → symlink creation.
 
         Returns:
             True if the operation was successful
         """
         main, fb1, fb2 = self._get_link_names(extract_dir, fork)
 
-        # For manual releases, first check if the target directory exists
         tag_dir = self._handle_manual_release_directory(
             extract_dir, tag, fork, is_manual_release
         )
 
-        # If it was manual release and no directory found, return early
         if is_manual_release and tag_dir is None:
             return True
 
-        # Find all version candidates
-        candidates = self.find_version_candidates(extract_dir, fork)
-
-        if not candidates:  # nothing to do
+        top_3 = _select_top_3(
+            extract_dir, fork, is_manual_release, tag_dir, self.file_system_client
+        )
+        if top_3 is None:
             logger.warning("No extracted Proton directories found – not touching links")
             return True
 
-        # Remove duplicate versions, preferring standard naming
-        candidates = self._deduplicate_candidates(candidates)
-
-        # Handle different logic for manual vs regular releases
-        if is_manual_release and tag_dir is not None:
-            top_3 = self._handle_manual_release_candidates(
-                tag, fork, candidates, tag_dir
-            )
-        else:
-            top_3 = self._handle_regular_release_candidates(candidates)
-
-        # Create the symlinks
         self.create_symlinks(main, fb1, fb2, top_3)
         return True
 
     def get_installed_versions(self, extract_dir: Path, fork: ForkName) -> list[str]:
-        """
-        Get list of currently installed version tags for a fork.
+        """Get list of currently installed version tags for a fork.
 
-        This method finds all version directories for the specified fork
-        and returns their tag names, sorted by version (newest first).
+        Delegates to the prune_operations submodule.
 
         Args:
             extract_dir: Directory to search for installed versions
@@ -1007,28 +448,14 @@ class LinkManager:
         Returns:
             List of version tag strings, sorted newest first
         """
-        # Find all version candidates
-        candidates = self.find_version_candidates(extract_dir, fork)
+        from .prune_operations import get_installed_versions as _get_installed
 
-        if not candidates:
-            return []
-
-        # Remove duplicates, preferring standard naming
-        candidates = self._deduplicate_candidates(candidates)
-
-        # Sort by version (newest first)
-        candidates.sort(key=lambda t: t[0], reverse=True)
-
-        # Extract tag names from directory paths
-        # Use the directory name as the tag
-        return [path.name for _, path in candidates]
+        return _get_installed(extract_dir, fork, self.file_system_client)
 
     def get_linked_versions(self, extract_dir: Path, fork: ForkName) -> set[str]:
-        """
-        Get set of version directories currently referenced by symlinks.
+        """Get set of version directories currently referenced by symlinks.
 
-        This method resolves all managed symlinks for the fork and returns
-        the directory names they point to.
+        Delegates to the prune_operations submodule.
 
         Args:
             extract_dir: Directory to search for symlinks
@@ -1037,19 +464,23 @@ class LinkManager:
         Returns:
             Set of directory names currently linked
         """
-        linked: set[str] = set()
-        main, fb1, fb2 = self.get_link_names_for_fork(extract_dir, fork)
+        from .prune_operations import get_linked_versions as _get_linked
 
-        for link_path in (main, fb1, fb2):
-            if self.file_system_client.is_symlink(link_path):
-                try:
-                    target = self.file_system_client.resolve(link_path)
-                    linked.add(target.name)
-                except OSError:
-                    # Broken symlink, skip
-                    continue
+        return _get_linked(extract_dir, fork, self.file_system_client)
 
-        return linked
+    def _compute_prune_plan(
+        self, extract_dir: Path, fork: ForkName, keep: int
+    ) -> tuple[list[str], list[str]]:
+        """Compute which versions to keep and which to prune.
+
+        Delegates to the prune_operations submodule.
+
+        Returns:
+            Tuple of (kept_versions, pruned_versions) lists
+        """
+        from .prune_operations import compute_prune_plan as _compute
+
+        return _compute(extract_dir, fork, keep, self.file_system_client)
 
     def prune_releases(
         self,
@@ -1058,12 +489,9 @@ class LinkManager:
         keep: int = 3,
         dry_run: bool = False,
     ) -> tuple[list[str], list[str]]:
-        """
-        Remove old unmanaged Proton releases, keeping the N newest versions.
+        """Remove old unmanaged Proton releases, keeping the N newest versions.
 
-        This method identifies installed versions that are not currently
-        referenced by symlinks and removes them, keeping only the newest
-        versions (default: 3, matching symlink strategy).
+        Delegates to the prune_operations submodule.
 
         Args:
             extract_dir: Directory containing Proton installations
@@ -1077,53 +505,6 @@ class LinkManager:
         Raises:
             ValueError: If keep is less than 1
         """
-        if keep < 1:
-            raise ValueError("keep must be at least 1")
-
-        # Get all installed versions (sorted newest first)
-        all_versions = self.get_installed_versions(extract_dir, fork)
-
-        if not all_versions:
-            logger.info(f"No {fork.value} installations found to prune")
-            return [], []
-
-        # Get currently linked versions (these should never be pruned)
-        linked_versions = self.get_linked_versions(extract_dir, fork)
-
-        # Determine which versions to keep and prune
-        # Always keep the newest N versions
-        kept_versions: list[str] = all_versions[:keep]
-
-        # Versions beyond the newest N are candidates for pruning
-        prune_candidates = all_versions[keep:]
-
-        # Never prune linked versions, even if they're old
-        # (this protects against breaking active prefixes)
-        pruned_versions: list[str] = [
-            v for v in prune_candidates if v not in linked_versions
-        ]
-
-        # Report any linked versions that would have been pruned
-        protected_versions = [v for v in prune_candidates if v in linked_versions]
-        if protected_versions:
-            logger.debug(
-                f"Protected {len(protected_versions)} linked version(s) from pruning: "
-                f"{', '.join(protected_versions)}"
-            )
-
-        if not pruned_versions:
-            return kept_versions, []
-
-        if dry_run:
-            return kept_versions, pruned_versions
-
-        # Actually remove the pruned versions using existing remove_release
-        logger.info(f"Pruning {len(pruned_versions)} old {fork.value} release(s)...")
-        for version in pruned_versions:
-            try:
-                self.remove_release(extract_dir, version, fork)
-                logger.info(f"  Removed: {version}")
-            except LinkManagementError as e:
-                logger.warning(f"  Failed to remove {version}: {e}")
-
-        return kept_versions, pruned_versions
+        return _prune_releases(
+            extract_dir, fork, keep, dry_run, self.file_system_client
+        )

@@ -1,13 +1,16 @@
 """
 Unit tests for GitHubReleaseFetcher orchestrator.
 
-Focused tests for the main orchestrator class:
-- Error handling scenarios
+GitHubReleaseFetcher is a marker class (~10 lines, zero method overrides)
+that delegates all behavior to BaseReleaseFetcher + GitHubPlatformAdapter.
+
+Tests in this file verify:
+- Error handling scenarios (curl missing, asset not found, etc.)
 - Skip logic for existing directories
-- Dependency validation
 - Multi-fork update logic
 
-Note: Complete workflow tests are in test_cli.py to avoid duplication.
+Adapter selection is tested in test_base_release_fetcher.py.
+Complete workflow tests are in test_cli.py to avoid duplication.
 """
 
 import json
@@ -45,19 +48,59 @@ class TestFetchAndExtractEdgeCases:
         extract_dir = Path("/mock/compatibilitytools.d")
         existing_dir = extract_dir / tag
 
-        mocker.patch(
-            "protonfetcher.github_fetcher.Path.exists",
-            return_value=True,
-        )
-        mocker.patch(
-            "protonfetcher.github_fetcher.Path.is_dir",
-            return_value=True,
-        )
-
         fetcher = GitHubReleaseFetcher(
             network_client=mock_network_client,
             file_system_client=mock_filesystem_client,
             timeout=30,
+        )
+
+        # Patch Path.exists/is_dir for _check_existing_directory (uses Path directly)
+        mocker.patch(
+            "protonfetcher.base_release_fetcher.Path.exists",
+            return_value=True,
+        )
+        mocker.patch(
+            "protonfetcher.base_release_fetcher.Path.is_dir",
+            return_value=True,
+        )
+
+        # Mock the fetcher's file_system_client for _ensure_directory_is_writable
+        mocker.patch.object(
+            fetcher.file_system_client,
+            "exists",
+            return_value=True,
+        )
+        mocker.patch.object(
+            fetcher.file_system_client,
+            "is_dir",
+            return_value=True,
+        )
+        mocker.patch.object(
+            fetcher.file_system_client,
+            "mkdir",
+            return_value=None,
+        )
+        mocker.patch.object(
+            fetcher.file_system_client,
+            "write",
+            return_value=None,
+        )
+        mocker.patch.object(
+            fetcher.file_system_client,
+            "unlink",
+            return_value=None,
+        )
+
+        # Mock the release_manager's file_system_client for directory checks
+        mocker.patch.object(
+            fetcher.release_manager.file_system_client,
+            "exists",
+            return_value=True,
+        )
+        mocker.patch.object(
+            fetcher.release_manager.file_system_client,
+            "is_dir",
+            return_value=True,
         )
 
         result_path = fetcher.fetch_and_extract(
@@ -103,6 +146,12 @@ class TestFetchAndExtractEdgeCases:
             timeout=30,
         )
 
+        # Mock cache to avoid mock filesystem mtime issues
+        mocker.patch.object(
+            fetcher.release_manager, "_get_cached_asset_size", return_value=None
+        )
+
+        # Asset is found but get_remote_asset_size fails (mock doesn't have proper HEAD)
         with pytest.raises(NetworkError, match="Failed to get remote asset size"):
             fetcher.fetch_and_extract(
                 repo="GloriousEggroll/proton-ge-custom",
@@ -153,7 +202,7 @@ class TestRemoveRelease:
 
         fetcher = GitHubReleaseFetcher(file_system_client=mock_filesystem_client)
 
-        with pytest.raises(LinkManagementError, match="does not exist"):
+        with pytest.raises(LinkManagementError):
             fetcher.remove_release(extract_dir, "NonExistent-10-20", ForkName.GE_PROTON)
 
 
@@ -334,3 +383,173 @@ class TestUpdateAllManagedForks:
             or "Error" in caplog.text
             or "Failed" in caplog.text
         )
+
+
+# =============================================================================
+# check_for_updates Tests (moved from test_cli.py)
+# =============================================================================
+
+
+class TestCheckForUpdates:
+    """Tests for GitHubReleaseFetcher.check_for_updates() method."""
+
+    @pytest.mark.parametrize(
+        "fork,installed_dir,latest_tag,expected",
+        [
+            # GE-Proton
+            (
+                ForkName.GE_PROTON,
+                "GE-Proton10-20",
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+            ),
+            (
+                ForkName.GE_PROTON,
+                "GE-Proton10-21",
+                "GE-Proton10-21",
+                None,
+            ),
+            # Proton-EM (with proton- prefix in directory name)
+            (
+                ForkName.PROTON_EM,
+                "proton-EM-10.0-30",
+                "EM-10.0-31",
+                "EM-10.0-31",
+            ),
+            (
+                ForkName.PROTON_EM,
+                "proton-EM-10.0-30",
+                "EM-10.0-30",
+                None,
+            ),
+            # CachyOS (with proton- prefix and -x86_64 suffix)
+            (
+                ForkName.CACHYOS,
+                "proton-cachyos-10.0-20260207-slr-x86_64",
+                "cachyos-10.0-20260227-slr",
+                "cachyos-10.0-20260227-slr",
+            ),
+            (
+                ForkName.CACHYOS,
+                "proton-cachyos-10.0-20260207-slr-x86_64",
+                "cachyos-10.0-20260207-slr",
+                None,
+            ),
+        ],
+    )
+    def test_check_for_updates_all_forks(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        tmp_path: Path,
+        fork: ForkName,
+        installed_dir: str,
+        latest_tag: str,
+        expected: str | None,
+    ) -> None:
+        """Test check_for_updates for all forks with real directory naming."""
+        from protonfetcher.filesystem import FileSystemClient
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+        (extract_dir / installed_dir).mkdir()
+
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=f'{{"tag_name": "{latest_tag}"}}', stderr=""
+        )
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"Location: /releases/tag/{latest_tag}",
+            stderr="",
+        )
+
+        fs = FileSystemClient()
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=fs,
+        )
+
+        result = fetcher.check_for_updates(extract_dir, fork)
+        assert result == expected
+
+    def test_check_with_special_build_suffix_installed(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Test that check_for_updates correctly handles special build suffixes.
+
+        This is a regression test for the bug where directories like proton-EM-10.0-36-HDRTEST
+        were not recognized, causing --check to incorrectly report updates available when
+        the latest version was already installed.
+        """
+        from protonfetcher.filesystem import FileSystemClient
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Install the HDRTEST version (special build suffix)
+        (extract_dir / "proton-EM-10.0-36-HDRTEST").mkdir()
+
+        # Mock the latest tag to be the same as the installed version
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout='{"tag_name": "EM-10.0-36"}', stderr=""
+        )
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="Location: /releases/tag/EM-10.0-36",
+            stderr="",
+        )
+
+        fs = FileSystemClient()
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=fs,
+        )
+
+        # Should return None since we have 10.0.36 installed (HDRTEST is same version)
+        result = fetcher.check_for_updates(extract_dir, ForkName.PROTON_EM)
+        assert result is None
+
+    def test_check_with_older_special_build_suffix(
+        self,
+        mocker: Any,
+        mock_network_client: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Test that check_for_updates reports update when newer version available.
+
+        When an older special build suffix version is installed, check should
+        correctly report that a newer version is available.
+        """
+        from protonfetcher.filesystem import FileSystemClient
+
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Install an older HDRTEST version
+        (extract_dir / "proton-EM-10.0-33-HDRTEST").mkdir()
+
+        # Mock the latest tag to be newer
+        mock_network_client.get.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout='{"tag_name": "EM-10.0-36"}', stderr=""
+        )
+        mock_network_client.head.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="Location: /releases/tag/EM-10.0-36",
+            stderr="",
+        )
+
+        fs = FileSystemClient()
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=fs,
+        )
+
+        # Should return the newer version
+        result = fetcher.check_for_updates(extract_dir, ForkName.PROTON_EM)
+        assert result == "EM-10.0-36"

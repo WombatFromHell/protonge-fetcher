@@ -7,10 +7,10 @@ from typing import Optional
 
 from .common import (
     DEFAULT_TIMEOUT,
+    DEFAULT_USER_AGENT,
     FileSystemClientProtocol,
     Headers,
     NetworkClientProtocol,
-    ProcessResult,
 )
 from .exceptions import NetworkError
 from .release_manager import ReleaseManager
@@ -32,27 +32,6 @@ class AssetDownloader:
         self.network_client = network_client
         self.file_system_client = file_system_client
         self.timeout = timeout
-
-    def curl_get(
-        self, url: str, headers: Optional[Headers] = None, stream: bool = False
-    ) -> ProcessResult:
-        """Make a GET request using curl."""
-        return self.network_client.get(url, headers, stream)
-
-    def curl_head(
-        self,
-        url: str,
-        headers: Headers | None = None,
-        follow_redirects: bool = False,
-    ) -> ProcessResult:
-        """Make a HEAD request using curl."""
-        return self.network_client.head(url, headers, follow_redirects)
-
-    def curl_download(
-        self, url: str, output_path: Path, headers: Headers | None = None
-    ) -> ProcessResult:
-        """Download a file using curl."""
-        return self.network_client.download(url, output_path, headers)
 
     def download_with_spinner(
         self, url: str, output_path: Path, headers: Optional[Headers] = None
@@ -148,7 +127,7 @@ class AssetDownloader:
 
         # Prepare headers for download
         headers = {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": DEFAULT_USER_AGENT,
         }
 
         try:
@@ -158,7 +137,7 @@ class AssetDownloader:
             # Fallback to original curl method for compatibility
             logger.warning(f"Spinner download failed: {e}, falling back to curl")
             try:
-                result = self.curl_download(download_url, out_path, headers)
+                result = self.network_client.download(download_url, out_path, headers)
                 if result.returncode != 0:
                     if "404" in result.stderr or "not found" in result.stderr.lower():
                         raise NetworkError(f"Asset not found: {asset_name}")

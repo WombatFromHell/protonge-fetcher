@@ -6,7 +6,6 @@ Concrete subclasses implement platform-specific methods.
 
 import logging
 import shutil
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
 
@@ -19,30 +18,34 @@ from .common import (
     FileSystemClientProtocol,
     ForkName,
     NetworkClientProtocol,
+    PlatformAdapter,
     ProcessingResult,
     ReleaseTagsList,
 )
 from .exceptions import LinkManagementError, NetworkError, ProtonFetcherError
 from .filesystem import FileSystemClient
-from .link_manager import LinkManager
+from .link_manager import LinkManager, resolve_directory, resolve_directory_candidates
 from .network import NetworkClient
+from .platform_adapters import forgejo_adapter, github_adapter
 from .release_manager import ReleaseManager
 from .utils import format_bytes, parse_version
 
 logger = logging.getLogger(__name__)
 
 
-class BaseReleaseFetcher(ABC):
-    """Abstract base class for release fetchers.
+class BaseReleaseFetcher:
+    """Base class for release fetchers.
 
     Provides shared infrastructure (directory management, symlink handling,
-    extraction, download orchestration) while delegating platform-specific
-    behavior (URL construction, API calls) to subclasses.
+    extraction, download orchestration) and delegates all platform-specific
+    behavior to `PlatformAdapter` instances.
 
-    Concrete subclasses:
+    Subclasses are marker classes that only set the `platform` attribute:
         - GitHubReleaseFetcher: GitHub-hosted forks (GE-Proton, Proton-EM, CachyOS)
         - ForgejoReleaseFetcher: Forgejo-hosted forks (DW-Proton)
     """
+
+    platform: str = "github"
 
     def __init__(
         self,
@@ -56,8 +59,15 @@ class BaseReleaseFetcher(ABC):
         self.file_system_client = file_system_client or FileSystemClient()
 
         # Initialize the smaller, focused classes
+        # Select platform adapter based on subclass platform attribute
+        adapter: PlatformAdapter = (
+            github_adapter if self.platform == "github" else forgejo_adapter
+        )
         self.release_manager = ReleaseManager(
-            self.network_client, self.file_system_client, timeout
+            self.network_client,
+            self.file_system_client,
+            timeout,
+            platform_adapter=adapter,
         )
         self.asset_downloader = AssetDownloader(
             self.network_client, self.file_system_client, timeout
@@ -111,6 +121,37 @@ class BaseReleaseFetcher(ABC):
         self._ensure_directory_is_writable(output_dir)
         self._ensure_directory_is_writable(extract_dir)
 
+    def _handle_already_extracted(
+        self,
+        extract_dir: Path,
+        tag: str,
+        fork: ForkName,
+        directory: Path,
+        is_manual_release: bool,
+    ) -> ProcessingResult:
+        """Handle an already-extracted directory: check/update symlinks and return.
+
+        Args:
+            extract_dir: Base directory where Proton is extracted
+            tag: Release tag name
+            fork: The fork name
+            directory: The actual extracted directory path
+            is_manual_release: Whether this is a manual release
+
+        Returns:
+            (True, directory) after ensuring symlinks are current
+        """
+        if self.link_manager.are_links_up_to_date(
+            extract_dir, tag, fork, is_manual_release=is_manual_release
+        ):
+            logger.info("Symlinks are already up-to-date, skipping link management")
+            return True, directory
+
+        self.link_manager.manage_proton_links(
+            extract_dir, tag, fork, is_manual_release=is_manual_release
+        )
+        return True, directory
+
     def _handle_existing_directory(
         self,
         extract_dir: Path,
@@ -126,17 +167,9 @@ class BaseReleaseFetcher(ABC):
         logger.info(
             f"Unpacked directory already exists: {actual_directory}, skipping download and extraction"
         )
-
-        if self.link_manager.are_links_up_to_date(
-            extract_dir, release_tag, fork, is_manual_release=is_manual_release
-        ):
-            logger.info("Symlinks are already up-to-date, skipping link management")
-            return True, actual_directory
-
-        self.link_manager.manage_proton_links(
-            extract_dir, release_tag, fork, is_manual_release=is_manual_release
+        return self._handle_already_extracted(
+            extract_dir, release_tag, fork, actual_directory, is_manual_release
         )
-        return True, actual_directory
 
     def _check_post_download_directory(
         self,
@@ -151,17 +184,9 @@ class BaseReleaseFetcher(ABC):
             logger.info(
                 f"Unpacked directory exists after download: {unpacked}, skipping extraction"
             )
-
-            if self.link_manager.are_links_up_to_date(
-                extract_dir, release_tag, fork, is_manual_release=is_manual_release
-            ):
-                logger.info("Symlinks are already up-to-date, skipping link management")
-                return True, unpacked
-
-            self.link_manager.manage_proton_links(
-                extract_dir, release_tag, fork, is_manual_release=is_manual_release
+            return self._handle_already_extracted(
+                extract_dir, release_tag, fork, unpacked, is_manual_release
             )
-            return True, unpacked
         return False, extract_dir
 
     def relink_fork(
@@ -234,6 +259,9 @@ class BaseReleaseFetcher(ABC):
         first_fork = True
 
         for fork in FORKS.keys():
+            if FORKS[fork].platform != self.platform:
+                logger.debug(f"Skipping {fork}: platform mismatch")
+                continue
             if not self.link_manager.has_managed_links(extract_dir, fork):
                 logger.debug(f"Skipping {fork}: no managed links found")
                 continue
@@ -280,82 +308,13 @@ class BaseReleaseFetcher(ABC):
             raise ProtonFetcherError(f"Failed to check for updates for {fork}: {e}")
 
     # ------------------------------------------------------------------
-    # Platform-specific abstract methods (must be implemented by subclasses)
+    # Platform-agnostic directory helpers (identical across platforms)
     # ------------------------------------------------------------------
 
-    @abstractmethod
-    def fetch_latest_tag(self, repo: str) -> str:
-        """Get the latest release tag for the given repo.
-
-        Args:
-            repo: Repository in format 'owner/repo'
-
-        Returns:
-            The latest release tag
-        """
-        ...
-
-    @abstractmethod
-    def find_asset_by_name(
-        self, repo: str, tag: str, fork: ForkName = ForkName.GE_PROTON
-    ) -> str | None:
-        """Find the Proton asset in a release.
-
-        Args:
-            repo: Repository in format 'owner/repo'
-            tag: Release tag
-            fork: The fork name
-
-        Returns:
-            The asset name, or None if not found
-        """
-        ...
-
-    @abstractmethod
-    def get_remote_asset_size(self, repo: str, tag: str, asset_name: str) -> int:
-        """Get the size of a remote asset.
-
-        Args:
-            repo: Repository in format 'owner/repo'
-            tag: Release tag
-            asset_name: Asset filename
-
-        Returns:
-            Size in bytes
-        """
-        ...
-
-    @abstractmethod
-    def list_recent_releases(self, repo: str) -> ReleaseTagsList:
-        """Fetch and return a list of recent release tags.
-
-        Args:
-            repo: Repository in format 'owner/repo'
-
-        Returns:
-            List of the 20 most recent tag names
-        """
-        ...
-
-    @abstractmethod
-    def _build_download_url(self, repo: str, tag: str, asset_name: str) -> str:
-        """Build a download URL for an asset.
-
-        Args:
-            repo: Repository in format 'owner/repo'
-            tag: Release tag
-            asset_name: Asset filename
-
-        Returns:
-            Full download URL
-        """
-        ...
-
-    @abstractmethod
     def _get_expected_directories(
         self, extract_dir: Path, release_tag: str, fork: ForkName
     ) -> DirectoryTuple:
-        """Get expected unpack directories based on fork type.
+        """Get expected unpack directories based on fork templates.
 
         Args:
             extract_dir: Directory to extract to
@@ -365,9 +324,11 @@ class BaseReleaseFetcher(ABC):
         Returns:
             Tuple of (standard_path, alternative_path_or_None)
         """
-        ...
+        candidates = resolve_directory_candidates(extract_dir, release_tag, fork)
+        if len(candidates) >= 2:
+            return candidates[0], candidates[1]
+        return candidates[0], None
 
-    @abstractmethod
     def _check_existing_directory(
         self,
         unpacked: Path,
@@ -384,9 +345,12 @@ class BaseReleaseFetcher(ABC):
         Returns:
             Tuple of (exists, actual_path)
         """
-        ...
+        if alternative and alternative.exists() and alternative.is_dir():
+            return True, alternative
+        if unpacked.exists() and unpacked.is_dir():
+            return True, unpacked
+        return False, None
 
-    @abstractmethod
     def _find_extracted_directory(
         self,
         extract_dir: Path,
@@ -403,10 +367,81 @@ class BaseReleaseFetcher(ABC):
         Returns:
             Path to the extracted directory
         """
-        ...
+        return resolve_directory(
+            extract_dir, release_tag, fork, self.file_system_client
+        )
 
     # ------------------------------------------------------------------
-    # Shared workflow methods (use abstract methods internally)
+    # Platform-agnostic methods (delegated to ReleaseManager)
+    # ------------------------------------------------------------------
+
+    def fetch_latest_tag(self, repo: str) -> str:
+        """Get the latest release tag for the given repo.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+
+        Returns:
+            The latest release tag
+        """
+        return self.release_manager.fetch_latest_tag(repo)
+
+    def find_asset_by_name(
+        self, repo: str, tag: str, fork: ForkName = ForkName.GE_PROTON
+    ) -> str | None:
+        """Find the Proton asset in a release.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+            tag: Release tag
+            fork: The fork name
+
+        Returns:
+            The asset name, or None if not found
+        """
+        return self.release_manager.find_asset_by_name(repo, tag, fork)
+
+    def get_remote_asset_size(self, repo: str, tag: str, asset_name: str) -> int:
+        """Get the size of a remote asset.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+            tag: Release tag
+            asset_name: Asset filename
+
+        Returns:
+            Size in bytes
+        """
+        return self.release_manager.get_remote_asset_size(repo, tag, asset_name)
+
+    def list_recent_releases(self, repo: str) -> ReleaseTagsList:
+        """Fetch and return a list of recent release tags.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+
+        Returns:
+            List of the 20 most recent tag names
+        """
+        return self.release_manager.list_recent_releases(repo)
+
+    def _build_download_url(self, repo: str, tag: str, asset_name: str) -> str:
+        """Build a download URL for an asset.
+
+        Args:
+            repo: Repository in format 'owner/repo'
+            tag: Release tag
+            asset_name: Asset filename
+
+        Returns:
+            Full download URL
+        """
+        return self.release_manager.platform_adapter.build_download_url(
+            repo, tag, asset_name
+        )
+
+    # ------------------------------------------------------------------
+    # Shared workflow methods
     # ------------------------------------------------------------------
 
     def _determine_release_tag(

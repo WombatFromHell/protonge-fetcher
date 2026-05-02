@@ -30,22 +30,10 @@ def format_progress_bar(percent: float, width: int) -> str:
 
 
 def format_bytes_rate(rate: float) -> str:
-    """Format a byte rate with appropriate SI prefix.
+    """Format a byte rate with binary units (backward-compat wrapper)."""
+    from .utils import format_rate as _format_rate_bytes
 
-    Args:
-        rate: Rate in bytes per second.
-
-    Returns:
-        e.g. `` (2.45MB/s) ``
-    """
-    if rate <= 1024:
-        return f" ({rate:.2f}B/s)"
-    elif rate < 1024**2:
-        return f" ({rate / 1024:.2f}KB/s)"
-    elif rate < 1024**3:
-        return f" ({rate / 1024**2:.2f}MB/s)"
-    else:
-        return f" ({rate / 1024**3:.2f}GB/s)"
+    return f" ({_format_rate_bytes(rate)})"
 
 
 def format_rate(

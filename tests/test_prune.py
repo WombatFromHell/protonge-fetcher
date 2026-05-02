@@ -14,9 +14,11 @@ from typing import Any
 
 import pytest
 
-from protonfetcher.cli import (
-    _handle_prune_operation,
-    parse_arguments,
+from protonfetcher.cli.argparse_builder import build_parser, parse_args
+from protonfetcher.cli.handlers import handle_prune_operation
+from protonfetcher.cli.validators import (
+    set_default_fork,
+    validate_mutually_exclusive_args,
 )
 from protonfetcher.common import ForkName
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
@@ -36,7 +38,8 @@ class TestPruneArgumentParsing:
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune"]):
-            args = parse_arguments()
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
             assert args.prune is True
             assert args.keep == 3  # default
 
@@ -46,7 +49,8 @@ class TestPruneArgumentParsing:
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune", "--keep", "5"]):
-            args = parse_arguments()
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
             assert args.prune is True
             assert args.keep == 5
 
@@ -58,7 +62,8 @@ class TestPruneArgumentParsing:
         with patch.object(
             sys, "argv", ["protonfetcher", "--prune", "--fork", "Proton-EM"]
         ):
-            args = parse_arguments()
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
             assert args.prune is True
             assert args.fork == "Proton-EM"
 
@@ -68,7 +73,8 @@ class TestPruneArgumentParsing:
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune", "--dry-run"]):
-            args = parse_arguments()
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
             assert args.prune is True
             assert args.dry_run is True
 
@@ -84,10 +90,11 @@ class TestPruneArgumentParsing:
             sys, "argv", ["protonfetcher", "--prune", "--release", "GE-Proton10-20"]
         ):
             with pytest.raises(SystemExit) as exc_info:
-                parse_arguments()
-            assert exc_info.value.code == 1
+                parse_args(build_parser())
+            # argparse uses exit code 2 for argument parsing errors
+            assert exc_info.value.code == 2
             captured = capsys.readouterr()
-            assert "Error:" in captured.out
+            assert "not allowed with argument --prune" in captured.err
 
     def test_parse_prune_mutually_exclusive_with_list(
         self,
@@ -99,8 +106,9 @@ class TestPruneArgumentParsing:
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune", "--list"]):
             with pytest.raises(SystemExit) as exc_info:
-                parse_arguments()
-            assert exc_info.value.code == 1
+                parse_args(build_parser())
+            # argparse uses exit code 2 for argument parsing errors
+            assert exc_info.value.code == 2
 
     def test_parse_prune_mutually_exclusive_with_ls(
         self,
@@ -112,8 +120,9 @@ class TestPruneArgumentParsing:
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune", "--ls"]):
             with pytest.raises(SystemExit) as exc_info:
-                parse_arguments()
-            assert exc_info.value.code == 1
+                parse_args(build_parser())
+            # argparse uses exit code 2 for argument parsing errors
+            assert exc_info.value.code == 2
 
     def test_parse_prune_mutually_exclusive_with_rm(
         self,
@@ -127,8 +136,9 @@ class TestPruneArgumentParsing:
             sys, "argv", ["protonfetcher", "--prune", "--rm", "GE-Proton10-20"]
         ):
             with pytest.raises(SystemExit) as exc_info:
-                parse_arguments()
-            assert exc_info.value.code == 1
+                parse_args(build_parser())
+            # argparse uses exit code 2 for argument parsing errors
+            assert exc_info.value.code == 2
 
     def test_parse_prune_mutually_exclusive_with_relink(
         self,
@@ -140,8 +150,9 @@ class TestPruneArgumentParsing:
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune", "--relink"]):
             with pytest.raises(SystemExit) as exc_info:
-                parse_arguments()
-            assert exc_info.value.code == 1
+                parse_args(build_parser())
+            # argparse uses exit code 2 for argument parsing errors
+            assert exc_info.value.code == 2
 
     def test_parse_prune_mutually_exclusive_with_check(
         self,
@@ -152,8 +163,11 @@ class TestPruneArgumentParsing:
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune", "--check"]):
+            args = parse_args(build_parser())
+            args = set_default_fork(args)
             with pytest.raises(SystemExit) as exc_info:
-                parse_arguments()
+                validate_mutually_exclusive_args(args)
+            # Validation-level conflict uses exit code 1
             assert exc_info.value.code == 1
 
 
@@ -183,7 +197,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "No unmanaged releases to prune" in captured.out
@@ -212,7 +226,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "Would prune 4 old version(s)" in captured.out
@@ -241,7 +255,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         # Should only call prune_releases once for Proton-EM
         assert mock_fetcher.prune_releases.call_count == 1
@@ -267,7 +281,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         # Should call prune_releases for all 4 forks
         assert mock_fetcher.prune_releases.call_count == 3
@@ -308,7 +322,7 @@ class TestPruneOperationFlow:
         # Mock user input to confirm
         mocker.patch("builtins.input", return_value="y")
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         # The output shows what would be pruned and the result
@@ -344,7 +358,7 @@ class TestPruneOperationFlow:
         mocker.patch("builtins.input", return_value="n")
 
         with pytest.raises(SystemExit) as exc_info:
-            _handle_prune_operation(
+            handle_prune_operation(
                 mock_fetcher, mock_forgejo_fetcher, args, extract_dir
             )
 
@@ -381,7 +395,7 @@ class TestPruneOperationFlow:
 
         mocker.patch("builtins.input", return_value="y")
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "WARNING" in captured.out
@@ -408,7 +422,7 @@ class TestPruneOperationFlow:
 
         extract_dir = Path("/tmp/test")
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         # Verify keep=5 was passed to prune_releases
         for call in mock_fetcher.prune_releases.call_args_list:
@@ -710,7 +724,7 @@ class TestPruneE2E:
         args.keep = 3
         args.dry_run = True
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "No unmanaged releases to prune" in captured.out
@@ -744,7 +758,7 @@ class TestPruneE2E:
         args.keep = 3
         args.dry_run = True
 
-        _handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
+        handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
         assert "Would prune 2 old version(s)" in captured.out

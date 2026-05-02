@@ -6,7 +6,7 @@ import dataclasses
 import subprocess
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterator, Optional, Protocol
+from typing import Iterator, Optional, Protocol
 
 
 class ForkName(StrEnum):
@@ -32,25 +32,57 @@ ForkList = list[ForkName]
 VersionGroups = dict[VersionTuple, list[Path]]
 
 
+class PlatformAdapter(Protocol):
+    """Protocol for platform-specific URL and header construction."""
+
+    @property
+    def api_base(self) -> str:
+        """Base URL for API calls."""
+        ...
+
+    @property
+    def host_base(self) -> str:
+        """Base URL for host pages (release pages, etc.)."""
+        ...
+
+    def build_api_url(self, repo: str, *parts: str) -> str:
+        """Build an API URL for the given repo and path parts."""
+        ...
+
+    def build_download_url(self, repo: str, tag: str, asset_name: str) -> str:
+        """Build a download URL for a release asset."""
+        ...
+
+    def build_host_url(self, repo: str, *parts: str) -> str:
+        """Build a host page URL (e.g., release tag page)."""
+        ...
+
+    @property
+    def default_headers(self) -> Headers:
+        """Default headers to include in API requests."""
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class ForkConfig:
     repo: str
     archive_format: str
     api_base: str = "https://api.github.com"
     host_base: str = "https://github.com"
-
-    def __getitem__(self, key: str) -> str:
-        """Allow dict-like access for backward compatibility."""
-        if key == "repo":
-            return self.repo
-        elif key == "archive_format":
-            return self.archive_format
-        elif key == "api_base":
-            return self.api_base
-        elif key == "host_base":
-            return self.host_base
-        else:
-            raise KeyError(key)
+    # Version parsing
+    version_pattern: str = ""
+    version_prefix: str = ""
+    is_ge_proton: bool = False
+    # Link naming suffixes
+    link_names: tuple[str, str, str] = ("", "", "")
+    # Tag prefixes to skip during discovery
+    skip_prefixes: frozenset[str] = frozenset()
+    # Asset filename template
+    asset_template: str = "{tag}.tar.gz"
+    # Directory name templates to try when extracting (in priority order)
+    dir_name_templates: tuple[str, ...] = ("{tag}",)
+    # Platform type: "github" or "forgejo"
+    platform: str = "github"
 
 
 @dataclasses.dataclass
@@ -62,20 +94,6 @@ class SymlinkSpec:
 
 # Now that SymlinkSpec is defined, we can define the list type alias
 LinkSpecList = list[SymlinkSpec]
-
-
-@dataclasses.dataclass
-class SpinnerConfig:
-    iterable: Optional[Iterator[Any]] = None
-    total: Optional[int] = None
-    desc: str = ""
-    unit: Optional[str] = None
-    unit_scale: Optional[bool] = None
-    disable: bool = False
-    fps_limit: Optional[float] = None
-    width: int = 10
-    show_progress: bool = False  # New parameter to control progress display
-    show_file_details: bool = False  # New parameter to control file details display
 
 
 class NetworkClientProtocol(Protocol):
@@ -398,6 +416,10 @@ class FileSystemClientProtocol(Protocol):
 
 # Constants
 DEFAULT_TIMEOUT = 30
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+)
 GITHUB_URL_PATTERN = r"/releases/tag/([^/?#]+)"
 
 # Constants for ProtonGE forks
@@ -405,20 +427,58 @@ FORKS: dict[ForkName, ForkConfig] = {
     ForkName.GE_PROTON: ForkConfig(
         repo="GloriousEggroll/proton-ge-custom",
         archive_format=".tar.gz",
+        version_pattern=r"GE-Proton(\d+)-(\d+)",
+        version_prefix="GE-Proton",
+        is_ge_proton=True,
+        link_names=("GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"),
+        skip_prefixes=frozenset(
+            ["EM-", "proton-EM-", "cachyos-", "proton-cachyos-", "dwproton-"]
+        ),
+        asset_template="{tag}.tar.gz",
+        dir_name_templates=("{tag}",),
+        platform="github",
     ),
     ForkName.PROTON_EM: ForkConfig(
         repo="Etaash-mathamsetty/Proton",
         archive_format=".tar.xz",
+        version_pattern=r"(?:proton-)?EM-(\d+)\.(\d+)-(\d+)",
+        version_prefix="EM",
+        is_ge_proton=False,
+        link_names=("Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"),
+        skip_prefixes=frozenset(
+            ["GE-Proton", "cachyos-", "proton-cachyos-", "dwproton-"]
+        ),
+        asset_template="proton-{tag}.tar.xz",
+        dir_name_templates=("proton-{tag}", "{tag}"),
+        platform="github",
     ),
     ForkName.CACHYOS: ForkConfig(
         repo="CachyOS/proton-cachyos",
         archive_format=".tar.xz",
+        version_pattern=r"(?:proton-)?cachyos-(\d+)\.(\d+)-(\d+)-slr(?:-x86_64)?",
+        version_prefix="cachyos",
+        is_ge_proton=False,
+        link_names=("CachyOS", "CachyOS-Fallback", "CachyOS-Fallback2"),
+        skip_prefixes=frozenset(["GE-Proton", "EM-", "proton-EM-", "dwproton-"]),
+        asset_template="proton-{tag}-x86_64.tar.xz",
+        dir_name_templates=("proton-{tag}-x86_64", "proton-{tag}", "{tag}"),
+        platform="github",
     ),
     ForkName.DW_PROTON: ForkConfig(
         repo="dawn-winery/dwproton",
         archive_format=".tar.xz",
         api_base="https://dawn.wine/api/v1",
         host_base="https://dawn.wine",
+        version_pattern=r"dwproton-(\d+)\.(\d+)-(\d+)",
+        version_prefix="dwproton",
+        is_ge_proton=False,
+        link_names=("DW-Proton", "DW-Proton-Fallback", "DW-Proton-Fallback2"),
+        skip_prefixes=frozenset(
+            ["GE-Proton", "EM-", "cachyos-", "proton-cachyos-", "proton-EM-"]
+        ),
+        asset_template="{tag}-x86_64.tar.xz",
+        dir_name_templates=("{tag}-x86_64", "{tag}"),
+        platform="forgejo",
     ),
 }
 DEFAULT_FORK: ForkName = ForkName.GE_PROTON

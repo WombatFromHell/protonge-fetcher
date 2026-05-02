@@ -1,4 +1,16 @@
-"""Tests for ForgejoReleaseFetcher and DW-Proton-specific functionality."""
+"""Tests for ForgejoReleaseFetcher and DW-Proton-specific functionality.
+
+ForgejoReleaseFetcher is a marker class (~10 lines, zero method overrides)
+that delegates all behavior to BaseReleaseFetcher + ForgejoPlatformAdapter.
+
+Tests in this file verify:
+- DW-Proton-specific utility functions (parse_version, compare_versions, etc.)
+- LinkManager behavior for DW-Proton fork
+- Forgejo URL construction via forgejo_adapter (Pattern 8)
+- Shared BaseReleaseFetcher workflow via ForgejoReleaseFetcher instance
+
+Adapter selection is tested in test_base_release_fetcher.py.
+"""
 
 import subprocess
 from pathlib import Path
@@ -11,6 +23,11 @@ from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.link_manager import LinkManager
 from protonfetcher.utils import compare_versions, get_proton_asset_name, parse_version
+from protonfetcher.version_finder import (
+    _get_tag_name,
+    _is_valid_proton_directory,
+    _should_skip_directory,
+)
 
 # =============================================================================
 # parse_version — DW-Proton
@@ -131,9 +148,6 @@ class TestLinkManagerDWProton:
 
     def test_is_valid_proton_directory_dwproton(self, tmp_path: Path) -> None:
         """Test _is_valid_proton_directory with DW-Proton patterns."""
-        fs = FileSystemClient()
-        lm = LinkManager(fs)
-
         # Valid DW-Proton directories
         valid_names = [
             "dwproton-10.0-26-x86_64",
@@ -144,7 +158,7 @@ class TestLinkManagerDWProton:
         for name in valid_names:
             dir_path = tmp_path / name
             dir_path.mkdir()
-            assert lm._is_valid_proton_directory(dir_path, ForkName.DW_PROTON) is True
+            assert _is_valid_proton_directory(dir_path, ForkName.DW_PROTON) is True
             dir_path.rmdir()
 
         # Invalid DW-Proton directories (missing -x86_64 suffix)
@@ -158,14 +172,11 @@ class TestLinkManagerDWProton:
         for name in invalid_names:
             dir_path = tmp_path / name
             dir_path.mkdir()
-            assert lm._is_valid_proton_directory(dir_path, ForkName.DW_PROTON) is False
+            assert _is_valid_proton_directory(dir_path, ForkName.DW_PROTON) is False
             dir_path.rmdir()
 
     def test_should_skip_directory_dwproton(self, tmp_path: Path) -> None:
         """Test _should_skip_directory with DW-Proton fork."""
-        fs = FileSystemClient()
-        lm = LinkManager(fs)
-
         # DW-Proton should skip non-DW-Proton directories
         skip_names = [
             "GE-Proton10-20",
@@ -175,11 +186,11 @@ class TestLinkManagerDWProton:
             "proton-cachyos-10.0-20260207-slr-x86_64",
         ]
         for name in skip_names:
-            assert lm._should_skip_directory(name, ForkName.DW_PROTON) is True
+            assert _should_skip_directory(name, ForkName.DW_PROTON) is True
 
         # DW-Proton should not skip its own directories
         assert (
-            lm._should_skip_directory("dwproton-10.0-26-x86_64", ForkName.DW_PROTON)
+            _should_skip_directory("dwproton-10.0-26-x86_64", ForkName.DW_PROTON)
             is False
         )
 
@@ -187,26 +198,20 @@ class TestLinkManagerDWProton:
         self, tmp_path: Path
     ) -> None:
         """Test that non-DW-Proton forks skip dwproton- directories."""
-        fs = FileSystemClient()
-        lm = LinkManager(fs)
-
         for fork in [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]:
-            assert lm._should_skip_directory("dwproton-10.0-26-x86_64", fork) is True
+            assert _should_skip_directory("dwproton-10.0-26-x86_64", fork) is True
 
     def test_get_tag_name_dwproton(self, tmp_path: Path) -> None:
         """Test _get_tag_name strips -x86_64 suffix for DW-Proton."""
-        fs = FileSystemClient()
-        lm = LinkManager(fs)
-
         entry = tmp_path / "dwproton-10.0-26-x86_64"
         entry.mkdir()
-        assert lm._get_tag_name(entry, ForkName.DW_PROTON) == "dwproton-10.0-26"
+        assert _get_tag_name(entry, ForkName.DW_PROTON) == "dwproton-10.0-26"
         entry.rmdir()
 
         # Without -x86_64 suffix, should return as-is
         entry2 = tmp_path / "dwproton-10.0-26"
         entry2.mkdir()
-        assert lm._get_tag_name(entry2, ForkName.DW_PROTON) == "dwproton-10.0-26"
+        assert _get_tag_name(entry2, ForkName.DW_PROTON) == "dwproton-10.0-26"
         entry2.rmdir()
 
 
@@ -221,36 +226,23 @@ class TestForgejoReleaseFetcher:
     def test_fetch_latest_tag_success(
         self, mocker: Any, mock_network_factory: Any
     ) -> None:
-        """Test fetch_latest_tag returns tag from Forgejo API response."""
+        """Test fetch_latest_tag returns tag from redirect response."""
+        # fetch_latest_tag uses head() to follow redirect, not get()
         mock_network = mock_network_factory(
-            get_response={
-                "tag_name": "dwproton-10.0-26",
-                "name": "dwproton-10.0-26",
-                "assets": [
-                    {"name": "dwproton-10.0-26-x86_64.tar.xz", "size": 281758252},
-                ],
-            }
+            head_response="Location: https://dawn.wine/dawn-winery/dwproton/releases/tag/dwproton-10.0-26"
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
         tag = fetcher.fetch_latest_tag("dawn-winery/dwproton")
         assert tag == "dwproton-10.0-26"
 
-    def test_fetch_latest_tag_missing_tag_name(
-        self, mocker: Any, mock_network_factory: Any
-    ) -> None:
-        """Test fetch_latest_tag raises on missing tag_name."""
-        mock_network = mock_network_factory(get_response={"name": "no tag here"})
-        fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        with pytest.raises(Exception):  # NetworkError
-            fetcher.fetch_latest_tag("dawn-winery/dwproton")
-
     def test_fetch_latest_tag_api_failure(
         self, mocker: Any, mock_network_factory: Any
     ) -> None:
         """Test fetch_latest_tag raises on API error."""
-        mock_network = mock_network_factory(
-            get_response="",
-            custom_returncode=22,
+        mock_network = mock_network_factory(custom_returncode=22)
+        # fetch_latest_tag uses head(), not get()
+        mock_network.head.return_value = subprocess.CompletedProcess(
+            args=[], returncode=22, stdout="", stderr="API error"
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
         with pytest.raises(Exception):  # NetworkError
@@ -305,7 +297,13 @@ class TestForgejoReleaseFetcher:
             }
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        asset = fetcher.find_asset_by_name("dawn-winery/dwproton", "dwproton-10.0-26")
+        # Mock cache to avoid mock filesystem mtime issues
+        mocker.patch.object(
+            fetcher.release_manager, "_get_cached_asset_size", return_value=None
+        )
+        asset = fetcher.find_asset_by_name(
+            "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON
+        )
         assert asset == "dwproton-10.0-26-x86_64.tar.xz"
 
     def test_find_asset_by_name_api_fallback_to_first(
@@ -321,7 +319,12 @@ class TestForgejoReleaseFetcher:
             }
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        asset = fetcher.find_asset_by_name("dawn-winery/dwproton", "dwproton-10.0-26")
+        mocker.patch.object(
+            fetcher.release_manager, "_get_cached_asset_size", return_value=None
+        )
+        asset = fetcher.find_asset_by_name(
+            "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON
+        )
         assert asset == "dwproton-10.0-26-x86_64.sha512sum"
 
     def test_find_asset_by_name_html_fallback(
@@ -339,7 +342,12 @@ class TestForgejoReleaseFetcher:
             args=[], returncode=0, stdout=html_response, stderr=""
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        asset = fetcher.find_asset_by_name("dawn-winery/dwproton", "dwproton-10.0-26")
+        mocker.patch.object(
+            fetcher.release_manager, "_get_cached_asset_size", return_value=None
+        )
+        asset = fetcher.find_asset_by_name(
+            "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON
+        )
         assert asset == "dwproton-10.0-26-x86_64.tar.xz"
 
     def test_find_asset_by_name_returns_none_on_not_found(
@@ -357,23 +365,25 @@ class TestForgejoReleaseFetcher:
             args=[], returncode=0, stdout=html_response, stderr=""
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        asset = fetcher.find_asset_by_name("dawn-winery/dwproton", "dwproton-10.0-26")
+        asset = fetcher.find_asset_by_name(
+            "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON
+        )
         assert asset is None
 
     def test_url_construction(self, mocker: Any, mock_network_factory: Any) -> None:
         """Test Forgejo URL construction helpers."""
-        mock_network = mock_network_factory()
-        fetcher = ForgejoReleaseFetcher(network_client=mock_network)
+        # URL builders should use forgejo_adapter
+        from protonfetcher.platform_adapters import forgejo_adapter
 
-        # _api_url should use dawn.wine/api/v1/repos/...
-        api_url = fetcher._api_url("dawn-winery/dwproton", "releases", "latest")
+        api_url = forgejo_adapter.build_api_url(
+            "dawn-winery/dwproton", "releases", "latest"
+        )
         assert (
             api_url
             == "https://dawn.wine/api/v1/repos/dawn-winery/dwproton/releases/latest"
         )
 
-        # _host_url should use dawn.wine/{owner}/{repo}/...
-        host_url = fetcher._host_url(
+        host_url = forgejo_adapter.build_host_url(
             "dawn-winery/dwproton", "releases", "tag", "dwproton-10.0-26"
         )
         assert (
@@ -381,14 +391,44 @@ class TestForgejoReleaseFetcher:
             == "https://dawn.wine/dawn-winery/dwproton/releases/tag/dwproton-10.0-26"
         )
 
-        download_url = fetcher._host_url(
+        download_url = forgejo_adapter.build_download_url(
             "dawn-winery/dwproton",
-            "releases",
-            "download",
             "dwproton-10.0-26",
             "dwproton-10.0-26-x86_64.tar.xz",
         )
         assert (
             download_url
             == "https://dawn.wine/dawn-winery/dwproton/releases/download/dwproton-10.0-26/dwproton-10.0-26-x86_64.tar.xz"
+        )
+
+    def test_github_adapter_url_construction(
+        self, mocker: Any, mock_network_factory: Any
+    ) -> None:
+        """Test GitHub URL construction helpers (symmetric to forgejo_adapter tests)."""
+        from protonfetcher.platform_adapters import github_adapter
+
+        api_url = github_adapter.build_api_url(
+            "GloriousEggroll/proton-ge-custom", "releases", "latest"
+        )
+        assert (
+            api_url
+            == "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest"
+        )
+
+        host_url = github_adapter.build_host_url(
+            "GloriousEggroll/proton-ge-custom", "releases", "tag", "GE-Proton10-20"
+        )
+        assert (
+            host_url
+            == "https://github.com/GloriousEggroll/proton-ge-custom/releases/tag/GE-Proton10-20"
+        )
+
+        download_url = github_adapter.build_download_url(
+            "GloriousEggroll/proton-ge-custom",
+            "GE-Proton10-20",
+            "GE-Proton10-20.tar.gz",
+        )
+        assert (
+            download_url
+            == "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton10-20/GE-Proton10-20.tar.gz"
         )

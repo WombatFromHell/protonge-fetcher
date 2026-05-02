@@ -3,20 +3,7 @@
 import re
 from typing import Type
 
-from .common import ForkName
-
-# Data-driven version parsing: ForkName → (regex, prefix, is_ge_proton)
-# is_ge_proton=True means minor is stored as patch-like (major, 0, minor)
-_VERSION_PATTERNS: dict[ForkName, tuple[str, str, bool]] = {
-    ForkName.GE_PROTON: (r"GE-Proton(\d+)-(\d+)", "GE-Proton", True),
-    ForkName.PROTON_EM: (r"(?:proton-)?EM-(\d+)\.(\d+)-(\d+)", "EM", False),
-    ForkName.CACHYOS: (
-        r"(?:proton-)?cachyos-(\d+)\.(\d+)-(\d+)-slr(?:-x86_64)?",
-        "cachyos",
-        False,
-    ),
-    ForkName.DW_PROTON: (r"dwproton-(\d+)\.(\d+)-(\d+)", "dwproton", False),
-}
+from .common import FORKS, ForkName
 
 
 def validate_protocol_instance(obj: object, protocol: Type) -> bool:
@@ -79,7 +66,15 @@ def parse_version(
     Returns:
         A tuple of (prefix, major, minor, patch) for comparison purposes, or a fallback tuple if parsing fails
     """
-    pattern, prefix, is_ge_proton = _VERSION_PATTERNS.get(fork, (r"", tag, False))
+    cfg = FORKS.get(fork)
+    if cfg is None:
+        pattern, prefix, is_ge_proton = r"", tag, False
+    else:
+        pattern, prefix, is_ge_proton = (
+            cfg.version_pattern,
+            cfg.version_prefix,
+            cfg.is_ge_proton,
+        )
     match_result = re.match(pattern, tag)
     if match_result:
         groups = list(map(int, match_result.groups()))
@@ -112,14 +107,6 @@ def compare_versions(tag1: str, tag2: str, fork: ForkName = ForkName.GE_PROTON) 
     return (v1 > v2) - (v1 < v2)
 
 
-ASSET_TEMPLATES: dict[ForkName, str] = {
-    ForkName.GE_PROTON: "{tag}.tar.gz",
-    ForkName.PROTON_EM: "proton-{tag}.tar.xz",
-    ForkName.CACHYOS: "proton-{tag}-x86_64.tar.xz",
-    ForkName.DW_PROTON: "{tag}-x86_64.tar.xz",
-}
-
-
 def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
     """
     Generate the expected Proton asset name from a tag and fork.
@@ -131,10 +118,12 @@ def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
     Returns:
         The expected asset name (e.g., 'GE-Proton10-20.tar.gz' or 'proton-EM-10.0-30.tar.xz')
     """
-    return ASSET_TEMPLATES.get(fork, "{tag}.tar.gz").format(tag=tag)
+    cfg = FORKS.get(fork)
+    template = cfg.asset_template if cfg else "{tag}.tar.gz"
+    return template.format(tag=tag)
 
 
-def format_bytes(bytes_value: int) -> str:
+def format_size(bytes_value: int) -> str:
     """Format bytes into a human-readable string using binary units (KiB, MiB, GiB)."""
     if bytes_value < 1024:
         return f"{bytes_value} B"
@@ -144,3 +133,19 @@ def format_bytes(bytes_value: int) -> str:
         return f"{bytes_value / (1024 * 1024):.2f} MiB"
     else:
         return f"{bytes_value / (1024 * 1024 * 1024):.2f} GiB"
+
+
+# Backward-compat alias
+format_bytes = format_size
+
+
+def format_rate(bytes_per_sec: float) -> str:
+    """Format a byte rate using binary units (KiB/s, MiB/s, GiB/s)."""
+    if bytes_per_sec < 1024:
+        return f"{bytes_per_sec:.2f} B/s"
+    elif bytes_per_sec < 1024 * 1024:
+        return f"{bytes_per_sec / 1024:.2f} KiB/s"
+    elif bytes_per_sec < 1024 * 1024 * 1024:
+        return f"{bytes_per_sec / (1024 * 1024):.2f} MiB/s"
+    else:
+        return f"{bytes_per_sec / (1024 * 1024 * 1024):.2f} GiB/s"

@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 import urllib.parse
 import urllib.request
@@ -18,11 +17,13 @@ from .common import (
     FileSystemClientProtocol,
     ForkName,
     NetworkClientProtocol,
+    PlatformAdapter,
     ProcessResult,
     ReleaseTagsList,
     VersionTuple,
 )
 from .exceptions import NetworkError
+from .platform_adapters import github_adapter
 from .utils import format_bytes, get_proton_asset_name, parse_version
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,16 @@ class ReleaseManager:
         network_client: NetworkClientProtocol,
         file_system_client: FileSystemClientProtocol,
         timeout: int = 30,
+        cache_enabled: bool = True,
+        platform_adapter: PlatformAdapter | None = None,
     ) -> None:
         self.network_client = network_client
         self.file_system_client = file_system_client
         self.timeout = timeout
+        self._cache_enabled = cache_enabled
+        self.platform_adapter: PlatformAdapter = (
+            platform_adapter if platform_adapter is not None else github_adapter
+        )
 
         # Initialize cache directory
         xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
@@ -111,7 +118,7 @@ class ReleaseManager:
         Raises:
             FetchError: If unable to determine the tag from the redirect
         """
-        url = f"https://github.com/{repo}/releases/latest"
+        url = self.platform_adapter.build_host_url(repo, "releases", "latest")
         try:
             response = self.network_client.head(url)
             if response.returncode != 0:
@@ -266,21 +273,18 @@ class ReleaseManager:
                 )
                 return asset_name
             else:
-                raise Exception("No assets found in release")
+                raise NetworkError("No assets found in release")
 
     def _try_api_approach(self, repo: str, tag: str, fork: ForkName) -> str:
-        """Try to find the asset using the GitHub API."""
-        api_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+        """Try to find the asset using the platform API."""
+        api_url = self.platform_adapter.build_api_url(repo, "releases", "tags", tag)
         logger.debug(f"Fetching release info from API: {api_url}")
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "application/vnd.github.v3+json",
-        }
+        headers = dict(self.platform_adapter.default_headers)
         response = self.network_client.get(api_url, headers=headers)
         if response.returncode != 0:
             logger.debug(f"API request failed: {response.stderr}")
-            raise Exception(
+            raise NetworkError(
                 f"API request failed with return code {response.returncode}"
             )
 
@@ -288,11 +292,11 @@ class ReleaseManager:
             release_data: dict[str, Any] = json.loads(response.stdout)
         except json.JSONDecodeError as e:
             logger.debug(f"Failed to parse JSON response: {e}")
-            raise Exception(f"Failed to parse JSON: {e}")
+            raise NetworkError(f"Failed to parse JSON: {e}")
 
         # Look for assets (attachments) in the release data
         if "assets" not in release_data:
-            raise Exception("No assets found in release API response")
+            raise NetworkError("No assets found in release API response")
 
         assets: list[dict[str, Any]] = release_data["assets"]
         expected_extension = self._get_expected_extension(fork)
@@ -302,7 +306,7 @@ class ReleaseManager:
         """Try to find the asset by HTML parsing if API fails."""
         # Generate the expected asset name using the appropriate naming convention
         expected_asset_name = get_proton_asset_name(tag, fork)
-        url = f"https://github.com/{repo}/releases/tag/{tag}"
+        url = self.platform_adapter.build_host_url(repo, "releases", "tag", tag)
         logger.info(f"Fetching release page: {url}")
 
         try:
@@ -397,6 +401,18 @@ class ReleaseManager:
                 return size
         return None
 
+    @staticmethod
+    def _is_not_found_error(result: ProcessResult) -> bool:
+        """Check if the result indicates a 404 / not found error."""
+        stdout = getattr(result, "stdout", "")
+        stderr = getattr(result, "stderr", "")
+        for content in (stdout, stderr):
+            if isinstance(content, str) and (
+                "404" in content or "not found" in content.lower()
+            ):
+                return True
+        return False
+
     def _follow_redirect_and_get_size(
         self,
         initial_result: ProcessResult,
@@ -420,33 +436,29 @@ class ReleaseManager:
             Size in bytes if found and greater than 0, otherwise None
         """
         location_match = re.search(r"(?i)location:\s*(.+)", initial_result.stdout)
-        if location_match:
-            redirect_url = location_match.group(1).strip()
-            if redirect_url and redirect_url != url:
-                logger.debug(f"Following redirect to: {redirect_url}")
-                # Make another HEAD request to the redirect URL
-                result = self.network_client.head(redirect_url, follow_redirects=False)
-                if result.returncode == 0:
-                    # Check for 404 or similar errors in redirect response
-                    stdout_content = getattr(result, "stdout", "")
-                    stderr_content = getattr(result, "stderr", "")
-                    if isinstance(stdout_content, str) and (
-                        "404" in stdout_content or "not found" in stdout_content.lower()
-                    ):
-                        raise NetworkError(f"Remote asset not found: {asset_name}")
-                    if isinstance(stderr_content, str) and (
-                        "404" in stderr_content or "not found" in stderr_content.lower()
-                    ):
-                        raise NetworkError(f"Remote asset not found: {asset_name}")
+        if not location_match:
+            return None
 
-                    size = self._extract_size_from_response(result.stdout)
-                    if size:
-                        logger.debug(f"Remote asset size: {format_bytes(size)}")
-                        # Cache the result for future use (if not testing)
-                        if not in_test:
-                            self._cache_asset_size(repo, tag, asset_name, size)
-                        return size
-        return None
+        redirect_url = location_match.group(1).strip()
+        if not redirect_url or redirect_url == url:
+            return None
+
+        logger.debug(f"Following redirect to: {redirect_url}")
+        result = self.network_client.head(redirect_url, follow_redirects=False)
+        if result.returncode != 0:
+            return None
+
+        if self._is_not_found_error(result):
+            raise NetworkError(f"Remote asset not found: {asset_name}")
+
+        size = self._extract_size_from_response(result.stdout)
+        if not size:
+            return None
+
+        logger.debug(f"Remote asset size: {format_bytes(size)}")
+        if not in_test:
+            self._cache_asset_size(repo, tag, asset_name, size)
+        return size
 
     def _fetch_size_with_head_request(self, url: str, asset_name: str) -> ProcessResult:
         """Execute HEAD request to fetch asset size.
@@ -456,25 +468,15 @@ class ReleaseManager:
         """
         result = self.network_client.head(url, follow_redirects=True)
         if result.returncode != 0:
-            stderr_content = getattr(result, "stderr", "")
-            if isinstance(stderr_content, str) and (
-                "404" in stderr_content or "not found" in stderr_content.lower()
-            ):
+            stderr = getattr(result, "stderr", "")
+            if self._is_not_found_error(result):
                 raise NetworkError(f"Remote asset not found: {asset_name}")
             raise NetworkError(
-                f"Failed to get remote asset size for {asset_name}: {stderr_content}"
+                f"Failed to get remote asset size for {asset_name}: {stderr}"
             )
 
         # Check for 404 or similar errors even if returncode is 0
-        stdout_content = getattr(result, "stdout", "")
-        stderr_content = getattr(result, "stderr", "")
-        if isinstance(stdout_content, str) and (
-            "404" in stdout_content or "not found" in stdout_content.lower()
-        ):
-            raise NetworkError(f"Remote asset not found: {asset_name}")
-        if isinstance(stderr_content, str) and (
-            "404" in stderr_content or "not found" in stderr_content.lower()
-        ):
+        if self._is_not_found_error(result):
             raise NetworkError(f"Remote asset not found: {asset_name}")
         return result
 
@@ -494,14 +496,13 @@ class ReleaseManager:
         size = self._extract_size_from_response(result.stdout)
         if size:
             logger.debug(f"Remote asset size: {format_bytes(size)}")
-            if "pytest" not in sys.modules and "PYTEST_CURRENT_TEST" not in os.environ:
+            if self._cache_enabled:
                 self._cache_asset_size(repo, tag, asset_name, size)
             return size
 
         # If content-length not available, try following redirects
-        in_test = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
         size = self._follow_redirect_and_get_size(
-            result, url, repo, tag, asset_name, in_test
+            result, url, repo, tag, asset_name, not self._cache_enabled
         )
         return size
 
@@ -519,8 +520,8 @@ class ReleaseManager:
         Raises:
             FetchError: If unable to get asset size
         """
-        # Try cache first (skip in test mode)
-        if "pytest" not in sys.modules and "PYTEST_CURRENT_TEST" not in os.environ:
+        # Try cache first (skip when caching is disabled)
+        if self._cache_enabled:
             cached_size = self._get_cached_asset_size(repo, tag, asset_name)
             if cached_size is not None:
                 logger.debug(
@@ -528,7 +529,7 @@ class ReleaseManager:
                 )
                 return cached_size
 
-        url = f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
+        url = self.platform_adapter.build_download_url(repo, tag, asset_name)
         logger.debug(f"Getting remote asset size from: {url}")
 
         try:
@@ -560,7 +561,7 @@ class ReleaseManager:
         Raises:
             FetchError: If unable to fetch or parse the releases
         """
-        url = f"https://api.github.com/repos/{repo}/releases"
+        url = self.platform_adapter.build_api_url(repo, "releases")
 
         try:
             response = self.network_client.get(url)

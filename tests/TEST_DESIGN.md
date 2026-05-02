@@ -1,1124 +1,833 @@
-# ProtonFetcher Test Suite Design
+# ProtonFetcher Test Suite — Code Navigation Map
 
-## Overview
+> Mermaid-first reference. For fixture docs, see [`FIXTURES.md`](FIXTURES.md).
 
-The ProtonFetcher test suite employs a comprehensive, multi-layered testing strategy designed around the protocol-based architecture. Tests are organized by component and testing level, with heavy use of mocking to ensure fast, reliable, and isolated test execution.
+---
 
-## Test Suite Philosophy
+## 1. Test Priority Pyramid
 
-### User-Facing Tests Over Coverage Metrics
+```mermaid
+graph TD
+    subgraph E2E["E2E — Complete User Journeys (Highest Priority)"]
+        E2E_CLI["test_cli.py"]
+        E2E_PRUNE["test_prune.py"]
+        E2E_RELEASE["test_release_manager_e2e.py"]
+    end
 
-**The ProtonFetcher test suite prioritizes meaningful end-to-end and integration tests that verify user-facing functionality over maximizing code coverage percentages.**
+    subgraph INTEGRATION["Integration — Component Interaction (High Priority)"]
+        INT_LINK["test_link_manager_e2e.py"]
+        INT_RELEASE["test_release_manager_e2e.py"]
+        INT_INTEGRATION["test_integration.py"]
+    end
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Test Priority Pyramid                        │
-│                                                                 │
-│                         /‾‾‾\                                   │
-│                        / E2E \                                  │
-│                       / Tests  \     ← Highest priority         │
-│                      /──────────\                               │
-│                     / Integration \                             │
-│                    /    Tests      \    ← High priority         │
-│                   /──────────────────\                          │
-│                  /    Unit Tests      \   ← As needed           │
-│                 /______________________\                        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+    subgraph UNIT["Unit — Logic & Edge Cases (As Needed)"]
+        UT_UTILS["test_utils.py"]
+        UT_BASE["test_base_release_fetcher.py"]
+        UT_FORGEJO["test_forgejo_fetcher.py"]
+    end
 
-### Why This Approach?
-
-| Metric-Focused Testing | User-Focused Testing |
-|------------------------|----------------------|
-| Tests every getter/setter | Tests complete workflows |
-| 100% coverage, 0 confidence | High confidence in critical paths |
-| Brittle tests tied to implementation | Resilient tests tied to behavior |
-| "Did we test every line?" | "Did we test what users experience?" |
-| Mocks everything | Mocks boundaries, tests integration |
-
-### Our Testing Priorities
-
-1. **E2E Workflows** - Test complete user journeys (fetch, extract, link)
-2. **Integration Points** - Test component interactions (network + filesystem + extraction)
-3. **Error Handling** - Test failure modes users might encounter
-4. **Edge Cases** - Test boundary conditions that affect real usage
-5. **Unit Logic** - Test complex algorithms (version parsing, deduplication)
-
-### What We Don't Test
-
-```python
-# ❌ Don't test trivial getters/setters
-def test_fork_name_enum():
-    assert ForkName.GE_PROTON.value == "GE-Proton"  # Waste of time
-
-# ❌ Don't test Python builtins
-def test_path_concatenation():
-    assert Path("/a") / "b" == Path("/a/b")  # Python's job to test
-
-# ❌ Don't test protocol definitions
-def test_protocol_has_method():
-    assert hasattr(NetworkClientProtocol, "get")  # Already enforced by type checker
+    E2E_CLI --> INTEGRATION
+    E2E_PRUNE --> INTEGRATION
+    E2E_RELEASE --> INTEGRATION
+    INTEGRATION --> UNIT
 ```
 
-### Coverage as a Side Effect
+---
 
-Good E2E and integration tests naturally achieve high coverage:
+## 2. Test File → Source Module Mapping
 
-```
-User clicks "fetch latest GE-Proton"
-    ↓
-CLI parses arguments              ← cli.py covered
-    ↓
-GitHubReleaseFetcher.orchestrate() ← github_fetcher.py covered
-    ↓
-ReleaseManager.find_asset()       ← release_manager.py covered
-    ↓
-AssetDownloader.download()        ← asset_downloader.py covered
-    ↓
-ArchiveExtractor.extract()        ← archive_extractor.py covered
-    ↓
-LinkManager.manage_proton_links() ← link_manager.py covered
-    ↓
-Symlinks created                  ← User's goal achieved ✓
-```
+```mermaid
+graph LR
+    subgraph TESTS["tests/"]
+        T_CLI["test_cli.py<br/>31 tests"]
+        T_DISPATCH["test_cli_dispatch.py<br/>30 tests"]
+        T_BASE["test_base_release_fetcher.py<br/>25 tests"]
+        T_PRUNE["test_prune.py<br/>27 tests"]
+        T_PRUNE_OPS["test_prune_operations.py<br/>20 tests"]
+        T_VERSION["test_version_finder.py<br/>19 tests"]
+        T_RELEASE_E2E["test_release_manager_e2e.py<br/>28 tests"]
+        T_INTEGRATION["test_integration.py<br/>22 tests"]
+        T_LINK_STATUS["test_link_status.py<br/>16 tests"]
+        T_RELEASE_OPS["test_release_operations.py<br/>16 tests"]
+        T_FORGEJO["test_forgejo_fetcher.py<br/>23 tests"]
+        T_SYMLINK_OPS["test_symlink_operations.py<br/>14 tests"]
+        T_CLI_HANDLERS["test_cli_handlers.py<br/>9 tests"]
+        T_CLI_VALIDATORS["test_cli_validators.py<br/>7 tests"]
+        T_GITHUB["test_github_fetcher.py<br/>12 tests"]
+        T_EXTRACTION["test_extraction.py<br/>12 tests"]
+        T_LINK_MGR["test_link_manager_e2e.py<br/>10 tests"]
+        T_UTILS["test_utils.py<br/>10 tests"]
+        C["conftest.py<br/>shared fixtures"]
+    end
 
-**One E2E test = Coverage of 6+ modules + verification they work together**
+    subgraph SRC["src/protonfetcher/"]
+        S_CLI["cli.py"]
+        S_FETCHER["base_release_fetcher.py"]
+        S_GITHUB["github_fetcher.py"]
+        S_FORGEJO["forgejo_fetcher.py"]
+        S_LINK["link_manager.py"]
+        S_LINK_STATUS["link_status.py"]
+        S_RELEASE["release_manager.py"]
+        S_RELEASE_OPS["release_operations.py"]
+        S_PRUNE_OPS["prune_operations.py"]
+        S_EXTRACTION["archive_extractor.py"]
+        S_DOWNLOAD["asset_downloader.py"]
+        S_NETWORK["network.py"]
+        S_FS["filesystem.py"]
+        S_ADAPTER["platform_adapters.py"]
+        S_COMMON["common.py"]
+        S_UTILS["utils.py"]
+        S_SPINNER["spinner.py"]
+        S_VERSION["version_finder.py"]
+        S_CANDIDATE["candidate_selection.py"]
+        S_SYMLINK_OPS["symlink_operations.py"]
+    end
 
-### Coverage Guidelines
-
-| Coverage Range | Action |
-|----------------|--------|
-| 80-100% | Excellent - focus on test quality, not increasing number |
-| 60-80% | Good - review missing critical paths |
-| Below 60% | Add E2E tests for missing workflows |
-
-**Never add tests solely to increase coverage percentage.** Add tests to:
-- Verify user-facing behavior
-- Prevent regression of bugs
-- Document expected behavior
-- Test error conditions users might hit
-
-### Test Quality Indicators
-
-**High Quality Tests:**
-- ✅ Test would pass even if internal implementation changed
-- ✅ Test fails when user-facing behavior breaks
-- ✅ Test documents expected behavior clearly
-- ✅ Test covers realistic scenarios
-
-**Low Quality Tests:**
-- ❌ Test verifies internal method call counts
-- ❌ Test breaks when refactoring (same behavior, different code)
-- ❌ Test only exists to cover an `if` branch
-- ❌ Test mocks the class it's testing
-
-### The Coverage Tool is a Lie Detector
-
-Use coverage reports to find **untested user paths**, not to chase percentages:
-
-```bash
-# Run tests with coverage
-uv run pytest --cov=protonfetcher --cov-report=term-missing
-
-# Look at uncovered lines and ask:
-# "Is this a user-facing path that needs testing?"
-# NOT "How do I get this line covered?"
-```
-
-**Example:** If `except IOError` branch shows uncovered:
-- **Wrong response:** Add test that forces IOError just to cover line
-- **Right response:** Ask "Can users hit this error?" → If yes, add realistic test
-
-## Test Organization
-
-### Directory Structure (Current)
-
-```
-tests/
-├── conftest.py              # Shared fixtures and configuration
-├── test_cli.py              # CLI interface tests (all operations)
-├── test_github_fetcher.py   # Main orchestrator tests
-├── test_link_manager_e2e.py # Symlink management E2E tests
-├── test_release_manager_e2e.py # Release discovery E2E tests
-├── test_extraction.py       # Archive extraction tests
-├── test_integration.py      # Integration tests
-├── test_utils.py            # Utility function tests (version parsing)
-├── test_prune.py            # Prune operation tests (NEW)
-└── TEST_DESIGN.md           # This document
+    T_CLI --> S_CLI
+    T_DISPATCH --> S_CLI
+    T_DISPATCH --> S_GITHUB & S_FORGEJO
+    T_CLI_HANDLERS --> S_CLI
+    T_CLI_VALIDATORS --> S_CLI
+    T_BASE --> S_FETCHER
+    T_PRUNE --> S_LINK & S_CLI
+    T_PRUNE_OPS --> S_PRUNE_OPS & S_VERSION
+    T_LINK_STATUS --> S_LINK_STATUS & S_COMMON
+    T_RELEASE_OPS --> S_RELEASE_OPS & S_FS
+    T_RELEASE_E2E --> S_RELEASE & S_ADAPTER
+    T_GITHUB --> S_GITHUB & S_FETCHER
+    T_FORGEJO --> S_FORGEJO & S_ADAPTER
+    T_EXTRACTION --> S_EXTRACTION & S_DOWNLOAD
+    T_INTEGRATION --> S_NETWORK & S_SPINNER
+    T_UTILS --> S_UTILS
+    T_VERSION --> S_VERSION
+    T_SYMLINK_OPS --> S_SYMLINK_OPS & S_COMMON
+    T_LINK_MGR --> S_LINK & S_FS
+    C --> TESTS
 ```
 
-**Note:** The test suite continues to evolve. In 2026-03, `test_prune.py` was added to test the new `--prune` feature with 27 comprehensive tests covering argument parsing, operation flow, LinkManager integration, and end-to-end scenarios.
+---
 
-### Original Structure (Pre-Streamlining)
+## 3. Adapter-Based Architecture & Test Implications
 
-```
-tests/
-├── conftest.py                    # 1,155 lines
-├── test_cli_e2e.py                # 824 lines
-├── test_check_mode.py             # 594 lines
-├── test_dry_run.py                # 493 lines
-├── test_extraction_workflow_e2e.py # 747 lines
-├── test_github_fetcher_e2e.py     # 917 lines
-├── test_link_manager_e2e.py       # 852 lines
-├── test_network_integration.py    # 336 lines
-├── test_release_manager_e2e.py    # 734 lines
-├── test_spinner_integration.py    # 487 lines
-└── TEST_DESIGN.md
-```
+```mermaid
+classDiagram
+    class BaseReleaseFetcher {
+        +platform: str
+        +release_manager: ReleaseManager
+        +fetch_and_extract()
+        +check_for_newer()
+        +remove_release()
+        +relink_fork()
+        +update_all_managed_forks()
+    }
 
-### Test Categories
+    class GitHubReleaseFetcher {
+        <<marker>>
+        platform = "github"
+    }
 
-| Category | Purpose | Files |
-|----------|---------|-------|
-| **Unit Tests** | Component-specific method testing | `test_utils.py`, embedded in E2E files |
-| **Integration Tests** | Component interaction testing | `test_integration.py` |
-| **End-to-End Tests** | Complete workflow testing | `test_cli.py`, `test_github_fetcher.py`, `test_prune.py` |
-| **CLI Tests** | Command-line interface testing | `test_cli.py` |
-| **Feature Tests** | New feature testing (comprehensive) | `test_prune.py` |
+    class ForgejoReleaseFetcher {
+        <<marker>>
+        platform = "forgejo"
+    }
 
-### Test Suite Statistics (2026-03)
+    class PlatformAdapter {
+        <<protocol>>
+        +api_base: str
+        +host_base: str
+        +default_headers: dict
+        +build_api_url()
+        +build_download_url()
+        +build_host_url()
+    }
 
-| Metric | Count |
-|--------|-------|
-| Test files | 9 |
-| Total tests | 260+ |
-| Test coverage | ~85% |
-| Newest feature tests | `test_prune.py` (27 tests) |
+    class GitHubPlatformAdapter {
+        api_base = "https://api.github.com"
+    }
 
-**Key improvements since streamlining:**
-- ✅ Added comprehensive prune feature tests (27 tests)
-- ✅ Real filesystem testing for symlink operations (where mocks fail)
-- ✅ Enhanced CLI operation flow testing
-- ✅ Better integration between LinkManager and filesystem
-- ✅ Maintained fast test execution (<1 second for full suite)
+    class ForgejoPlatformAdapter {
+        api_base = "https://dawn.wine/api/v1"
+    }
 
-## Core Testing Principles
+    class ReleaseManager {
+        +platform_adapter: PlatformAdapter
+        +find_asset()
+        +list_recent_releases()
+    }
 
-### 1. Protocol-Based Mocking
+    class ForkConfig {
+        +platform: str
+        +repo: str
+        +archive_format: str
+        +version_pattern: str
+    }
 
-The test suite leverages the protocol-based architecture for dependency injection:
+    BaseReleaseFetcher <|-- GitHubReleaseFetcher
+    BaseReleaseFetcher <|-- ForgejoReleaseFetcher
+    BaseReleaseFetcher o-- ReleaseManager
+    ReleaseManager o-- PlatformAdapter
+    PlatformAdapter <|.. GitHubPlatformAdapter
+    PlatformAdapter <|.. ForgejoPlatformAdapter
+    ForkConfig --> BaseReleaseFetcher : "platform field selects adapter"
 
-```python
-from protonfetcher.common import NetworkClientProtocol, FileSystemClientProtocol
-
-# Mock the protocol, not the implementation
-mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-mock_fs = mocker.MagicMock(spec=FileSystemClientProtocol)
-```
-
-**Benefits:**
-- Tests are decoupled from implementation details
-- Easy to swap real/fake implementations
-- Clear interface contracts
-
-### 2. Comprehensive Mocking Strategy
-
-Tests mock external dependencies to ensure reliability:
-
-| Dependency | Mock Approach | Fixture |
-|------------|---------------|---------|
-| Filesystem | `FileSystemClientProtocol` mock | `mock_filesystem_client` |
-| Network | `NetworkClientProtocol` mock | `mock_network_client` |
-| tarfile | `tarfile.open` patch | `mock_tarfile_operations` |
-| urllib | `urllib.request.urlopen` patch | `mock_urllib_download` |
-| subprocess | `subprocess.run` patch | `mock_subprocess_tar` |
-| builtins.open | `builtins.open` patch | `mock_builtin_open` |
-
-### 3. Real Filesystem for Symlink Operations
-
-Tests use the real filesystem for symlink operations where mocks don't properly handle `resolve()`:
-
-```python
-# ✅ Prefer: Real filesystem for symlink testing (in tmp_path)
-from protonfetcher.filesystem import FileSystemClient
-from protonfetcher.link_manager import LinkManager
-
-def test_prune_releases_protects_linked_versions(tmp_path: Path):
-    extract_dir = tmp_path / "compatibilitytools.d"
-    extract_dir.mkdir()
-    
-    # Create real directories and symlinks
-    fs = FileSystemClient()
-    link_manager = LinkManager(fs)
-    
-    # Test with real symlink operations
-    result = link_manager.prune_releases(...)
+    note for GitHubReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
+    note for ForgejoReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
+    note for BaseReleaseFetcher["~400 lines, ALL logic<br/>Test: test_base_release_fetcher.py (20 tests)"]
+    note for PlatformAdapter["URL/header construction<br/>Test: test_forgejo_fetcher.py + test_release_manager_e2e.py (Pattern 8)"]
 ```
 
-**When to use real vs. mocked filesystem:**
+---
 
-| Scenario | Approach | Reason |
-|----------|----------|--------|
-| Symlink creation/resolution | Real filesystem | Mocks don't handle `resolve()` properly |
-| Directory iteration | Real filesystem | Mocks require complex side_effect setup |
-| File write/read | Mocked | Faster, no I/O |
-| Network calls | Always mocked | External dependency |
-| tarfile operations | Mocked | Complex archive handling |
+## 4. Mocking Strategy & Dependency Injection
 
-## Golden Rules
+```mermaid
+graph TB
+    subgraph SUT["System Under Test (REAL)"]
+        FETCHER["BaseReleaseFetcher<br/>GitHubReleaseFetcher<br/>ForgejoReleaseFetcher"]
+        LINK_MGR["LinkManager"]
+        RELEASE_MGR["ReleaseManager"]
+        EXTRACTOR["ArchiveExtractor"]
+    end
 
-The ProtonFetcher test suite follows four fundamental rules. All contributors must adhere to these principles.
+    subgraph MOCKS["Mocks (Protocol-Based)"]
+        NET_MOCK["mock_network_client<br/>NetworkClientProtocol"]
+        FS_MOCK["mock_filesystem_client<br/>FileSystemClientProtocol"]
+        TAR_MOCK["mock_tarfile_operations<br/>tarfile.open patch"]
+        URL_MOCK["mock_urllib_download<br/>urllib.request.urlopen"]
+        SUB_MOCK["mock_subprocess_tar<br/>subprocess.run"]
+        OPEN_MOCK["mock_builtin_open<br/>builtins.open"]
+    end
 
-### Rule 1: Do Not Mock the SUT (System Under Test)
+    subgraph REAL_FS["Real Filesystem (tmp_path)"]
+        SYMLINK["Symlink creation/resolution"]
+        DIR_ITER["Directory iteration"]
+    end
 
-**Never mock the class or function you are testing.** Only mock its dependencies.
+    FETCHER --> NET_MOCK
+    FETCHER --> FS_MOCK
+    EXTRACTOR --> TAR_MOCK
+    EXTRACTOR --> URL_MOCK
+    EXTRACTOR --> SUB_MOCK
+    EXTRACTOR --> OPEN_MOCK
+    LINK_MGR --> REAL_FS
+    RELEASE_MGR --> NET_MOCK
 
-```python
-# ❌ WRONG: Mocking the SUT
-def test_fetcher(mock_github_fetcher: Any):  # Don't do this
-    mock_github_fetcher.fetch_and_extract.return_value = Path("/mock/result")
-    # This tests nothing - you're testing your mock, not the code
-
-# ✅ CORRECT: Mock dependencies, instantiate real SUT
-def test_fetcher(mock_network_client: Any, mock_filesystem_client: Any):
-    fetcher = GitHubReleaseFetcher(  # Real SUT
-        network_client=mock_network_client,
-        file_system_client=mock_filesystem_client,
-    )
-    result = fetcher.fetch_and_extract(...)  # Real method call
-    assert result == expected_path  # Verify real behavior
+    note for MOCKS["Always mock: network, tarfile,<br/>file read/write, subprocess"]
+    note for REAL_FS["Never mock: symlinks<br/>(resolve() breaks with mocks)"]
 ```
 
-**Rationale:** Mocking the SUT means you're not testing actual code - you're testing your mock configuration. The SUT should be real; its dependencies should be mocked.
+---
 
-**When to break this rule:** Only when testing at a higher integration level where the "SUT" is a complete workflow and you're verifying component interaction.
+## 5. Fixture Dependency Graph
 
-### Rule 2: Use Real Filesystem for Symlink Operations
+```mermaid
+graph TD
+    subgraph FACTORIES["Factory Fixtures"]
+        NET_FACTORY["mock_network_factory"]
+        FS_FACTORY["mock_filesystem_factory"]
+        ARCHIVE_FACTORY["sample_archive_factory"]
+    end
 
-**Never mock symlink creation or resolution.** The mock `FileSystemClientProtocol` doesn't properly implement `resolve()`, which breaks symlink testing.
+    subgraph ENVIRONMENT["Environment Fixtures"]
+        ENV_BUILDER["test_environment_builder<br/>fluent builder"]
+    end
 
-```python
-# ❌ WRONG: Using mocked filesystem for symlinks
-def test_symlink_with_mock(mock_filesystem_client: Any):
-    link_manager = LinkManager(mock_filesystem_client)
-    # resolve() returns MagicMock, not actual path - assertions fail!
+    subgraph DATA["Test Data Fixtures"]
+        TEST_DATA["test_data<br/>centralized fork configs"]
+        FORK_FIXTURE["fork (parametrized)"]
+        FORK_REPO["fork_repo"]
+        FORK_FORMAT["fork_archive_format"]
+    end
 
-# ✅ CORRECT: Use real filesystem in tmp_path
-def test_symlink_with_real_fs(tmp_path: Path):
-    from protonfetcher.filesystem import FileSystemClient
-    from protonfetcher.link_manager import LinkManager
-    
-    extract_dir = tmp_path / "compatibilitytools.d"
-    extract_dir.mkdir()
-    
-    fs = FileSystemClient()  # Real filesystem
-    link_manager = LinkManager(fs)
-    
-    # Create real symlink
-    main_link.symlink_to(version_dir)
-    
-    # resolve() works correctly
-    assert main_link.resolve() == version_dir
+    subgraph COMPONENTS["Component Fixtures"]
+        RM_FIXTURE["release_manager"]
+        LM_FIXTURE["link_manager"]
+        GF_FIXTURE["github_fetcher"]
+    end
+
+    subgraph MOCKS["Mock Fixtures"]
+        NET_CLIENT["mock_network_client"]
+        FS_CLIENT["mock_filesystem_client"]
+        TAR_OPS["mock_tarfile_operations"]
+        URL_DL["mock_urllib_download"]
+        SUB_TAR["mock_subprocess_tar"]
+        BUILTIN_OPEN["mock_builtin_open"]
+        RATE_LIMIT["mock_network_with_rate_limit"]
+    end
+
+    NET_FACTORY --> NET_CLIENT
+    NET_FACTORY --> RATE_LIMIT
+    FS_FACTORY --> FS_CLIENT
+    FS_FACTORY --> LM_FIXTURE
+    FS_FACTORY --> RM_FIXTURE
+    FS_FACTORY --> GF_FIXTURE
+    ARCHIVE_FACTORY --> TAR_OPS
+
+    FORK_FIXTURE --> FORK_REPO
+    FORK_FIXTURE --> FORK_FORMAT
+    TEST_DATA --> FORK_FIXTURE
+
+    ENV_BUILDER --> COMPONENTS
+
+    NET_CLIENT --> RM_FIXTURE
+    NET_CLIENT --> GF_FIXTURE
+    FS_CLIENT --> LM_FIXTURE
+    FS_CLIENT --> RM_FIXTURE
+    FS_CLIENT --> GF_FIXTURE
+
+    style FACTORIES fill:#e1f5e1
+    style ENVIRONMENT fill:#e1f0f5
+    style DATA fill:#fff4e1
+    style COMPONENTS fill:#f5e1f5
+    style MOCKS fill:#f5e1e1
 ```
 
-**Rationale:** Mocking `resolve()` requires complex `side_effect` chains that are brittle and error-prone. Real filesystem operations in `tmp_path` are fast, reliable, and test actual behavior.
+---
 
-**Scope:** This rule applies specifically to symlink operations. Continue mocking:
-- Network calls (external dependency)
-- File read/write (faster with mocks)
-- tarfile operations (complex archive handling)
-- subprocess calls (external tools)
+## 6. Test Pattern Catalog
 
-### Rule 3: Leverage pytest/pytest-mock Features Fully
+```mermaid
+graph TB
+    subgraph PATTERNS["8 Test Patterns"]
+        P1["P1: Complete Workflow<br/>All mocks → execute → verify interactions"]
+        P2["P2: Error Handling<br/>Configure error → assert exception"]
+        P3["P3: Parametrized Fork<br/>@parametrize over ForkName enum"]
+        P4["P4: Real Integration<br/>tmp_path + real FileSystemClient"]
+        P5["P5: CLI Argument Parsing<br/>patch sys.argv → parse → assert"]
+        P6["P6: CLI Mocked Fetcher<br/>patch fetcher class → main() → capsys"]
+        P7["P7: Feature Test Suite<br/>ArgParse → Flow → Integration → E2E"]
+        P8["P8: Platform Adapter<br/>URL construction + header verification"]
+    end
 
-**Use pytest's built-in features before writing custom test logic.** This includes parametrization, fixtures, markers, and built-in assertions.
+    subgraph EXAMPLES["Example Files"]
+        E1["test_github_fetcher.py"]
+        E2["test_github_fetcher.py"]
+        E3["test_link_manager_e2e.py"]
+        E4["test_link_manager_e2e.py"]
+        E5["test_cli.py::TestArgumentParsing"]
+        E6["test_cli.py::TestListReleasesOperation"]
+        E7["test_prune.py"]
+        E8["test_forgejo_fetcher.py"]
+    end
 
-```python
-# ❌ WRONG: Manual test repetition
-def test_ge_proton():
-    test_fork(ForkName.GE_PROTON)
+    subgraph NEW_TESTS["New Tests (2026-05)"]
+        NT1["TestAdapterSelection<br/>2 tests in test_base_release_fetcher.py"]
+        NT2["TestBuildDownloadUrl<br/>2 tests in test_base_release_fetcher.py"]
+        NT3["TestHandleAlreadyExtracted<br/>2 tests in test_base_release_fetcher.py"]
+        NT4["TestUpdateAllManagedForksPlatformFiltering<br/>2 tests in test_base_release_fetcher.py"]
+        NT5["TestForkConfigPlatformDispatch<br/>4 tests in test_cli.py"]
+        NT6["TestReleaseManagerForgejoAdapter<br/>5 tests in test_release_manager_e2e.py"]
+    end
 
-def test_proton_em():
-    test_fork(ForkName.PROTON_EM)
+    P1 --> E1
+    P2 --> E2
+    P3 --> E3
+    P4 --> E4
+    P5 --> E5
+    P6 --> E6
+    P7 --> E7
+    P8 --> E8
 
-def test_cachyos():
-    test_fork(ForkName.CACHYOS)
-
-# ✅ CORRECT: Use pytest.mark.parametrize
-@pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS])
-def test_all_forks(fork: ForkName, ...):
-    test_fork(fork)
+    style PATTERNS fill:#e1f5e1
+    style EXAMPLES fill:#fff4e1
+    style NEW_TESTS fill:#e1f0f5
 ```
 
-```python
-# ❌ WRONG: Custom fixture when pytest-mock provides it
-@pytest.fixture
-def mocker():
-    from unittest.mock import MagicMock
-    return MagicMock()
+---
 
-# ✅ CORRECT: Use pytest-mock's mocker fixture
-def test_with_mock(mocker: Any):
-    mock = mocker.MagicMock()  # Rich mocker API available
+## 7. Golden Rules
+
+```mermaid
+graph LR
+    subgraph RULES["5 Golden Rules"]
+        R1["Rule 1: Never Mock the SUT<br/>Real class, mocked deps"]
+        R2["Rule 2: Real FS for Symlinks<br/>tmp_path + FileSystemClient"]
+        R3["Rule 3: Use pytest Features<br/>parametrize, fixtures, capsys, mocker"]
+        R4["Rule 4: Test Adapter Selection<br/>Verify platform → adapter mapping"]
+        R5["Rule 5: DRY Tests<br/>One behavior per test, no overlap"]
+    end
+
+    subgraph VIOLATIONS["Common Violations"]
+        V1["❌ mock_github_fetcher.fetch.return_value"]
+        V2["❌ LinkManager(mock_fs)"]
+        V3["❌ Manual loop over forks"]
+        V4["❌ Indirect-only adapter tests"]
+        V5["❌ Copy-paste tests"]
+    end
+
+    R1 -.-> V1
+    R2 -.-> V2
+    R3 -.-> V3
+    R4 -.-> V4
+    R5 -.-> V5
+
+    style RULES fill:#e1f5e1
+    style VIOLATIONS fill:#f5e1e1
 ```
 
-**Key pytest/pytest-mock features to use:**
+---
 
-| Feature | Use Case | Example |
-|---------|----------|---------|
-| `@pytest.mark.parametrize` | Run same test with different inputs | Testing all forks |
-| `@pytest.fixture` | Shared setup/teardown | `mock_network_client` |
-| `tmp_path` | Temporary file paths | `tmp_path / "test.txt"` |
-| `capsys` | Capture stdout/stderr | CLI output testing |
-| `caplog` | Capture log messages | Logging verification |
-| `mocker.patch` | Patch objects | `mocker.patch("tarfile.open")` |
-| `mocker.spy` | Spy on real methods | Verify method calls without mocking |
-| `pytest.raises` | Exception testing | `with pytest.raises(NetworkError)` |
+## 8. Feature Test Structure (New Feature Checklist)
 
-**Centralize fixtures in `conftest.py`:**
+```mermaid
+graph TD
+    subgraph FEATURE["New Feature Test Structure (test_prune.py template)"]
+        A["Argument Parsing Tests<br/>- CLI flags<br/>- Mutual exclusivity<br/>- Default values"]
+        B["Operation Flow Tests<br/>- Happy path<br/>- Dry-run mode<br/>- Confirmation workflow"]
+        C["Integration Tests<br/>- Real FileSystemClient<br/>- Symlink protection<br/>- Directory iteration"]
+        D["E2E Tests<br/>- Complete workflow<br/>- All forks<br/>- Error recovery"]
+        E["Error Handling Tests<br/>- Invalid inputs<br/>- Edge cases<br/>- Exception chaining"]
+    end
 
-```python
-# ❌ WRONG: Duplicate fixtures in test files
-# tests/test_a.py
-@pytest.fixture
-def mock_network_client(mocker): ...
+    A --> B --> C --> D
+    E -.-> B
+    E -.-> C
 
-# tests/test_b.py
-@pytest.fixture
-def mock_network_client(mocker): ...  # Duplicate!
-
-# ✅ CORRECT: Single source of truth
-# conftest.py
-@pytest.fixture
-def mock_network_client(mocker): ...  # Available to all tests
+    style A fill:#e1f5e1
+    style B fill:#e1f5e1
+    style C fill:#e1f5e1
+    style D fill:#e1f5e1
+    style E fill:#fff4e1
 ```
 
-### Rule 3: Don't Repeat Yourself (DRY)
+---
 
-**Never write overlapping or redundant tests.** Each test should verify exactly one behavior or scenario.
+## 9. CLI Operation Test Coverage
 
-```python
-# ❌ WRONG: Overlapping tests
-def test_symlink_created():
-    # Creates symlink, verifies it exists
-    ...
+```mermaid
+graph LR
+    subgraph CLI_MAIN["test_cli.py — Main Entry (31 tests)"]
+        OP_CHECK["--check<br/>TestCheckOperationFlow<br/>TestCheckCLI"]
+        OP_DRYRUN["--dry-run<br/>TestDryRunCLI<br/>TestDryRunWorkflow<br/>TestDryRunOutput<br/>TestDryRunIntegration"]
+        OP_LIST["--list<br/>TestListReleasesOperation"]
+        OP_LINKS["--list-links<br/>TestListLinksOperation"]
+        OP_REMOVE["--remove<br/>TestRemoveOperation"]
+        OP_RELINK["--relink<br/>TestRelinkOperation"]
+        OP_DOWNLOAD["--download<br/>TestDownloadOperation"]
+        OP_PRUNE["--prune<br/>test_prune.py"]
+        OP_FORK["--fork flag<br/>TestForkConversion<br/>TestForkFlagWithoutValue"]
+        OP_DEBUG["--debug<br/>TestDebugLogging"]
+        OP_ERROR["Error handling<br/>TestErrorHandling"]
+    end
 
-def test_symlink_points_to_correct_target():
-    # Creates same symlink, verifies target
-    ...
+    subgraph CLI_DISPATCH["test_cli_dispatch.py — Dispatch Logic (30 tests)"]
+        DD["Operation routing per flag<br/>30 tests<br/>Verify _dispatch() paths"]
+    end
 
-def test_symlink_workflow():
-    # Creates same symlink, verifies everything
-    ...
+    subgraph CLI_HANDLERS["test_cli_handlers.py — Handler Functions (9 tests)"]
+        DH["_handle_* functions<br/>9 tests<br/>Verify handler behavior"]
+    end
 
-# ✅ CORRECT: Single responsibility per test
-def test_symlink_creation_creates_link():
-    # Only verify symlink is created
-    ...
+    subgraph CLI_VALIDATORS["test_cli_validators.py — Validation (7 tests)"]
+        DV["Mutual exclusivity, defaults<br/>7 tests<br/>Verify _validate_* functions"]
+    end
 
-def test_symlink_creation_correct_target():
-    # Only verify target is correct
-    ...
+    subgraph PARSING["Argument Parsing"]
+        PARSE["TestArgumentParsing<br/>test_cli.py"]
+    end
 
-def test_symlink_creation_priority_order():
-    # Only verify priority ordering with multiple versions
-    ...
+    subgraph VERSIONS["Version Checks"]
+        INSTALLED["TestGetInstalledVersions"]
+        UPDATES["TestCheckForUpdates"]
+        NEWER["TestCheckForNewerRelease"]
+    end
+
+    PARSING --> CLI_MAIN
+    VERSIONS --> OP_CHECK
+    CLI_MAIN --> CLI_DISPATCH
+    CLI_MAIN --> CLI_HANDLERS
+    CLI_MAIN --> CLI_VALIDATORS
+
+    style CLI_MAIN fill:#e1f5e1
+    style CLI_DISPATCH fill:#fff4e1
+    style CLI_HANDLERS fill:#fff4e1
+    style CLI_VALIDATORS fill:#fff4e1
+    style PARSING fill:#fff4e1
+    style VERSIONS fill:#fff4e1
 ```
 
-**Test organization by scenario, not by method:**
+---
 
-```python
-# ❌ WRONG: One test per method
-def test_manage_proton_links():
-    # Tests everything: creation, ordering, updates, edge cases
-    ...
+## 10. Test Execution Flow — What Happens When You Run `pytest`
 
-# ✅ CORRECT: One test per scenario
-class TestManageProtonLinks:
-    def test_creates_all_three_symlinks(self): ...
-    def test_orders_by_version_newest_first(self): ...
-    def test_skips_existing_correct_symlinks(self): ...
-    def test_handles_missing_target_directory(self): ...
+```mermaid
+sequenceDiagram
+    autonumber
+    participant PY as pytest
+    participant CF as conftest.py
+    participant FIX as Fixtures (factories, mocks, env)
+    participant SUT as SUT (real classes)
+    participant MOCK as Mocks (network, fs, tar)
+    participant FS as Real FS (tmp_path)
+
+    PY->>CF: Load shared fixtures
+    CF->>FIX: Register factories, mock fixtures, test_data
+    PY->>FIX: Resolve fixture dependencies per test
+    FIX->>MOCK: Create protocol-based mocks
+    FIX->>SUT: Instantiate real SUT with mocked deps
+
+    alt Symlink test (LinkManager)
+        FIX->>FS: Create tmp_path directories
+        SUT->>FS: Real symlink operations
+        FS-->>SUT: resolve() works correctly
+    else Network/Extraction test
+        SUT->>MOCK: Call mocked network/fs
+        MOCK-->>SUT: Return configured responses
+    end
+
+    PY->>SUT: Execute test assertions
+    PY->>PY: Pass/Fail + coverage
 ```
 
-**Use helper functions for shared setup, not for shared assertions:**
+---
 
-```python
-# ❌ WRONG: Shared assertion logic
-def assert_symlinks_correct(result, expected):
-    assert result.symlink_count == expected.count
-    assert result.targets == expected.targets
+## 11. Adding a New Platform — Test Flow
 
-def test_case_1():
-    assert_symlinks_correct(result1, expected1)
+```mermaid
+graph TD
+    subgraph STEP1["1. PlatformAdapter"]
+        A1["Create adapter in platform_adapters.py"]
+        A2["Set api_base, host_base, headers"]
+        A3["Implement URL builders"]
+    end
 
-def test_case_2():
-    assert_symlinks_correct(result2, expected2)
+    subgraph STEP2["2. Marker Fetcher"]
+        B1["Create subclass of BaseReleaseFetcher"]
+        B2["Set platform = 'new-platform'"]
+        B3["Zero method overrides"]
+    end
 
-# ✅ CORRECT: Shared setup, explicit assertions
-@pytest.fixture
-def symlink_environment(tmp_path):
-    # Shared setup
-    ...
+    subgraph STEP3["3. ForkConfig"]
+        C1["Add entry in common.py"]
+        C2["Set platform field"]
+        C3["Configure repo, archive, version"]
+    end
 
-def test_case_1(symlink_environment):
-    # Explicit, readable assertions
-    assert symlink_environment["symlinks"]["main"].exists()
-    assert symlink_environment["symlinks"]["main"].resolve() == expected_target
+    subgraph STEP4["4. Tests (11+ new tests)"]
+        D1["PlatformAdapter URL tests<br/>(Pattern 8, test_forgejo_fetcher.py)"]
+        D2["Adapter selection test<br/>(TestAdapterSelection, test_base_release_fetcher.py)"]
+        D3["ForkConfig.platform dispatch test<br/>(TestForkConfigPlatformDispatch, test_cli.py)"]
+        D4["update_all_managed_forks filter test<br/>(TestUpdateAllManagedForksPlatformFiltering)"]
+        D5["_build_download_url delegation test<br/>(TestBuildDownloadUrl)"]
+        D6["ReleaseManager adapter integration<br/>(TestReleaseManagerForgejoAdapter)"]
+    end
+
+    A1 --> A2 --> A3
+    B1 --> B2 --> B3
+    C1 --> C2 --> C3
+    D1 --> D2 --> D3 --> D4
+
+    A3 -.-> D1
+    B3 -.-> D2
+    C3 -.-> D3
+    B2 -.-> D5
+    A1 -.-> D6
+
+    style STEP1 fill:#e1f5e1
+    style STEP2 fill:#e1f5e1
+    style STEP3 fill:#e1f5e1
+    style STEP4 fill:#fff4e1
 ```
 
-**Signs of DRY violations:**
+---
 
-1. **Copy-paste tests** - Same test with different data → Use `@pytest.mark.parametrize`
-2. **Multiple assertions on same object** - Test verifies too much → Split into separate tests
-3. **Helper assertion functions** - Hides test intent → Make assertions explicit
-4. **Duplicate fixtures** - Same fixture in multiple files → Move to `conftest.py`
-5. **Overlapping test coverage** - Multiple tests verify same behavior → Consolidate or clarify scope
+## 12. New Source Modules — Extracted from LinkManager
 
-## Fixtures
+> LinkManager (~400 lines) was refactored into 5 focused modules. Each has its own test file.
 
-**See [`FIXTURES.md`](FIXTURES.md) for comprehensive fixture documentation.**
+```mermaid
+graph LR
+    subgraph EXTRACTED["Extracted Modules"]
+        VF["version_finder.py<br/>Version discovery & dedup<br/>find_version_candidates()"]
+        CS["candidate_selection.py<br/>Top-3 candidate selection<br/>select_top_3_candidates()"]
+        LS["link_status.py<br/>Read-only link inspection<br/>list_links(), get_link_status()"]
+        SO["symlink_operations.py<br/>Symlink CRUD<br/>create_symlink_specs(), cleanup_symlinks()"]
+        PO["prune_operations.py<br/>Prune plan & execution<br/>get_installed_versions(), execute_prune()"]
+        RO["release_operations.py<br/>Release removal<br/>remove_release()"]
+    end
 
-The test suite uses **factory-based fixtures** to reduce duplication and improve flexibility. Key fixtures include:
+    subgraph TESTS["Test Files"]
+        TVF["test_version_finder.py<br/>19 tests"]
+        TLS["test_link_status.py<br/>16 tests"]
+        TSO["test_symlink_operations.py<br/>14 tests"]
+        TPO["test_prune_operations.py<br/>20 tests"]
+        TRO["test_release_operations.py<br/>16 tests"]
+    end
 
-| Category | Key Fixtures | Purpose |
-|----------|--------------|---------|
-| **Factories** | `mock_network_factory`, `mock_filesystem_factory`, `sample_archive_factory` | Configurable mock creation |
-| **Test Data** | `test_data` | Centralized fork configurations |
-| **Fork Fixtures** | `fork`, `fork_repo`, `fork_archive_format` | Parametrized fork testing |
-| **Environment** | `test_environment_builder` | Fluent test environment setup |
-| **Components** | `release_manager`, `link_manager`, `github_fetcher` | SUT creation with mocked deps |
+    VF --> TVF
+    CS -.-> TVF
+    LS --> TLS
+    SO --> TSO
+    PO --> TPO
+    RO --> TRO
 
-### Quick Example
-
-```python
-# Factory-based mocking
-def test_custom_scenario(mock_network_factory, test_environment_builder):
-    mock_network = mock_network_factory(rate_limit=True)
-    env = test_environment_builder.with_extract_dir().build()
-    
-    # Test code using configured mocks and environment
+    style EXTRACTED fill:#e1f5e1
+    style TESTS fill:#fff4e1
 ```
 
-For complete fixture documentation including all parameters and usage examples, see [`FIXTURES.md`](FIXTURES.md).
+**Module responsibilities:**
 
-## Test Patterns
+| Module                   | Responsibility                                | Key Functions                                  |
+| ------------------------ | --------------------------------------------- | ---------------------------------------------- |
+| `version_finder.py`      | Scan directories, parse versions, deduplicate | `find_version_candidates()`                    |
+| `candidate_selection.py` | Select top-3 candidates for symlinks          | `select_top_3_candidates()`                    |
+| `link_status.py`         | Read-only link inspection                     | `list_links()`, `get_link_status()`            |
+| `symlink_operations.py`  | Symlink CRUD (create, cleanup, manage)        | `create_symlink_specs()`, `cleanup_symlinks()` |
+| `prune_operations.py`    | Prune plan computation & execution            | `get_installed_versions()`, `execute_prune()`  |
+| `release_operations.py`  | Remove specific releases                      | `remove_release()`                             |
 
-### Pattern 1: Complete Workflow Test
+---
 
-```python
-def test_fetch_and_extract_complete_workflow(
-    self,
-    mocker: Any,
-    mock_network_client: Any,
-    mock_filesystem_client: Any,
-    mock_tarfile_operations: Any,
-    mock_urllib_download: Any,
-    mock_builtin_open: Any,
-) -> None:
-    """Test complete download and extraction workflow."""
-    # 1. Arrange: Configure all mocks
-    mock_filesystem_client.exists.side_effect = lambda p: p in expected_paths
-    mock_network_client.get.return_value = subprocess.CompletedProcess(...)
-    mock_tarfile_operations(members=[...])
-    mock_urllib_download(chunks=[b"data", b""])
-    
-    # 2. Act: Execute workflow
-    result = fetcher.fetch_and_extract(...)
-    
-    # 3. Assert: Verify results and mock interactions
-    assert result == expected_path
-    mock_filesystem_client.symlink_to.assert_called()
+## 13. Coverage Strategy — What Gets Covered by What
+
+```mermaid
+graph TD
+    subgraph E2E_COV["One E2E Test Covers 8+ Modules"]
+        USER["User: 'fetch latest GE-Proton'"]
+        CLI_MOD["cli.py — argument parsing"]
+        FETCHER_MOD["github_fetcher.py — orchestrate()"]
+        RELEASE_MOD["release_manager.py — find_asset()"]
+        DOWNLOAD_MOD["asset_downloader.py — download()"]
+        EXTRACT_MOD["archive_extractor.py — extract()"]
+        VERSION_MOD["version_finder.py — discover versions"]
+        CANDIDATE_MOD["candidate_selection.py — select top-3"]
+        SYMLINK_MOD["symlink_operations.py — create symlinks"]
+        LINK_STATUS_MOD["link_status.py — verify links"]
+        RESULT["Symlinks created ✓"]
+    end
+
+    USER --> CLI_MOD --> FETCHER_MOD --> RELEASE_MOD --> DOWNLOAD_MOD --> EXTRACT_MOD --> VERSION_MOD --> CANDIDATE_MOD --> SYMLINK_MOD --> LINK_STATUS_MOD --> RESULT
+
+    style E2E_COV fill:#e1f5e1
 ```
 
-### Pattern 2: Error Handling Test
+---
 
-```python
-def test_network_error_handling(
-    self,
-    mock_network_client: Any,
-    mock_filesystem_client: Any,
-) -> None:
-    """Test handling of network errors."""
-    # Arrange: Configure error response
-    mock_network_client.get.return_value = subprocess.CompletedProcess(
-        returncode=22, stderr="404 Not Found"
-    )
-    
-    # Act & Assert: Verify exception raised
-    with pytest.raises(NetworkError, match="404"):
-        fetcher.fetch_and_extract(...)
+## 14. Test Suite Statistics & Quick Reference
+
+```mermaid
+mindmap
+    root((Test Suite - 331 tests))
+        Files
+            conftest.py - shared fixtures
+            test_cli.py - 31 tests - CLI main entry
+            test_cli_dispatch.py - 30 tests - CLI dispatch logic
+            test_base_release_fetcher.py - 25 tests - shared workflow
+            test_prune.py - 27 tests - prune feature
+            test_release_manager_e2e.py - 28 tests - discovery
+            test_integration.py - 22 tests - NetworkClient, Spinner
+            test_prune_operations.py - 20 tests - prune standalone ops
+            test_version_finder.py - 19 tests - version discovery
+            test_link_status.py - 16 tests - link inspection
+            test_release_operations.py - 16 tests - release removal
+            test_forgejo_fetcher.py - 23 tests - Forgejo + adapters
+            test_symlink_operations.py - 14 tests - symlink CRUD
+            test_github_fetcher.py - 12 tests - GitHub edge cases
+            test_extraction.py - 12 tests - archive extraction
+            test_link_manager_e2e.py - 10 tests - symlink E2E
+            test_utils.py - 10 tests - version parsing
+            test_cli_handlers.py - 9 tests - CLI handler functions
+            test_cli_validators.py - 7 tests - CLI validation
+        Stats
+            18 test files
+            331 tests total
+            ~85% coverage
+            <0.5s execution
+        Markers
+            integration
+            unit
+            slow
+        Commands
+            uv run pytest -xvs
+            uv run pytest -k ge_proton
+            uv run pytest --cov=protonfetcher
+            uv run make quality
+        Recent Additions
+            2026-05 - 8 new test files (323 → 331)
+            CLI split: dispatch, handlers, validators
+            New modules: version_finder, prune_operations,
+            release_operations, symlink_operations,
+            link_status, candidate_selection
+            Adapter selection tests
+            URL delegation tests
+            Platform dispatch tests
+            ReleaseManager adapter tests
 ```
 
-### Pattern 3: Parametrized Fork Test
+---
 
-```python
-@pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS])
-def test_fork_specific_behavior(
-    self,
-    fork: ForkName,
-    mock_filesystem_client: Any,
-    fork_repo: str,
-) -> None:
-    """Test behavior across all forks."""
-    # Arrange
-    mock_filesystem_client.exists.return_value = True
-    
-    # Act
-    result = link_manager.find_tag_directory(extract_dir, tag, fork)
-    
-    # Assert
-    assert result is not None
+## 15. conftest.py Fixture Architecture
+
+```mermaid
+graph TB
+    subgraph ROOT["conftest.py — Fixture Hierarchy"]
+        subgraph PARAM["Parametrized Fixtures"]
+            FORK["fork<br/>params=[GE_PROTON, PROTON_EM, CACHYOS]"]
+        end
+
+        subgraph FACTORY_FIXTURES["Factory Fixtures"]
+            NET_FACT["mock_network_factory<br/>configurable mock creation"]
+            FS_FACT["mock_filesystem_factory<br/>configurable FS mock"]
+            ARCH_FACT["sample_archive_factory<br/>tarball simulation"]
+        end
+
+        subgraph MOCK_FIXTURES["Mock Fixtures"]
+            MC_NET["mock_network_client"]
+            MC_FS["mock_filesystem_client"]
+            MC_TAR["mock_tarfile_operations"]
+            MC_URL["mock_urllib_download"]
+            MC_SUB["mock_subprocess_tar"]
+            MC_OPEN["mock_builtin_open"]
+            MC_RATE["mock_network_with_rate_limit"]
+        end
+
+        subgraph DATA_FIXTURES["Data Fixtures"]
+            TDATA["test_data<br/>fork configurations"]
+            FREPO["fork_repo"]
+            FFORMAT["fork_archive_format"]
+        end
+
+        subgraph ENV_FIXTURES["Environment Fixtures"]
+            ENVB["test_environment_builder<br/>fluent builder pattern"]
+        end
+
+        subgraph SUT_FIXTURES["SUT Fixtures"]
+            FMGR["release_manager"]
+            LMGR["link_manager"]
+            GFETCH["github_fetcher"]
+        end
+
+        FORK --> FREPO
+        FORK --> FFORMAT
+        TDATA --> FORK
+
+        NET_FACT --> MC_NET
+        NET_FACT --> MC_RATE
+        FS_FACT --> MC_FS
+
+        MC_NET --> FMGR
+        MC_NET --> GFETCH
+        MC_FS --> LMGR
+        MC_FS --> FMGR
+        MC_FS --> GFETCH
+        ENVB --> SUT_FIXTURES
+    end
+
+    style ROOT fill:#f0f0f0
+    style PARAM fill:#e1f5e1
+    style FACTORY_FIXTURES fill:#fff4e1
+    style MOCK_FIXTURES fill:#f5e1e1
+    style DATA_FIXTURES fill:#e1f0f5
+    style ENV_FIXTURES fill:#f5e1f5
+    style SUT_FIXTURES fill:#e1f5e1
 ```
 
-### Pattern 4: Integration Test with Real Components
+---
 
-```python
-def test_link_manager_with_real_filesystem(
-    self,
-    tmp_path: Path,
-) -> None:
-    """Test LinkManager with real filesystem."""
-    # Arrange: Use real filesystem in tmp_path
-    extract_dir = tmp_path / "compatibilitytools.d"
-    extract_dir.mkdir()
-    
-    # Create real directories
-    (extract_dir / "GE-Proton10-20").mkdir()
-    
-    # Use real FileSystemClient
-    fs = FileSystemClient()
-    link_manager = LinkManager(fs)
-    
-    # Act
-    link_manager.manage_proton_links(extract_dir, "GE-Proton10-20", ForkName.GE_PROTON)
-    
-    # Assert: Verify real symlinks created
-    assert (extract_dir / "GE-Proton").is_symlink()
+## 16. New Test Classes — 2026-05 Refinement
+
+```mermaid
+graph TB
+    subgraph NEW_CLASSES["8 New Test Files (323 → 331)"]
+        subgraph BASE_TESTS["test_base_release_fetcher.py — 8 tests"]
+            AT["TestAdapterSelection<br/>2 tests<br/>Verify adapter per fetcher"]
+            BD["TestBuildDownloadUrl<br/>2 tests<br/>Verify URL per platform"]
+            HA["TestHandleAlreadyExtracted<br/>2 tests<br/>Verify DRY helper behavior"]
+            UF["TestUpdateAllManagedForksPlatformFiltering<br/>2 tests<br/>Verify platform filtering"]
+        end
+
+        subgraph CLI_TESTS["test_cli.py + test_cli_dispatch.py — 4 tests"]
+            FD["TestForkConfigPlatformDispatch<br/>4 tests<br/>Verify CLI dispatch per fork"]
+        end
+
+        subgraph RM_TESTS["test_release_manager_e2e.py — 5 tests"]
+            RA["TestReleaseManagerForgejoAdapter<br/>5 tests<br/>Verify adapter integration"]
+        end
+
+        subgraph FJ_TESTS["test_forgejo_fetcher.py — 1 test"]
+            GA["test_github_adapter_url_construction<br/>1 test<br/>Symmetric adapter tests"]
+        end
+
+        subgraph CLI_SPLIT["test_cli_dispatch.py — 30 tests"]
+            CD["CLI dispatch logic<br/>30 tests<br/>Verify operation routing per flag"]
+        end
+
+        subgraph CLI_HANDLERS["test_cli_handlers.py — 9 tests"]
+            CH["CLI handler functions<br/>9 tests<br/>Verify _handle_* function behavior"]
+        end
+
+        subgraph CLI_VALIDATORS["test_cli_validators.py — 7 tests"]
+            CV["CLI validation<br/>7 tests<br/>Verify mutual exclusivity, defaults"]
+        end
+
+        subgraph PRUNE_OPS["test_prune_operations.py — 20 tests"]
+            PO["prune_operations.py<br/>20 tests<br/>Standalone prune functions"]
+        end
+
+        subgraph VERSION["test_version_finder.py — 19 tests"]
+            VF["version_finder.py<br/>19 tests<br/>Version discovery & dedup"]
+        end
+
+        subgraph LINK_STATUS["test_link_status.py — 16 tests"]
+            LS["link_status.py<br/>16 tests<br/>Read-only link inspection"]
+        end
+
+        subgraph RELEASE_OPS["test_release_operations.py — 16 tests"]
+            RO["release_operations.py<br/>16 tests<br/>Release removal functions"]
+        end
+
+        subgraph SYMLINK_OPS["test_symlink_operations.py — 14 tests"]
+            SO["symlink_operations.py<br/>14 tests<br/>Symlink CRUD operations"]
+        end
+    end
+
+    AT --> BASE_TESTS
+    BD --> BASE_TESTS
+    HA --> BASE_TESTS
+    UF --> BASE_TESTS
+    FD --> CLI_TESTS
+    RA --> RM_TESTS
+    GA --> FJ_TESTS
+    CD --> CLI_SPLIT
+    CH --> CLI_HANDLERS
+    CV --> CLI_VALIDATORS
+    PO --> PRUNE_OPS
+    VF --> VERSION
+    LS --> LINK_STATUS
+    RO --> RELEASE_OPS
+    SO --> SYMLINK_OPS
+
+    style NEW_CLASSES fill:#e1f5e1
+    style BASE_TESTS fill:#e1f0f5
+    style CLI_TESTS fill:#fff4e1
+    style RM_TESTS fill:#f5e1e1
+    style FJ_TESTS fill:#e1f5e1
+    style CLI_SPLIT fill:#e1f5e1
+    style CLI_HANDLERS fill:#e1f5e1
+    style CLI_VALIDATORS fill:#e1f5e1
+    style PRUNE_OPS fill:#e1f5e1
+    style VERSION fill:#e1f5e1
+    style LINK_STATUS fill:#e1f5e1
+    style RELEASE_OPS fill:#e1f5e1
+    style SYMLINK_OPS fill:#e1f5e1
 ```
 
-### Pattern 5: CLI Test with Argument Parsing
-
-```python
-def test_cli_argument_parsing(self) -> None:
-    """Test CLI argument parsing."""
-    with patch.object(sys, "argv", ["protonfetcher", "--list"]):
-        args = parse_arguments()
-        assert args.list is True
-```
-
-### Pattern 6: CLI Test with Mocked Fetcher
-
-```python
-def test_list_releases_operation(
-    self,
-    mocker: Any,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Test CLI --list operation."""
-    # Arrange: Mock fetcher
-    mock_fetcher = mocker.MagicMock()
-    mock_fetcher.release_manager.list_recent_releases.return_value = [...]
-
-    mocker.patch("protonfetcher.cli.GitHubReleaseFetcher", return_value=mock_fetcher)
-    mocker.patch("protonfetcher.cli.sys.argv", ["protonfetcher", "--list"])
-
-    # Act
-    main()
-
-    # Assert
-    captured = capsys.readouterr()
-    assert "GE-Proton10-20" in captured.out
-    assert "Success" in captured.out
-```
-
-### Pattern 7: Feature Test with Multiple Test Types
-
-New features should include comprehensive test coverage across multiple test types:
-
-```python
-# test_prune.py - Example feature test structure
-
-class TestPruneArgumentParsing:
-    """Test CLI argument parsing for --prune flag."""
-    
-    def test_parse_prune_flag(self) -> None: ...
-    def test_parse_prune_with_keep(self) -> None: ...
-    def test_parse_prune_mutually_exclusive_with_release(self) -> None: ...
-
-class TestPruneOperationFlow:
-    """Test the --prune operation flow."""
-    
-    def test_prune_no_unmanaged_releases(self) -> None: ...
-    def test_prune_with_dry_run(self) -> None: ...
-    def test_prune_with_confirmation_yes(self) -> None: ...
-
-class TestLinkManagerPruneIntegration:
-    """Integration tests for LinkManager.prune_releases()."""
-    
-    def test_prune_releases_protects_linked_versions(self) -> None: ...
-    def test_prune_releases_dry_run_no_deletion(self) -> None: ...
-
-class TestPruneE2E:
-    """End-to-end tests for prune functionality."""
-    
-    def test_prune_e2e_all_forks_no_prunable(self) -> None: ...
-    def test_prune_e2e_with_prunable_versions(self) -> None: ...
-```
-
-**Feature test checklist:**
-- ✅ Argument parsing tests (all flags, mutual exclusivity)
-- ✅ Operation flow tests (all scenarios, confirmation, dry-run)
-- ✅ Integration tests (real filesystem where needed)
-- ✅ E2E tests (complete workflow verification)
-- ✅ Error handling tests (edge cases, invalid inputs)
-
-## Running Tests
-
-### Basic Commands
-
-```bash
-# Run all tests
-uv run pytest -xvs
-
-# Run specific test file
-uv run pytest tests/test_prune.py -xvs
-
-# Run specific test class
-uv run pytest tests/test_prune.py::TestPruneOperationFlow -xvs
-
-# Run specific test
-uv run pytest tests/test_prune.py::TestPruneOperationFlow::test_prune_with_dry_run -xvs
-
-# Run tests for specific fork
-uv run pytest tests/test_link_manager_e2e.py -k "ge_proton" -xvs
-
-# Run with coverage
-uv run pytest --cov=protonfetcher --cov-report=term-missing
-
-# Run prune tests only
-uv run pytest tests/test_prune.py -v
-```
-
-## Testing New Features
-
-### Feature Test Template
-
-When adding a new feature, follow the `test_prune.py` template:
-
-1. **Argument Parsing Tests** - Verify CLI flags parse correctly
-2. **Operation Flow Tests** - Test the feature's main workflow
-3. **Integration Tests** - Test with real components where mocks fail
-4. **E2E Tests** - Test complete user scenarios
-
-### Example: Prune Feature Tests
-
-The `test_prune.py` file (27 tests) demonstrates comprehensive feature testing:
-
-| Test Category | Count | Purpose |
-|---------------|-------|---------|
-| Argument Parsing | 10 | CLI flag validation, mutual exclusivity |
-| Operation Flow | 8 | Dry-run, confirmation, single/all forks |
-| LinkManager Integration | 7 | Real filesystem, version protection |
-| E2E Tests | 2 | Complete workflow verification |
-
-**Key design decisions:**
-- Uses real `FileSystemClient` for symlink operations (mocks don't handle `resolve()`)
-- Tests all three forks (GE-Proton, Proton-EM, CachyOS)
-- Verifies linked version protection
-- Tests confirmation workflow (yes/no/abort)
-
-## Test Markers
-
-```bash
-# Run only integration tests
-uv run pytest -m integration
-
-# Run only unit tests
-uv run pytest -m unit
-
-# Skip slow tests
-uv run pytest -m "not slow"
-```
-
-## Mocking Best Practices
-
-### DO: Mock Protocols
-
-```python
-# ✅ Correct: Mock the protocol
-mock_fs = mocker.MagicMock(spec=FileSystemClientProtocol)
-mock_fs.exists.return_value = True
-```
-
-### DON'T: Mock the SUT
-
-```python
-# ❌ Wrong: Mocking the class under test
-mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
-```
-
-### DO: Use Real Filesystem for Symlinks
-
-```python
-# ✅ Correct: Real filesystem for symlink testing
-from protonfetcher.filesystem import FileSystemClient
-from protonfetcher.link_manager import LinkManager
-
-def test_symlink(tmp_path: Path):
-    fs = FileSystemClient()
-    lm = LinkManager(fs)
-    # Test with real symlinks
-```
-
-### DON'T: Mock Symlink Operations
-
-```python
-# ❌ Wrong: Mocked filesystem for symlinks
-def test_symlink(mock_filesystem_client: Any):
-    lm = LinkManager(mock_filesystem_client)
-    # resolve() returns MagicMock - assertions will fail!
-```
-
-### DO: Use Fixtures for Common Setups
-
-```python
-# ✅ Correct: Use fixture
-def test_extraction(mock_tarfile_operations: Any):
-    mocks = mock_tarfile_operations(members=[...])
-```
-
-### DON'T: Repeat Mock Setup
-
-```python
-# ❌ Wrong: Repeated setup in every test
-mock_tarfile = mocker.patch("tarfile.open")
-mock_tar = mocker.MagicMock()
-mock_tar.getmembers.return_value = [...]
-```
-
-### DO: Verify Mock Interactions
-
-```python
-# ✅ Correct: Verify mock was used correctly
-mock_filesystem_client.symlink_to.assert_called_with(
-    link_path, target_path, target_is_directory=True
-)
-```
-
-### DON'T: Only Check Return Values
-
-```python
-# ❌ Incomplete: Only checking result
-assert result == expected
-
-# ✅ Better: Also verify interactions
-assert result == expected
-mock_network_client.get.assert_called_once()
-```
-
-## Test Data Guidelines
-
-### Test Data Fixture
-
-Use the centralized `test_data` fixture for consistent test data:
-
-```python
-def test_fork_config(test_data: dict[str, Any]):
-    ge_data = test_data["FORKS"][ForkName.GE_PROTON]
-    assert ge_data["repo"] == "GloriousEggroll/proton-ge-custom"
-```
-
-### Temporary Paths
-
-Always use `tmp_path` for temporary files:
-
-```python
-def test_with_temp_files(tmp_path: Path):
-    temp_file = tmp_path / "test.txt"
-    temp_file.write_text("data")
-    # Automatically cleaned up after test
-```
-
-### Parametrized Data
-
-Use parametrized fixtures for fork-specific data:
-
-```python
-@pytest.fixture(params=[ForkName.GE_PROTON, ForkName.PROTON_EM])
-def fork_data(request: pytest.FixtureRequest, test_data: dict) -> dict:
-    return test_data["FORKS"][request.param]
-```
-
-## Error Testing
-
-### Exception Type Testing
-
-```python
-def test_invalid_input_raises_error():
-    with pytest.raises(LinkManagementError, match="does not exist"):
-        link_manager.remove_release(extract_dir, "NonExistent", ForkName.GE_PROTON)
-```
-
-### Error Message Testing
-
-```python
-def test_network_error_message(mock_network_client: Any):
-    mock_network_client.get.return_value = subprocess.CompletedProcess(
-        returncode=22, stderr="404 Not Found"
-    )
-    
-    with pytest.raises(NetworkError, match="404"):
-        fetcher.fetch_and_extract(...)
-```
-
-### Exception Chaining Testing
-
-```python
-def test_exception_chaining():
-    try:
-        # Code that raises chained exception
-        pass
-    except ProtonFetcherError as e:
-        assert e.__cause__ is not None
-```
-
-## Integration Testing
-
-### Network Integration
-
-The `test_network_integration.py` file tests NetworkClient with mocked subprocess:
-
-```python
-def test_get_follows_redirects_mocked(mocker: Any):
-    mock_response = subprocess.CompletedProcess(...)
-    mock_run = mocker.patch("protonfetcher.network.subprocess.run", return_value=mock_response)
-    
-    client = NetworkClient(timeout=30)
-    result = client.get("https://example.com/api")
-    
-    # Verify curl command structure
-    call_args = mock_run.call_args[0][0]
-    assert "-L" in call_args  # Follow redirects
-```
-
-### Filesystem Integration
-
-Use real filesystem in `tmp_path` for integration tests:
-
-```python
-def test_symlink_creation(tmp_path: Path):
-    extract_dir = tmp_path / "compatibilitytools.d"
-    extract_dir.mkdir()
-
-    # Use real FileSystemClient
-    fs = FileSystemClient()
-    link_manager = LinkManager(fs)
-
-    # Create real symlink
-    link_manager.create_symlinks(...)
-
-    # Verify real symlink
-    assert (extract_dir / "GE-Proton").is_symlink()
-```
-
-**For prune-specific testing, see `test_prune.py`:**
-- `TestLinkManagerPruneIntegration` - Real filesystem for symlink protection tests
-- `TestPruneE2E` - End-to-end workflow with real directories
-- All tests use `tmp_path` for isolation
-
-## CI/CD Integration
-
-### Quality Checks
-
-```bash
-# Run quality checks
-make quality
-
-# Run complexity checks
-make radon
-
-# Run all tests
-make test
-```
-
-### Coverage Requirements
-
-Tests should maintain:
-- High branch coverage for error handling paths
-- Full coverage of protocol implementations
-- Comprehensive fork-specific testing
-
-## Troubleshooting
-
-### Common Issues
-
-#### Mock Not Called
-
-```python
-# Issue: Mock configured but not used
-# Solution: Verify SUT receives mocked dependencies
-
-fetcher = GitHubReleaseFetcher(
-    network_client=mock_network_client,  # ✅ Pass mock
-    file_system_client=mock_filesystem_client,
-)
-```
-
-#### Side Effect Not Triggered
-
-```python
-# Issue: side_effect not matching call signature
-# Solution: Check argument types and order
-
-mock_fs.exists.side_effect = lambda p: p in expected_paths
-# Ensure p is Path object, not string
-```
-
-#### Fixture Not Found
-
-```python
-# Issue: Fixture not in scope
-# Solution: Ensure fixture is in conftest.py or test file
-
-# In conftest.py (available to all tests)
-@pytest.fixture
-def my_fixture(): ...
-
-# Or in test file (available only to that file)
-@pytest.fixture
-def local_fixture(): ...
-```
-
-### Debugging Tips
-
-1. **Print Mock Calls**: `print(mock_object.call_args_list)`
-2. **Check Fixture Values**: Add `print()` in fixture to verify setup
-3. **Use pytest -s**: Show print output during tests
-4. **Use pytest --tb=long**: Full traceback on failures
-5. **Use caplog**: Capture and assert log messages
-
-```python
-def test_with_logging(caplog: pytest.LogCaptureFixture):
-    with caplog.at_level("DEBUG"):
-        # Code that logs
-        pass
-    
-    assert "Expected log message" in caplog.text
-```
-
-## Extending the Test Suite
-
-### Adding New Component Tests
-
-1. Create test file: `tests/test_new_component_e2e.py`
-2. Import fixtures from `conftest.py`
-3. Follow existing test patterns
-4. Add parametrized tests for all forks
-
-### Adding New Fixtures
-
-1. Add to `conftest.py` for global availability
-2. Follow naming convention: `mock_*` for mocks, `*_environment` for setups
-3. Document with docstrings and usage examples
-4. Type hint return values
-5. **Avoid default parameters** for fixtures that depend on parametrized fixtures
-
-**Fixture Documentation Template:**
-
-```python
-@pytest.fixture
-def my_new_fixture(...) -> ReturnType:
-    """
-    Brief description of fixture purpose.
-    
-    Detailed explanation if needed.
-    
-    Args:
-        param1: Description of parameters
-    
-    Returns:
-        Description of return value
-    
-    Usage:
-        def test_example(my_new_fixture):
-            # Example usage code
-            pass
-    """
-```
-
-### Adding Fork Support
-
-1. Add fork to parametrized `fork` fixture in `conftest.py`
-2. Update `test_data` fixture with fork config
-3. Add fork-specific test cases where behavior differs
-4. Ensure all parametrized tests include the new fork
-
-## Fixture Best Practices Summary
-
-### DO: Use Parametrized Fixtures
-
-```python
-# ✅ CORRECT: One test runs for all forks
-@pytest.mark.parametrize("fork", [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS])
-def test_all_forks(fork: ForkName, test_data: dict):
-    config = test_data["FORKS"][fork]
-    # Test fork-specific behavior
-```
-
-### DO: Use Centralized Test Data
-
-```python
-# ✅ CORRECT: Use test_data fixture
-def test_config(test_data: dict, fork: ForkName):
-    repo = test_data["FORKS"][fork]["repo"]
-    # Avoids hardcoding strings
-```
-
-### DO: Use Factory Fixtures with Indirect Parametrization
-
-```python
-# ✅ CORRECT: Use factory fixture
-@pytest.mark.parametrize("release_assets", [[{"name": "test.tar.gz"}]], indirect=True)
-def test_assets(release_assets):
-    # Uses parametrized factory data
-```
-
-### DO: Use Specialized Mocks for Error Scenarios
-
-```python
-# ✅ CORRECT: Use purpose-built mock
-def test_rate_limit(mock_network_with_rate_limit, mock_filesystem_client):
-    # Pre-configured for rate limit error
-```
-
-### DON'T: Hardcode Fork Values
-
-```python
-# ❌ WRONG: Misses other forks
-def test_ge_proton():
-    fork = ForkName.GE_PROTON
-    test_fork(fork)
-```
-
-### DON'T: Duplicate Fixture Setup
-
-```python
-# ❌ WRONG: Duplicate mock setup
-def test_one():
-    mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-    mock_network.get.return_value = ...
-
-def test_two():
-    mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
-    mock_network.get.return_value = ...  # Duplicate!
-
-# ✅ CORRECT: Use fixture
-def test_one(mock_network_client):
-    # Fixture provides consistent setup
-```
-
-### DON'T: Use Default Parameters for Parametrized Dependencies
-
-```python
-# ❌ WRONG: Default parameter conflicts with parametrization
-@pytest.fixture
-def my_fixture(tmp_path, fork: ForkName = ForkName.GE_PROTON):
-    # Will always use GE-Proton even when parametrized
-
-# ✅ CORRECT: Require explicit parameter
-@pytest.fixture
-def my_fixture(tmp_path, fork: ForkName):
-    # Properly uses the parametrized fork value
-```
+### Test Class Summary
+
+| Class                                        | File                                   | Tests | Purpose                                                    |
+| -------------------------------------------- | -------------------------------------- | ----- | ---------------------------------------------------------- |
+| `TestAdapterSelection`                       | `test_base_release_fetcher.py`         | 2     | Verify `github_adapter` / `forgejo_adapter` selection      |
+| `TestBuildDownloadUrl`                       | `test_base_release_fetcher.py`         | 2     | Verify `_build_download_url` delegates to adapter          |
+| `TestHandleAlreadyExtracted`                 | `test_base_release_fetcher.py`         | 2     | Verify DRY helper: skip vs. update paths                   |
+| `TestUpdateAllManagedForksPlatformFiltering` | `test_base_release_fetcher.py`         | 2     | Verify GitHub/Forgejo fork filtering                       |
+| `TestForkConfigPlatformDispatch`             | `test_cli.py` + `test_cli_dispatch.py` | 4     | Verify CLI dispatches DW-Proton→Forgejo, others→GitHub     |
+| `TestReleaseManagerForgejoAdapter`           | `test_release_manager_e2e.py`          | 5     | Verify adapter injection, URL construction, URL difference |
+| `test_github_adapter_url_construction`       | `test_forgejo_fetcher.py`              | 1     | Symmetric to existing `forgejo_adapter` tests              |
+| CLI dispatch logic                           | `test_cli_dispatch.py`                 | 30    | Verify operation routing per flag                          |
+| CLI handler functions                        | `test_cli_handlers.py`                 | 9     | Verify `_handle_*` function behavior                       |
+| CLI validation                               | `test_cli_validators.py`               | 7     | Verify mutual exclusivity, defaults                        |
+| prune_operations.py                          | `test_prune_operations.py`             | 20    | Standalone prune functions                                 |
+| version_finder.py                            | `test_version_finder.py`               | 19    | Version discovery & dedup                                  |
+| link_status.py                               | `test_link_status.py`                  | 16    | Read-only link inspection                                  |
+| release_operations.py                        | `test_release_operations.py`           | 16    | Release removal functions                                  |
+| symlink_operations.py                        | `test_symlink_operations.py`           | 14    | Symlink CRUD operations                                    |
