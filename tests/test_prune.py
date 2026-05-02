@@ -41,7 +41,7 @@ class TestPruneArgumentParsing:
             args = parse_args(build_parser())
             args = set_default_fork(args)
             assert args.prune is True
-            assert args.keep == 1  # default
+            assert args.keep is None  # default = prune all
 
     def test_parse_prune_with_keep(self) -> None:
         """Test parsing --prune with --keep parameter."""
@@ -153,21 +153,17 @@ class TestPruneArgumentParsing:
             # Validation-level conflict uses exit code 1
             assert exc_info.value.code == 1
 
-    def test_parse_prune_with_invalid_keep(
+    def test_parse_prune_with_zero_keep(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Test that --keep 0 is rejected."""
+        """Test that --keep 0 is accepted (prune all)."""
         import sys
         from unittest.mock import patch
 
         with patch.object(sys, "argv", ["protonfetcher", "--prune", "--keep", "0"]):
             args = parse_args(build_parser())
             args = set_default_fork(args)
-            with pytest.raises(SystemExit) as exc_info:
-                validate_mutually_exclusive_args(args)
-            assert exc_info.value.code == 1
-            captured = capsys.readouterr()
-            assert "--keep must be at least 1" in captured.out
+            assert args.keep == 0
 
     def test_parse_prune_with_negative_keep(
         self, capsys: pytest.CaptureFixture[str]
@@ -451,13 +447,13 @@ class TestPruneOperationFlow:
 class TestLinkManagerPruneIntegration:
     """Integration tests for LinkManager.prune_releases()."""
 
-    def test_prune_releases_protects_linked_versions(
+    def test_prune_releases_prunes_linked_versions_beyond_keep(
         self,
         link_manager: Any,
         mock_filesystem_client: Any,
         tmp_path: Path,
     ) -> None:
-        """Test that prune_releases protects versions referenced by symlinks."""
+        """Test symlink-aware pruning: keeps symlink targets, prunes extras."""
         # Arrange
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
@@ -477,9 +473,13 @@ class TestLinkManagerPruneIntegration:
         fs = FileSystemClient()
         real_link_manager = LinkManager(fs)
 
-        # Create symlink pointing to GE-Proton10-2 (older, outside top 3)
+        # Create 3 symlinks pointing to older versions (stale symlinks)
         main_link = extract_dir / "GE-Proton"
-        main_link.symlink_to(versions[3])  # GE-Proton10-2
+        fb1_link = extract_dir / "GE-Proton-Fallback"
+        fb2_link = extract_dir / "GE-Proton-Fallback2"
+        main_link.symlink_to(versions[2])  # GE-Proton10-3
+        fb1_link.symlink_to(versions[3])  # GE-Proton10-2
+        fb2_link.symlink_to(versions[4])  # GE-Proton10-1
 
         # Act
         kept, pruned = real_link_manager.prune_releases(
@@ -487,17 +487,16 @@ class TestLinkManagerPruneIntegration:
         )
 
         # Assert
-        # Top 3 newest unlinked (GE-Proton10-5, GE-Proton10-4, GE-Proton10-3) kept
-        # Plus GE-Proton10-2 is protected because it's linked
-        assert len(kept) == 4
-        assert "GE-Proton10-5" in kept
-        assert "GE-Proton10-4" in kept
+        # Keep targets of first 3 symlinks: 10-3, 10-2, 10-1
+        assert len(kept) == 3
         assert "GE-Proton10-3" in kept
         assert "GE-Proton10-2" in kept
+        assert "GE-Proton10-1" in kept
 
-        # Only GE-Proton10-1 is pruned
-        assert len(pruned) == 1
-        assert "GE-Proton10-1" in pruned
+        # Newer unlinked versions pruned
+        assert len(pruned) == 2
+        assert "GE-Proton10-5" in pruned
+        assert "GE-Proton10-4" in pruned
 
     def test_prune_releases_dry_run_no_deletion(
         self,
@@ -611,9 +610,9 @@ class TestLinkManagerPruneIntegration:
         real_link_manager = LinkManager(fs)
 
         # Act & Assert
-        with pytest.raises(ValueError, match="keep must be at least 1"):
+        with pytest.raises(ValueError, match="keep must be at least 0"):
             real_link_manager.prune_releases(
-                extract_dir, ForkName.GE_PROTON, keep=0, dry_run=True
+                extract_dir, ForkName.GE_PROTON, keep=-1, dry_run=True
             )
 
     def test_prune_releases_proton_em(

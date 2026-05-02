@@ -63,7 +63,7 @@ def print_prunable_versions(
     """Print prunable versions for a fork (installed but not linked)."""
     installed = link_manager.get_installed_versions(extract_dir, fork)
     linked = link_manager.get_linked_versions(extract_dir, fork)
-    prunable = [v for i, v in enumerate(installed, 1) if v not in linked and i > 3]
+    prunable = [v for v in installed if v not in linked]
     if prunable:
         print(f"\nPrunable {fork.value} versions ({len(prunable)}):")
         for version in prunable:
@@ -84,7 +84,7 @@ def print_links_for_fork(
     if show_versions:
         installed = link_manager.get_installed_versions(extract_dir, fork)
         linked = link_manager.get_linked_versions(extract_dir, fork)
-        prunable = [v for i, v in enumerate(installed, 1) if v not in linked and i > 3]
+        prunable = [v for v in installed if v not in linked]
     else:
         prunable = []
 

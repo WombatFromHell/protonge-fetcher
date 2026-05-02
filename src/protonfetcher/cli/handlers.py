@@ -235,8 +235,11 @@ def handle_prune_operation(
     explicit_fork = get_fork_from_args(args)
     forks_to_prune = [explicit_fork] if explicit_fork else list(FORKS.keys())
 
+    # None means prune all; otherwise use the explicit keep count
+    keep = args.keep if args.keep is not None else 0
+
     all_to_prune = _collect_prune_candidates(
-        fetcher, forgejo_fetcher, extract_dir, forks_to_prune, args.keep
+        fetcher, forgejo_fetcher, extract_dir, forks_to_prune, keep
     )
 
     total_to_prune = sum(len(v) for v in all_to_prune.values())
@@ -257,7 +260,7 @@ def handle_prune_operation(
     _confirm_deletion()
 
     total_pruned = _execute_prune(
-        fetcher, forgejo_fetcher, extract_dir, forks_to_prune, args.keep, all_to_prune
+        fetcher, forgejo_fetcher, extract_dir, forks_to_prune, keep, all_to_prune
     )
 
     print(f"\nPruned {total_pruned} release(s)")

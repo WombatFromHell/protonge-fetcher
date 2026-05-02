@@ -162,36 +162,73 @@ class TestComputePrunePlan:
         assert "GE-Proton10-2" in pruned
         assert "GE-Proton10-1" in pruned
 
-    def test_protects_linked_versions(self, tmp_path: Path) -> None:
-        """Test that linked versions are protected from pruning."""
+    def test_prunes_linked_versions_beyond_keep(self, tmp_path: Path) -> None:
+        """Test symlink-aware pruning: keeps symlink targets, prunes extras."""
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        # Create 5 GE-Proton version directories
+        # Create 5 GE-Proton version directories (higher number = newer)
         versions = []
         for i in range(5, 0, -1):
             v = extract_dir / f"GE-Proton10-{i}"
             v.mkdir()
             versions.append(v)
 
-        # Create symlink pointing to GE-Proton10-2 (older, outside top 3)
+        # Create 3 symlinks pointing to older versions (simulating stale symlinks)
         main_link = extract_dir / "GE-Proton"
-        main_link.symlink_to(versions[3])  # GE-Proton10-2
+        fb1_link = extract_dir / "GE-Proton-Fallback"
+        fb2_link = extract_dir / "GE-Proton-Fallback2"
+        main_link.symlink_to(versions[2])  # GE-Proton10-3
+        fb1_link.symlink_to(versions[3])  # GE-Proton10-2
+        fb2_link.symlink_to(versions[4])  # GE-Proton10-1
 
         kept, pruned = compute_prune_plan(
             extract_dir, ForkName.GE_PROTON, keep=3, file_system=FileSystemClient()
         )
 
-        # Top 3 newest unlinked should be kept
-        assert "GE-Proton10-5" in kept
-        assert "GE-Proton10-4" in kept
+        # Keep targets of first 3 symlinks: 10-3, 10-2, 10-1
         assert "GE-Proton10-3" in kept
-
-        # GE-Proton10-2 is protected because it's linked
         assert "GE-Proton10-2" in kept
-        # Only GE-Proton10-1 is pruned
-        assert len(pruned) == 1
-        assert "GE-Proton10-1" in pruned
+        assert "GE-Proton10-1" in kept
+        assert len(kept) == 3
+
+        # Newer unlinked versions are pruned
+        assert len(pruned) == 2
+        assert "GE-Proton10-5" in pruned
+        assert "GE-Proton10-4" in pruned
+
+    def test_prune_keep_one_removes_extra_symlink_targets(self, tmp_path: Path) -> None:
+        """Test keep=1: only main symlink target kept, extras pruned."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        # Create 3 Proton-EM version directories
+        versions = []
+        for i in [37, 36, 34]:
+            v = extract_dir / f"proton-EM-10.0-{i}"
+            v.mkdir()
+            versions.append(v)
+
+        # Create 3 symlinks: main → newest, fb1 → mid, fb2 → oldest
+        main_link = extract_dir / "Proton-EM"
+        fb1_link = extract_dir / "Proton-EM-Fallback"
+        fb2_link = extract_dir / "Proton-EM-Fallback2"
+        main_link.symlink_to(versions[0])  # proton-EM-10.0-37
+        fb1_link.symlink_to(versions[1])  # proton-EM-10.0-36
+        fb2_link.symlink_to(versions[2])  # proton-EM-10.0-34
+
+        kept, pruned = compute_prune_plan(
+            extract_dir, ForkName.PROTON_EM, keep=1, file_system=FileSystemClient()
+        )
+
+        # Only main symlink target kept
+        assert len(kept) == 1
+        assert "proton-EM-10.0-37" in kept
+
+        # Extra symlink targets + unlinked pruned
+        assert len(pruned) == 2
+        assert "proton-EM-10.0-36" in pruned
+        assert "proton-EM-10.0-34" in pruned
 
     def test_empty_directory(self, tmp_path: Path) -> None:
         """Test prune plan with no versions."""
@@ -312,8 +349,8 @@ class TestPruneReleases:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        with pytest.raises(ValueError, match="keep must be at least 1"):
-            prune_releases(extract_dir, ForkName.GE_PROTON, keep=0, dry_run=True)
+        with pytest.raises(ValueError, match="keep must be at least 0"):
+            prune_releases(extract_dir, ForkName.GE_PROTON, keep=-1, dry_run=True)
 
     def test_prune_releases_nothing_to_prune(
         self, symlink_environment: SymlinkEnvironment

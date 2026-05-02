@@ -497,14 +497,14 @@ class LinkManager:
         Args:
             extract_dir: Directory containing Proton installations
             fork: The Proton fork name to prune
-            keep: Number of newest unlinked versions to retain (default: 1)
+            keep: Number of newest unlinked versions to retain (0 = prune all)
             dry_run: If True, only report what would be removed
 
         Returns:
             Tuple of (kept_versions, pruned_versions) lists
 
         Raises:
-            ValueError: If keep is less than 1
+            ValueError: If keep is less than 0
         """
         return _prune_releases(
             extract_dir, fork, keep, dry_run, self.file_system_client

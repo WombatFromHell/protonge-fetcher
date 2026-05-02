@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 from .common import (
+    FORKS,
     FileSystemClientProtocol,
     ForkName,
     VersionCandidateList,
@@ -101,6 +102,20 @@ def _deduplicate_candidates(
     return deduplicated
 
 
+def _get_fork_link_names(extract_dir: Path, fork: ForkName) -> tuple[Path, Path, Path]:
+    """Get the three symlink paths for a fork.
+
+    Returns:
+        Tuple of (main, fb1, fb2) symlink paths
+    """
+    suffixes = FORKS[fork].link_names
+    return (
+        extract_dir / suffixes[0],
+        extract_dir / suffixes[1] if len(suffixes) > 1 else Path(),
+        extract_dir / suffixes[2] if len(suffixes) > 2 else Path(),
+    )
+
+
 def compute_prune_plan(
     extract_dir: Path,
     fork: ForkName,
@@ -109,13 +124,14 @@ def compute_prune_plan(
 ) -> tuple[list[str], list[str]]:
     """Compute which versions to keep and which to prune.
 
-    Keeps all versions currently referenced by symlinks, plus the N newest
-    unlinked versions. Only versions beyond that are pruned.
+    Respects symlink hierarchy: keeps the N newest versions referenced by
+    the first N managed symlinks (main, fb1, fb2). Extra symlinks beyond N
+    and their target directories are pruned.
 
     Args:
         extract_dir: Directory containing Proton installations
         fork: The Proton fork name to prune
-        keep: Number of newest unlinked versions to retain
+        keep: Number of newest versions to retain (via symlinks)
         file_system: File system client
 
     Returns:
@@ -126,18 +142,48 @@ def compute_prune_plan(
         logger.info(f"No {fork.value} installations found to prune")
         return [], []
 
-    linked = get_linked_versions(extract_dir, fork, file_system)
+    # Get symlink paths for this fork
+    main, fb1, fb2 = _get_fork_link_names(extract_dir, fork)
+    symlink_paths = [main, fb1, fb2]
 
-    # Keep all linked versions
-    kept: set[str] = set(linked)
+    # Build mapping: symlink_path -> target_dir_name
+    symlink_targets: dict[Path, str] = {}
+    for link in symlink_paths:
+        if file_system.is_symlink(link):
+            try:
+                target = file_system.resolve(link)
+                symlink_targets[link] = target.name
+            except OSError:
+                pass  # broken symlink
 
-    # Keep N newest unlinked versions
-    unlinked = [v for v in all_versions if v not in kept]
-    kept.update(unlinked[:keep])
+    if symlink_targets:
+        # Symlink-aware mode: keep targets of first N symlinks, prune extras
+        kept: set[str] = set()
+        for link in symlink_paths[:keep]:
+            if link in symlink_targets:
+                kept.add(symlink_targets[link])
 
-    pruned_versions = [v for v in all_versions if v not in kept]
+        extra_symlink_targets: set[str] = set()
+        for link in symlink_paths[keep:]:
+            if link in symlink_targets:
+                extra_symlink_targets.add(symlink_targets[link])
 
-    return list(kept), pruned_versions
+        pruned: list[str] = []
+        # First: versions referenced by extra symlinks (symlink + dir removed together)
+        for v in all_versions:
+            if v in extra_symlink_targets and v not in kept:
+                pruned.append(v)
+        # Then: other unlinked versions beyond keep count
+        for v in all_versions:
+            if v not in kept and v not in pruned:
+                pruned.append(v)
+
+        return list(kept), pruned
+    else:
+        # No symlinks: fall back to version-based keeping
+        kept_versions = all_versions[:keep]
+        pruned_versions = all_versions[keep:]
+        return kept_versions, pruned_versions
 
 
 def execute_prune_removals(
@@ -172,15 +218,18 @@ def prune_releases(
     dry_run: bool = False,
     file_system: FileSystemClientProtocol | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Remove old unmanaged Proton releases.
+    """Remove old Proton releases beyond the keep count.
 
-    Keeps all versions currently referenced by symlinks, plus the N newest
-    unlinked versions. Only versions beyond that are removed (default: 1).
+    Respects symlink hierarchy: keeps the first N managed symlinks (main,
+    fb1, fb2) pointing to the N newest versions. Extra symlinks beyond N
+    and their target directories are pruned.
+
+    When keep=0, all versions are pruned (no versions kept).
 
     Args:
         extract_dir: Directory containing Proton installations
         fork: The Proton fork name to prune
-        keep: Number of newest unlinked versions to retain (default: 1)
+        keep: Number of symlinked versions to retain (0 = prune all)
         dry_run: If True, only report what would be removed
         file_system: File system client (uses default if None)
 
@@ -188,10 +237,10 @@ def prune_releases(
         Tuple of (kept_versions, pruned_versions) lists
 
     Raises:
-        ValueError: If keep is less than 1
+        ValueError: If keep is less than 0
     """
-    if keep < 1:
-        raise ValueError("keep must be at least 1")
+    if keep < 0:
+        raise ValueError("keep must be at least 0")
 
     if file_system is None:
         file_system = FileSystemClient()

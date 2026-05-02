@@ -45,9 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--keep",
         type=int,
-        default=1,
+        default=None,
         metavar="N",
-        help="Number of newest versions to keep when pruning (default: 1)",
+        help="Number of newest versions to keep when pruning (default: prune all)",
     )
     parser.add_argument(
         "--debug",
