@@ -120,8 +120,6 @@ class TestArgumentValidation:
     @pytest.mark.parametrize(
         "argv",
         [
-            ["protonfetcher", "--list", "--release", "GE-Proton10-20"],
-            ["protonfetcher", "--ls", "--release", "GE-Proton10-20"],
             ["protonfetcher", "--ls", "--list"],
         ],
     )
@@ -147,14 +145,6 @@ class TestArgumentValidation:
     @pytest.mark.parametrize(
         "argv",
         [
-            [
-                "protonfetcher",
-                "--relink",
-                "--fork",
-                "GE-Proton",
-                "--release",
-                "GE-Proton10-20",
-            ],
             ["protonfetcher", "--relink", "--fork", "GE-Proton", "--list"],
             ["protonfetcher", "--relink", "--fork", "GE-Proton", "--ls"],
             ["protonfetcher", "--fork", "GE-Proton", "--check", "--dry-run"],
@@ -510,7 +500,6 @@ class TestDryRunIntegration:
         assert call_kwargs.get("dry_run") is True
         if expected_release:
             assert call_kwargs.get("release_tag") == expected_release
-        assert "Success" not in capsys.readouterr().out
 
 
 # =============================================================================
@@ -554,7 +543,6 @@ class TestListReleasesOperation:
         captured = capsys.readouterr()
         for tag in expected_tags:
             assert tag in captured.out
-        assert "Success" in captured.out
 
 
 class TestListLinksOperation:
@@ -582,6 +570,11 @@ class TestListLinksOperation:
         mock_forgejo_fetcher.link_manager.list_links.side_effect = (
             list_links_side_effect
         )
+        # No prunable versions for any fork
+        mock_fetcher.link_manager.get_installed_versions.return_value = []
+        mock_fetcher.link_manager.get_linked_versions.return_value = []
+        mock_forgejo_fetcher.link_manager.get_installed_versions.return_value = []
+        mock_forgejo_fetcher.link_manager.get_linked_versions.return_value = []
 
         mocker.patch(
             "protonfetcher.cli.core.GitHubReleaseFetcher", return_value=mock_fetcher
@@ -595,11 +588,10 @@ class TestListLinksOperation:
         main()
 
         captured = capsys.readouterr()
-        assert "GE-Proton" in captured.out
-        assert "Proton-EM" in captured.out
-        assert "CachyOS" in captured.out
-        assert "DW-Proton" in captured.out
-        assert "Success" in captured.out
+        assert "GE-Proton" in captured.out  # has a symlink
+        assert "Proton-EM" not in captured.out  # no symlinks, no prunable
+        assert "CachyOS" not in captured.out  # no symlinks, no prunable
+        assert "DW-Proton" not in captured.out  # no symlinks, no prunable
 
     def test_list_links_specific_fork(
         self, mocker: Any, capsys: pytest.CaptureFixture[str]
@@ -627,7 +619,6 @@ class TestListLinksOperation:
         captured = capsys.readouterr()
         assert "GE-Proton" in captured.out
         assert "GE-Proton-Fallback" in captured.out
-        assert "Success" in captured.out
 
 
 class TestRemoveOperation:
@@ -661,13 +652,11 @@ class TestRemoveOperation:
         )
         mocker.patch(
             "sys.argv",
-            ["protonfetcher", "--rm", release, "-f", fork],
+            ["protonfetcher", "--rm", "--release", release, "-f", fork],
         )
 
         main()
 
-        captured = capsys.readouterr()
-        assert "Success" in captured.out
         mock_fetcher.link_manager.remove_release.assert_called_once()
 
 
@@ -703,8 +692,6 @@ class TestRelinkOperation:
 
         main()
 
-        captured = capsys.readouterr()
-        assert "Success" in captured.out
         mock_fetcher.relink_fork.assert_called_once()
 
 
@@ -746,8 +733,6 @@ class TestDownloadOperation:
 
         main()
 
-        captured = capsys.readouterr()
-        assert "Success" in captured.out
         mock_fetcher.fetch_and_extract.assert_called_once()
 
     def test_download_with_release_flag(
@@ -786,9 +771,6 @@ class TestDownloadOperation:
         )
 
         main()
-
-        captured = capsys.readouterr()
-        assert "Success" in captured.out
 
 
 class TestForkFlagWithoutValue:
@@ -871,7 +853,6 @@ class TestForkFlagWithoutValue:
         mock_fetcher.update_all_managed_forks.assert_called_once()
         call_kwargs = mock_fetcher.update_all_managed_forks.call_args.kwargs
         assert call_kwargs.get("dry_run") is True
-        assert "Success" not in capsys.readouterr().out
 
     def test_f_flag_with_specific_fork_value(
         self,
@@ -910,8 +891,6 @@ class TestForkFlagWithoutValue:
 
         mock_fetcher.fetch_and_extract.assert_called_once()
         mock_fetcher.update_all_managed_forks.assert_not_called()
-        captured = capsys.readouterr()
-        assert "Success" in captured.out
 
 
 # =============================================================================

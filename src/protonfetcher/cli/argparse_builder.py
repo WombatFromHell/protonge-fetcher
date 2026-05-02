@@ -58,11 +58,6 @@ def build_parser() -> argparse.ArgumentParser:
     # Mutually exclusive operation group
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
-        "--release",
-        "-r",
-        help="Manually specify a release tag (e.g., GE-Proton10-11) to download instead of the latest",
-    )
-    group.add_argument(
         "--list",
         "-l",
         action="store_true",
@@ -84,11 +79,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Remove old releases for all forks, keeping the N newest (use with --fork for specific fork)",
     )
 
-    # --rm is not mutually exclusive; can be used with --fork
+    # --release is not mutually exclusive; can be used with --rm
+    parser.add_argument(
+        "--release",
+        "-r",
+        help="Manually specify a release tag (e.g., GE-Proton10-11) to download instead of the latest",
+    )
+
+    # --rm is not mutually exclusive; can be used with --fork or --release
     parser.add_argument(
         "--rm",
-        metavar="TAG",
-        help="Remove a release directory and its symlinks. Use with --fork to remove all symlinks for that fork.",
+        action="store_true",
+        help="Remove a release directory and its symlinks. Use with --fork to remove all symlinks for that fork, or with --release to remove a specific tag.",
     )
 
     parser.add_argument(

@@ -190,7 +190,6 @@ def cleanup_stale_symlinks(
             if file_system.is_symlink(link):
                 try:
                     file_system.unlink(link)
-                    logger.info("Removed dangling symlink: %s", link)
                 except OSError as e:
                     logger.warning("Failed to remove symlink %s: %s", link, e)
         return
@@ -210,7 +209,6 @@ def cleanup_stale_symlinks(
             # Broken symlink — remove it
             try:
                 file_system.unlink(link)
-                logger.info("Removed broken symlink: %s", link)
             except OSError as e:
                 logger.warning("Failed to remove symlink %s: %s", link, e)
             continue
@@ -221,7 +219,6 @@ def cleanup_stale_symlinks(
             # Target directory gone — remove dangling symlink
             try:
                 file_system.unlink(link)
-                logger.info("Removed dangling symlink: %s", link)
             except OSError as e:
                 logger.warning("Failed to remove symlink %s: %s", link, e)
         elif target_name not in kept_set:
@@ -229,6 +226,5 @@ def cleanup_stale_symlinks(
             try:
                 file_system.unlink(link)
                 file_system.symlink_to(link, newest)
-                logger.info("Updated symlink: %s -> %s", link, newest)
             except OSError as e:
                 logger.warning("Failed to update symlink %s: %s", link, e)

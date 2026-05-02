@@ -489,15 +489,15 @@ class LinkManager:
         keep: int = 1,
         dry_run: bool = False,
     ) -> tuple[list[str], list[str]]:
-        """Remove old Proton releases, keeping the N newest versions total.
+        """Remove old unmanaged Proton releases.
 
-        Symlinks are part of the keep candidates — they are not protected
-        from pruning. Delegates to the prune_operations submodule.
+        Keeps all versions currently referenced by symlinks, plus the N newest
+        unlinked versions. Delegates to the prune_operations submodule.
 
         Args:
             extract_dir: Directory containing Proton installations
             fork: The Proton fork name to prune
-            keep: Number of newest versions to retain (default: 1)
+            keep: Number of newest unlinked versions to retain (default: 1)
             dry_run: If True, only report what would be removed
 
         Returns:

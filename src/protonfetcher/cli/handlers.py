@@ -16,7 +16,6 @@ from .fork_utils import (
     get_fork_fetcher,
     get_fork_from_args,
     get_link_names_for_fork,
-    print_success,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,8 +35,8 @@ def handle_ls_operation(
     forks_to_check = get_forks_to_list(args, list_all_forks)
     for fork in forks_to_check:
         lm = get_fork_fetcher(fetcher, forgejo_fetcher, fork).link_manager
-        print_links_for_fork(lm, extract_dir, fork, show_versions=True)
-    print("Success")
+        if not print_links_for_fork(lm, extract_dir, fork, show_versions=True):
+            continue
 
 
 def handle_list_operation(
@@ -56,7 +55,6 @@ def handle_list_operation(
     print("Recent releases:")
     for tag in tags:
         print(f"  {tag}")
-    print_success()
 
 
 def handle_relink_operation(
@@ -70,24 +68,40 @@ def handle_relink_operation(
     logger.info(f"Relinking {relink_fork} symlinks")
     fork_fetcher = get_fork_fetcher(fetcher, forgejo_fetcher, relink_fork)
     fork_fetcher.relink_fork(extract_dir, relink_fork)
-    print_success()
+
+
+def _identify_fork_symlinks(
+    extract_dir: Path,
+    fork: ForkName,
+) -> list[Path]:
+    """Identify managed symlinks for a fork that exist or are broken.
+
+    Returns:
+        List of symlink paths that would be removed.
+    """
+    main, fb1, fb2 = get_link_names_for_fork(extract_dir, fork)
+    return [link for link in (main, fb1, fb2) if link.exists() or link.is_symlink()]
 
 
 def _remove_all_fork_symlinks(
     extract_dir: Path,
     fork: ForkName,
     link_manager,
-) -> None:
-    """Remove all managed symlinks for a given fork."""
+) -> list[Path]:
+    """Remove all managed symlinks for a given fork.
 
-    main, fb1, fb2 = get_link_names_for_fork(extract_dir, fork)
-    for link in (main, fb1, fb2):
-        if link.exists() or link.is_symlink():
-            try:
-                link.unlink()
-                logger.info(f"Removed symlink: {link}")
-            except OSError as e:
-                logger.warning(f"Failed to remove symlink {link}: {e}")
+    Returns:
+        List of symlink paths that were actually removed.
+    """
+    existing = _identify_fork_symlinks(extract_dir, fork)
+    removed: list[Path] = []
+    for link in existing:
+        try:
+            link.unlink()
+            removed.append(link)
+        except OSError as e:
+            logger.warning("Failed to remove symlink %s: %s", link, e)
+    return removed
 
 
 def _cleanup_stale_symlinks(
@@ -114,26 +128,42 @@ def handle_rm_operation(
     """Handle the --rm operation flow.
 
     Two modes:
-    - --rm <tag>: remove that specific release directory + its symlinks
+    - --rm --release <tag>: remove that specific release directory + its symlinks
     - --rm --fork <fork>: remove ALL symlinks for that fork
     """
     rm_fork = get_fork_from_args(args) or DEFAULT_FORK
     fork_fetcher = get_fork_fetcher(fetcher, forgejo_fetcher, rm_fork)
 
-    if args.rm:
-        # Remove a specific release by tag
-        logger.info(f"Removing release: {args.rm}")
-        fork_fetcher.link_manager.remove_release(extract_dir, args.rm, rm_fork)
-        print(f"Removed {args.rm}")
+    if getattr(args, "release", None):
+        # Remove a specific release by tag (single item, no confirmation)
+        tag = args.release
+        fork_fetcher.link_manager.remove_release(extract_dir, tag, rm_fork)
+        print(f"Removed {tag} ({rm_fork.value})")
     else:
         # Remove all symlinks for the fork
-        logger.info(f"Removing all symlinks for {rm_fork}")
-        _remove_all_fork_symlinks(extract_dir, rm_fork, fork_fetcher.link_manager)
-        print(f"Removed all symlinks for {rm_fork}")
+        existing = _identify_fork_symlinks(extract_dir, rm_fork)
+        if not existing:
+            print(f"No symlinks found for {rm_fork.value}")
+            return
+
+        # Build display names for the preview
+        items = [link.name for link in existing]
+
+        # Confirm if more than one symlink would be removed
+        if len(items) > 1:
+            print(f"\nWill remove {len(items)} item(s):")
+            for item in items:
+                print(f"  - {item}")
+            _confirm_deletion()
+
+        removed = _remove_all_fork_symlinks(
+            extract_dir, rm_fork, fork_fetcher.link_manager
+        )
+        if removed:
+            print(f"Removed all symlinks for {rm_fork.value}")
 
     # Always clean up dangling/stale symlinks after removal
     _cleanup_stale_symlinks(extract_dir, rm_fork, fork_fetcher.link_manager)
-    print_success()
 
 
 def _collect_prune_candidates(
@@ -154,19 +184,17 @@ def _collect_prune_candidates(
     return all_to_prune
 
 
-def _confirm_prune(total_count: int) -> bool:
-    """Prompt the user for confirmation. Returns True if confirmed."""
-    print(
-        "⚠️  WARNING: Pruning old releases may break Steam prefixes that depend on them."
-    )
-    print("Games using pruned versions will need to be reconfigured.")
+def _confirm_deletion() -> None:
+    """Prompt the user for confirmation before deletion.
+
+    Raises:
+        SystemExit: If user declines or input is interrupted.
+    """
+    print("⚠️  WARNING: Removing releases may break Steam prefixes that depend on them.")
+    print("Games using removed versions will need to be reconfigured.")
 
     try:
-        response = (
-            input(f"\nProceed with pruning {total_count} release(s)? [y/N]: ")
-            .strip()
-            .lower()
-        )
+        response = input("\nProceed with removal? [y/N]: ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print("\nAborted")
         raise SystemExit(1) from None
@@ -174,7 +202,6 @@ def _confirm_prune(total_count: int) -> bool:
     if response not in ("y", "yes"):
         print("Aborted")
         raise SystemExit(0)
-    return True
 
 
 def _execute_prune(
@@ -215,7 +242,6 @@ def handle_prune_operation(
     total_to_prune = sum(len(v) for v in all_to_prune.values())
     if total_to_prune == 0:
         print("No unmanaged releases to prune")
-        print("Success")
         return
 
     print(f"\nWould prune {total_to_prune} old version(s):")
@@ -226,17 +252,15 @@ def handle_prune_operation(
 
     if args.dry_run:
         print("Dry run complete - no changes made")
-        print("Success")
         return
 
-    _confirm_prune(total_to_prune)
+    _confirm_deletion()
 
     total_pruned = _execute_prune(
         fetcher, forgejo_fetcher, extract_dir, forks_to_prune, args.keep, all_to_prune
     )
 
     print(f"\nPruned {total_pruned} release(s)")
-    print("Success")
 
 
 def _check_single_fork(
@@ -303,7 +327,7 @@ def handle_default_fetch(
 ) -> None:
     """Handle the default fetch and extract operation flow (GitHub forks only)."""
     actual_fork = get_fork_from_args(args) or DEFAULT_FORK
-    result = fetcher.fetch_and_extract(
+    fetcher.fetch_and_extract(
         repo,
         output_dir,
         extract_dir,
@@ -311,8 +335,6 @@ def handle_default_fetch(
         fork=actual_fork,
         dry_run=args.dry_run,
     )
-    if result is not None:
-        print_success()
 
 
 def handle_fetch_with_fork(
@@ -328,7 +350,7 @@ def handle_fetch_with_fork(
     logger.info(f"Using fork: {fork} ({repo})")
 
     fetcher_for_fork = get_fork_fetcher(fetcher, forgejo_fetcher, fork)
-    result = fetcher_for_fork.fetch_and_extract(
+    fetcher_for_fork.fetch_and_extract(
         repo,
         output_dir,
         extract_dir,
@@ -336,8 +358,6 @@ def handle_fetch_with_fork(
         fork=fork,
         dry_run=args.dry_run,
     )
-    if result is not None:
-        print_success()
 
 
 def handle_multi_fork_update(

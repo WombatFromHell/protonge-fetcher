@@ -85,8 +85,6 @@ class TestValidateMutuallyExclusiveArgs:
     @pytest.mark.parametrize(
         "argv",
         [
-            ["protonfetcher", "--list", "--release", "GE-Proton10-20"],
-            ["protonfetcher", "--ls", "--release", "GE-Proton10-20"],
             ["protonfetcher", "--ls", "--list"],
         ],
     )
@@ -112,14 +110,6 @@ class TestValidateMutuallyExclusiveArgs:
     @pytest.mark.parametrize(
         "argv",
         [
-            [
-                "protonfetcher",
-                "--relink",
-                "--fork",
-                "GE-Proton",
-                "--release",
-                "GE-Proton10-20",
-            ],
             ["protonfetcher", "--relink", "--fork", "GE-Proton", "--list"],
             ["protonfetcher", "--relink", "--fork", "GE-Proton", "--ls"],
             ["protonfetcher", "--fork", "GE-Proton", "--check", "--dry-run"],

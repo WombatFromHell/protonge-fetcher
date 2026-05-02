@@ -226,7 +226,9 @@ class BaseReleaseFetcher:
         keep: int = 3,
         dry_run: bool = False,
     ) -> tuple[list[str], list[str]]:
-        """Remove old unmanaged Proton releases, keeping the N newest versions."""
+        """Remove old unmanaged Proton releases.
+
+        Keeps all versions referenced by symlinks, plus the N newest unlinked versions."""
         return self.link_manager.prune_releases(extract_dir, fork, keep, dry_run)
 
     def list_links(

@@ -60,6 +60,7 @@ def get_explicit_flags(argv_list: list[str]) -> dict[str, bool]:
         "rm": "--rm" in argv_list,
         "fork": is_flag_passed(argv_list, "--fork", "-f"),
         "release": is_flag_passed(argv_list, "--release", "-r"),
+        "dry_run": "--dry-run" in argv_list,
     }
 
 
@@ -78,7 +79,7 @@ def get_operation_from_args(
         return "list"
     if args.relink:
         return "relink"
-    if args.rm or (argv_list and is_flag_passed(argv_list, "--rm", "-r")):
+    if args.rm:
         return "rm"
     if args.prune:
         return "prune"

@@ -78,24 +78,6 @@ class TestPruneArgumentParsing:
             assert args.prune is True
             assert args.dry_run is True
 
-    def test_parse_prune_mutually_exclusive_with_release(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Test that --prune and --release are mutually exclusive."""
-        import sys
-        from unittest.mock import patch
-
-        with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--release", "GE-Proton10-20"]
-        ):
-            with pytest.raises(SystemExit) as exc_info:
-                parse_args(build_parser())
-            # argparse uses exit code 2 for argument parsing errors
-            assert exc_info.value.code == 2
-            captured = capsys.readouterr()
-            assert "not allowed with argument --prune" in captured.err
-
     def test_parse_prune_mutually_exclusive_with_list(
         self,
         capsys: pytest.CaptureFixture[str],
@@ -130,13 +112,16 @@ class TestPruneArgumentParsing:
         from unittest.mock import patch
 
         with patch.object(
-            sys, "argv", ["protonfetcher", "--prune", "--rm", "GE-Proton10-20"]
+            sys,
+            "argv",
+            ["protonfetcher", "--prune", "--rm", "--release", "GE-Proton10-20"],
         ):
             args = parse_args(build_parser())
             args = set_default_fork(args)
             # Should parse successfully — no SystemExit
             assert args.prune is True
-            assert args.rm == "GE-Proton10-20"
+            assert args.rm is True
+            assert args.release == "GE-Proton10-20"
 
     def test_parse_prune_mutually_exclusive_with_relink(
         self,
@@ -231,7 +216,6 @@ class TestPruneOperationFlow:
 
         captured = capsys.readouterr()
         assert "No unmanaged releases to prune" in captured.out
-        assert "Success" in captured.out
 
     def test_prune_with_dry_run(
         self,
@@ -261,7 +245,6 @@ class TestPruneOperationFlow:
         captured = capsys.readouterr()
         assert "Would prune 4 old version(s)" in captured.out
         assert "Dry run complete - no changes made" in captured.out
-        assert "Success" in captured.out
         # Should not ask for confirmation in dry-run mode
         assert "Proceed with pruning" not in captured.out
 
@@ -359,7 +342,6 @@ class TestPruneOperationFlow:
         assert "Would prune 1 old version(s)" in captured.out
         assert "WARNING" in captured.out
         assert "Pruned 1 release(s)" in captured.out
-        assert "Success" in captured.out
 
     def test_prune_with_confirmation_no(
         self,
@@ -469,13 +451,13 @@ class TestPruneOperationFlow:
 class TestLinkManagerPruneIntegration:
     """Integration tests for LinkManager.prune_releases()."""
 
-    def test_prune_releases_prunes_linked_versions(
+    def test_prune_releases_protects_linked_versions(
         self,
         link_manager: Any,
         mock_filesystem_client: Any,
         tmp_path: Path,
     ) -> None:
-        """Test that prune_releases does NOT protect linked versions."""
+        """Test that prune_releases protects versions referenced by symlinks."""
         # Arrange
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
@@ -496,7 +478,6 @@ class TestLinkManagerPruneIntegration:
         real_link_manager = LinkManager(fs)
 
         # Create symlink pointing to GE-Proton10-2 (older, outside top 3)
-        # This version is now pruned (symlinks are no longer protected)
         main_link = extract_dir / "GE-Proton"
         main_link.symlink_to(versions[3])  # GE-Proton10-2
 
@@ -506,14 +487,16 @@ class TestLinkManagerPruneIntegration:
         )
 
         # Assert
-        # Top 3 newest (GE-Proton10-5, GE-Proton10-4, GE-Proton10-3) should be kept
-        assert len(kept) == 3
+        # Top 3 newest unlinked (GE-Proton10-5, GE-Proton10-4, GE-Proton10-3) kept
+        # Plus GE-Proton10-2 is protected because it's linked
+        assert len(kept) == 4
         assert "GE-Proton10-5" in kept
         assert "GE-Proton10-4" in kept
         assert "GE-Proton10-3" in kept
+        assert "GE-Proton10-2" in kept
 
-        # GE-Proton10-2 IS now pruned (symlinks are no longer protected)
-        assert "GE-Proton10-2" in pruned
+        # Only GE-Proton10-1 is pruned
+        assert len(pruned) == 1
         assert "GE-Proton10-1" in pruned
 
     def test_prune_releases_dry_run_no_deletion(

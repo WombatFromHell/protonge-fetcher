@@ -72,9 +72,25 @@ def print_prunable_versions(
 
 def print_links_for_fork(
     link_manager: Any, extract_dir: Path, fork: ForkName, show_versions: bool = False
-) -> None:
-    """Print links for a single fork."""
+) -> bool:
+    """Print links for a single fork.
+
+    Returns:
+        True if the fork had symlinks or prunable versions (was printed).
+    """
     links_info = link_manager.list_links(extract_dir, fork)
+    has_symlinks = any(target_path for target_path in links_info.values())
+
+    if show_versions:
+        installed = link_manager.get_installed_versions(extract_dir, fork)
+        linked = link_manager.get_linked_versions(extract_dir, fork)
+        prunable = [v for i, v in enumerate(installed, 1) if v not in linked and i > 3]
+    else:
+        prunable = []
+
+    if not has_symlinks and not prunable:
+        return False
+
     print(f"Links for {fork.value}:")
     for link_name, target_path in links_info.items():
         if target_path:
@@ -82,8 +98,12 @@ def print_links_for_fork(
         else:
             print(f"  {link_name} -> (not found)")
 
-    if show_versions:
-        print_prunable_versions(link_manager, extract_dir, fork)
+    if prunable:
+        print(f"\nPrunable {fork.value} versions ({len(prunable)}):")
+        for version in prunable:
+            print(f"  ○ {version}")
+
+    return True
 
 
 def get_link_names_for_fork(
@@ -104,8 +124,3 @@ def get_link_names_for_fork(
         extract_dir / suffixes[1],
         extract_dir / suffixes[2],
     )
-
-
-def print_success() -> None:
-    """Print the standard success message."""
-    print("Success")

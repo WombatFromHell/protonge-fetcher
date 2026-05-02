@@ -40,7 +40,8 @@ class TestGetExplicitFlags:
 
     def test_rm_flag_detected(self) -> None:
         """Test --rm flag is detected."""
-        assert get_explicit_flags(["--rm", "v1"])["rm"] is True
+        assert get_explicit_flags(["--rm"])["rm"] is True
+        assert get_explicit_flags(["--rm", "--release", "v1"])["rm"] is True
         # -r is --release, not --rm
         assert get_explicit_flags(["-r", "v1"])["rm"] is False
 
@@ -245,7 +246,7 @@ class TestDispatch:
             output_dir=Path("/tmp"),
             explicit_flags={},
         )
-        result = dispatch(ctx, ["--rm", "v1"])
+        result = dispatch(ctx, ["--rm", "--release", "v1"])
         assert result == 0
         mock_handler.assert_called_once()
 
