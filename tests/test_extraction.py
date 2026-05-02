@@ -76,20 +76,27 @@ class TestArchiveExtraction:
 
         assert result_path == target_dir
 
+    @pytest.mark.parametrize(
+        "archive_path,exists_return",
+        [
+            ("/mock/nonexistent.tar.gz", False),
+        ],
+    )
     def test_extract_nonexistent_archive(
         self,
+        archive_path: str,
+        exists_return: bool,
         mock_filesystem_client: Any,
     ) -> None:
         """Test extracting non-existent archive raises error."""
         extractor = ArchiveExtractor(mock_filesystem_client)
         target_dir = Path("/mock/extracted")
-        nonexistent_archive = Path("/mock/nonexistent.tar.gz")
 
-        mock_filesystem_client.exists.return_value = False
+        mock_filesystem_client.exists.return_value = exists_return
 
         with pytest.raises(ExtractionError):
             extractor.extract_archive(
-                archive_path=nonexistent_archive,
+                archive_path=Path(archive_path),
                 target_dir=target_dir,
                 show_progress=False,
                 show_file_details=False,
@@ -104,62 +111,56 @@ class TestArchiveExtraction:
 class TestSystemTarFallback:
     """Test system tar fallback when tarfile fails."""
 
-    @pytest.mark.parametrize("archive_format", ["gz", "xz"])
+    @pytest.mark.parametrize(
+        "archive_format,subprocess_returncode,expect_success",
+        [
+            ("gz", 0, True),
+            ("xz", 0, True),
+            ("gz", 2, False),
+        ],
+    )
     def test_system_tar_fallback(
         self,
         archive_format: str,
+        subprocess_returncode: int,
+        expect_success: bool,
         mocker: Any,
         mock_filesystem_client: Any,
         mock_tarfile_operations: Any,
         mock_subprocess_tar: Any,
     ) -> None:
-        """Test system tar fallback for both archive formats."""
+        """Test system tar fallback for both archive formats, success and failure."""
         extractor = ArchiveExtractor(mock_filesystem_client)
         target_dir = Path("/mock/extracted")
-        archive_name = f"test.tar.{archive_format}"
-        archive_path = Path(f"/mock/{archive_name}")
+        archive_path = Path(f"/mock/test.tar.{archive_format}")
 
         mock_filesystem_client.exists.side_effect = lambda p: (
             p in (archive_path, target_dir)
         )
         mock_filesystem_client.is_dir.side_effect = lambda p: p == target_dir
         mock_tarfile_operations(raise_on_open=Exception("tarfile failed"))
-        mock_run = mock_subprocess_tar(returncode=0, stdout="", stderr="")
-
-        extractor.extract_archive(
-            archive_path=archive_path,
-            target_dir=target_dir,
-            show_progress=False,
-            show_file_details=False,
+        mock_run = mock_subprocess_tar(
+            returncode=subprocess_returncode, stdout="", stderr="tar failed"
         )
 
-        assert mock_run.called
-        call_args = mock_run.call_args[0][0]
-        assert "tar" in call_args
-
-    def test_system_tar_fallback_failure(
-        self,
-        mocker: Any,
-        mock_filesystem_client: Any,
-        mock_tarfile_operations: Any,
-        mock_subprocess_tar: Any,
-    ) -> None:
-        """Test system tar fallback failure raises ExtractionError."""
-        extractor = ArchiveExtractor(mock_filesystem_client)
-        target_dir = Path("/mock/extracted")
-        archive_path = Path("/mock/test.tar.gz")
-
-        mock_filesystem_client.exists.side_effect = lambda p: p == archive_path
-        mock_tarfile_operations(raise_on_open=Exception("tarfile failed"))
-        mock_subprocess_tar(returncode=2, stdout="", stderr="tar failed")
-
-        with pytest.raises(ExtractionError, match="tar failed"):
+        if expect_success:
             extractor.extract_archive(
                 archive_path=archive_path,
                 target_dir=target_dir,
                 show_progress=False,
                 show_file_details=False,
             )
+            assert mock_run.called
+            call_args = mock_run.call_args[0][0]
+            assert "tar" in call_args
+        else:
+            with pytest.raises(ExtractionError, match="tar failed"):
+                extractor.extract_archive(
+                    archive_path=archive_path,
+                    target_dir=target_dir,
+                    show_progress=False,
+                    show_file_details=False,
+                )
 
 
 # =============================================================================
@@ -408,6 +409,7 @@ class TestExtractionEdgeCases:
         mocker: Any,
         mock_filesystem_client: Any,
         mock_tarfile_operations: Any,
+        mock_subprocess_tar: Any,
     ) -> None:
         """Test extracting corrupted archive raises error."""
         extractor = ArchiveExtractor(mock_filesystem_client)
@@ -416,8 +418,10 @@ class TestExtractionEdgeCases:
 
         mock_filesystem_client.exists.side_effect = lambda p: p == corrupted
         mock_tarfile_operations(raise_on_open=tarfile.TarError("corrupted"))
+        # Mock subprocess to prevent tar fallback from masking the error
+        mock_subprocess_tar(returncode=2, stdout="", stderr="tar failed")
 
-        with pytest.raises(ExtractionError):
+        with pytest.raises(ExtractionError, match="tar failed"):
             extractor.extract_archive(
                 archive_path=corrupted,
                 target_dir=target_dir,
@@ -431,7 +435,7 @@ class TestExtractionEdgeCases:
         mock_filesystem_client: Any,
         mock_subprocess_tar: Any,
     ) -> None:
-        """Test extracting unknown archive format."""
+        """Test extracting unknown archive format raises error."""
         extractor = ArchiveExtractor(mock_filesystem_client)
         target_dir = Path("/mock/extracted")
         unknown = Path("/mock/archive.zip")
@@ -439,7 +443,7 @@ class TestExtractionEdgeCases:
         mock_filesystem_client.exists.side_effect = lambda p: p == unknown
         mock_subprocess_tar(returncode=2, stdout="", stderr="Unknown format")
 
-        with pytest.raises(ExtractionError):
+        with pytest.raises(ExtractionError, match="Unknown format"):
             extractor.extract_archive(
                 archive_path=unknown,
                 target_dir=target_dir,

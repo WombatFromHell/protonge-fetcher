@@ -6,6 +6,8 @@ as standalone functions (no LinkManager dependency).
 
 from pathlib import Path
 
+import pytest
+
 from protonfetcher.common import ForkName
 from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.version_finder import (
@@ -20,125 +22,93 @@ from protonfetcher.version_finder import (
 class TestGetTagName:
     """Test _get_tag_name helper."""
 
-    def test_ge_proton_no_prefix(self, tmp_path: Path) -> None:
-        """GE-Proton directories keep their name."""
-        entry = tmp_path / "GE-Proton10-20"
-        assert _get_tag_name(entry, ForkName.GE_PROTON) == "GE-Proton10-20"
-
-    def test_proton_em_strips_prefix(self, tmp_path: Path) -> None:
-        """Proton-EM directories with 'proton-' prefix get it stripped."""
-        entry = tmp_path / "proton-EM-10.0-30"
-        assert _get_tag_name(entry, ForkName.PROTON_EM) == "EM-10.0-30"
-
-    def test_proton_em_no_prefix(self, tmp_path: Path) -> None:
-        """Proton-EM directories without prefix keep their name."""
-        entry = tmp_path / "EM-10.0-30"
-        assert _get_tag_name(entry, ForkName.PROTON_EM) == "EM-10.0-30"
-
-    def test_cachyos_strips_prefix_and_suffix(self, tmp_path: Path) -> None:
-        """CachyOS directories with 'proton-' prefix and '-x86_64' suffix."""
-        entry = tmp_path / "proton-cachyos-10.0-20260207-slr-x86_64"
-        assert _get_tag_name(entry, ForkName.CACHYOS) == "cachyos-10.0-20260207-slr"
-
-    def test_dw_proton_strips_suffix(self, tmp_path: Path) -> None:
-        """DW-Proton directories with '-x86_64' suffix."""
-        entry = tmp_path / "dwproton-10.0-26-x86_64"
-        assert _get_tag_name(entry, ForkName.DW_PROTON) == "dwproton-10.0-26"
+    @pytest.mark.parametrize(
+        "dir_name,fork,expected_tag",
+        [
+            ("GE-Proton10-20", ForkName.GE_PROTON, "GE-Proton10-20"),
+            ("proton-EM-10.0-30", ForkName.PROTON_EM, "EM-10.0-30"),
+            ("EM-10.0-30", ForkName.PROTON_EM, "EM-10.0-30"),
+            (
+                "proton-cachyos-10.0-20260207-slr-x86_64",
+                ForkName.CACHYOS,
+                "cachyos-10.0-20260207-slr",
+            ),
+            ("dwproton-10.0-26-x86_64", ForkName.DW_PROTON, "dwproton-10.0-26"),
+        ],
+    )
+    def test_tag_extraction(
+        self, tmp_path: Path, dir_name: str, fork: ForkName, expected_tag: str
+    ) -> None:
+        """Test tag name extraction for each fork's naming convention."""
+        entry = tmp_path / dir_name
+        assert _get_tag_name(entry, fork) == expected_tag
 
 
 class TestShouldSkipDirectory:
     """Test _should_skip_directory helper."""
 
-    def test_skips_other_fork_prefix(self) -> None:
-        """Directories with other fork's prefix are skipped."""
-        assert _should_skip_directory("EM-10.0-30", ForkName.GE_PROTON) is True
-        assert (
-            _should_skip_directory("cachyos-10.0-20260207-slr", ForkName.GE_PROTON)
-            is True
-        )
-
-    def test_no_skip_for_matching_prefix(self) -> None:
-        """GE-Proton directories are not skipped for GE-Proton fork."""
-        assert _should_skip_directory("GE-Proton10-20", ForkName.GE_PROTON) is False
+    @pytest.mark.parametrize(
+        "dir_name,fork,expected_skip",
+        [
+            ("EM-10.0-30", ForkName.GE_PROTON, True),
+            ("cachyos-10.0-20260207-slr", ForkName.GE_PROTON, True),
+            ("GE-Proton10-20", ForkName.GE_PROTON, False),
+            ("GE-Proton10-20", ForkName.PROTON_EM, True),
+            ("EM-10.0-30", ForkName.PROTON_EM, False),
+            ("GE-Proton10-20", ForkName.CACHYOS, True),
+            ("cachyos-10.0-20260207-slr", ForkName.CACHYOS, False),
+        ],
+    )
+    def test_skip_logic(
+        self, dir_name: str, fork: ForkName, expected_skip: bool
+    ) -> None:
+        """Test that directories from other forks are skipped."""
+        assert _should_skip_directory(dir_name, fork) is expected_skip
 
 
 class TestIsValidProtonDirectory:
     """Test _is_valid_proton_directory helper."""
 
-    def test_ge_proton_valid(self, tmp_path: Path) -> None:
-        """Valid GE-Proton directory names."""
-        assert (
-            _is_valid_proton_directory(tmp_path / "GE-Proton10-20", ForkName.GE_PROTON)
-            is True
-        )
-        assert (
-            _is_valid_proton_directory(tmp_path / "GE-Proton9-15", ForkName.GE_PROTON)
-            is True
-        )
-        assert (
-            _is_valid_proton_directory(
-                tmp_path / "GE-Proton10-20-RC1", ForkName.GE_PROTON
-            )
-            is True
-        )
-
-    def test_ge_proton_invalid(self, tmp_path: Path) -> None:
-        """Invalid GE-Proton directory names."""
-        assert (
-            _is_valid_proton_directory(tmp_path / "LegacyRuntime", ForkName.GE_PROTON)
-            is False
-        )
-        assert (
-            _is_valid_proton_directory(tmp_path / "SomeOtherDir", ForkName.GE_PROTON)
-            is False
-        )
-        assert (
-            _is_valid_proton_directory(tmp_path / "EM-10.0-30", ForkName.GE_PROTON)
-            is False
-        )
-
-    def test_proton_em_valid(self, tmp_path: Path) -> None:
-        """Valid Proton-EM directory names."""
-        assert (
-            _is_valid_proton_directory(tmp_path / "EM-10.0-30", ForkName.PROTON_EM)
-            is True
-        )
-        assert (
-            _is_valid_proton_directory(
-                tmp_path / "proton-EM-10.0-30", ForkName.PROTON_EM
-            )
-            is True
-        )
-        assert (
-            _is_valid_proton_directory(
-                tmp_path / "proton-EM-10.0-36-HDRTEST", ForkName.PROTON_EM
-            )
-            is True
-        )
-
-    def test_cachyos_valid(self, tmp_path: Path) -> None:
-        """Valid CachyOS directory names."""
-        assert (
-            _is_valid_proton_directory(
-                tmp_path / "cachyos-10.0-20260207-slr", ForkName.CACHYOS
-            )
-            is True
-        )
-        assert (
-            _is_valid_proton_directory(
-                tmp_path / "proton-cachyos-10.0-20260207-slr-x86_64", ForkName.CACHYOS
-            )
-            is True
-        )
-
-    def test_dw_proton_valid(self, tmp_path: Path) -> None:
-        """Valid DW-Proton directory names."""
-        assert (
-            _is_valid_proton_directory(
-                tmp_path / "dwproton-10.0-26-x86_64", ForkName.DW_PROTON
-            )
-            is True
-        )
+    @pytest.mark.parametrize(
+        "fork,valid_names,invalid_names",
+        [
+            (
+                ForkName.GE_PROTON,
+                ["GE-Proton10-20", "GE-Proton9-15", "GE-Proton10-20-RC1"],
+                ["LegacyRuntime", "SomeOtherDir", "EM-10.0-30"],
+            ),
+            (
+                ForkName.PROTON_EM,
+                ["EM-10.0-30", "proton-EM-10.0-30", "proton-EM-10.0-36-HDRTEST"],
+                ["GE-Proton10-20", "cachyos-10.0-20260207-slr"],
+            ),
+            (
+                ForkName.CACHYOS,
+                [
+                    "cachyos-10.0-20260207-slr",
+                    "proton-cachyos-10.0-20260207-slr-x86_64",
+                ],
+                ["GE-Proton10-20", "EM-10.0-30"],
+            ),
+            (
+                ForkName.DW_PROTON,
+                ["dwproton-10.0-26-x86_64", "dwproton-10.0-25-x86_64"],
+                ["GE-Proton10-20", "EM-10.0-30"],
+            ),
+        ],
+    )
+    def test_valid_and_invalid_names(
+        self,
+        tmp_path: Path,
+        fork: ForkName,
+        valid_names: list[str],
+        invalid_names: list[str],
+    ) -> None:
+        """Valid and invalid directory names for each fork."""
+        for name in valid_names:
+            assert _is_valid_proton_directory(tmp_path / name, fork) is True
+        for name in invalid_names:
+            assert _is_valid_proton_directory(tmp_path / name, fork) is False
 
 
 class TestFindVersionCandidates:

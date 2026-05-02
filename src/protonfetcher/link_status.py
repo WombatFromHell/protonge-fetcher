@@ -5,7 +5,7 @@ and determine whether they match expected targets.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from .common import FileSystemClientProtocol, ForkName, VersionCandidateList
 
@@ -86,7 +86,7 @@ def build_expected_link_mapping(
 
 
 def compare_link_targets(
-    current_links: dict[str, Optional[str]],
+    current_links: Mapping[str, Optional[str]],
     expected_links: dict[str, str],
 ) -> bool:
     """Compare current vs expected link targets.

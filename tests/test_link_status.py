@@ -5,8 +5,6 @@ Tests the standalone link status query functions independently of LinkManager.
 
 from pathlib import Path
 
-from conftest import SymlinkEnvironment  # noqa: E402
-
 from protonfetcher.common import ForkName
 from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.link_status import (
@@ -15,6 +13,7 @@ from protonfetcher.link_status import (
     has_managed_links,
     list_links,
 )
+from tests.fixtures import SymlinkEnvironment
 
 
 class TestListLinks:

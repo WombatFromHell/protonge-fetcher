@@ -93,6 +93,7 @@ test:
 
 lint:
 	uv run ty check ./src ./tests; \
+		uv run pyright ./src ./tests; \
 		uv run ruff check ./src ./tests --fix
 
 prettier:

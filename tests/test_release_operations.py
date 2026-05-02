@@ -6,7 +6,6 @@ Tests the standalone release removal functions independently of LinkManager.
 from pathlib import Path
 
 import pytest
-from conftest import SymlinkEnvironment  # noqa: E402
 
 from protonfetcher.common import ForkName
 from protonfetcher.filesystem import FileSystemClient
@@ -19,6 +18,7 @@ from protonfetcher.release_operations import (
     cleanup_stale_symlinks,
     remove_release,
 )
+from tests.fixtures import SymlinkEnvironment
 
 
 class TestDetermineReleasePath:

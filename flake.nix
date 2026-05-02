@@ -34,6 +34,7 @@
             jq
             less
             prettier
+            pyright
             python
             rsync
             util-linux

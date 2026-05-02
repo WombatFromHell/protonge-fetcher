@@ -6,7 +6,6 @@ Tests the standalone prune operation functions independently of LinkManager.
 from pathlib import Path
 
 import pytest
-from conftest import SymlinkEnvironment
 
 from protonfetcher.common import ForkName
 from protonfetcher.filesystem import FileSystemClient
@@ -17,6 +16,7 @@ from protonfetcher.prune_operations import (
     get_linked_versions,
     prune_releases,
 )
+from tests.fixtures import SymlinkEnvironment
 
 
 class TestGetInstalledVersions:
