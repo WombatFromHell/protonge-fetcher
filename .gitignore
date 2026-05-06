@@ -5,6 +5,8 @@
 .ruff_cache
 .build
 .direnv
+.pi
+result
 dist
 __pycache__
 Containerfile.dev

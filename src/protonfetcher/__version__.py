@@ -14,6 +14,3 @@ def _get_version() -> str:
         return version("protonge-fetcher")
     except PackageNotFoundError:
         return "unknown"
-
-
-__version__ = "1.3.0"
