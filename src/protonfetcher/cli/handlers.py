@@ -235,8 +235,8 @@ def handle_prune_operation(
     explicit_fork = get_fork_from_args(args)
     forks_to_prune = [explicit_fork] if explicit_fork else list(FORKS.keys())
 
-    # None means prune all; otherwise use the explicit keep count
-    keep = args.keep if args.keep is not None else 0
+    # Default to keeping 3 (all managed symlinks); use explicit keep if provided
+    keep = args.keep if args.keep is not None else 3
 
     all_to_prune = _collect_prune_candidates(
         fetcher, forgejo_fetcher, extract_dir, forks_to_prune, keep
