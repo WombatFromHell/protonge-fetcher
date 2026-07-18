@@ -173,7 +173,7 @@ class ReleaseManager:
                 # Validate that size is an integer
                 if isinstance(size, int):
                     return size
-            except (json.JSONDecodeError, KeyError, IOError):
+            except json.JSONDecodeError, KeyError, IOError:
                 # If cache file is invalid, return None to force a fresh fetch
                 pass
         return None
@@ -623,7 +623,7 @@ class ReleaseManager:
         # Parse the latest version
         try:
             latest_version = parse_version(latest_tag, fork)
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             # If we can't parse the latest version, assume no update
             logger.debug(f"Could not parse latest version: {latest_tag}")
             return None
@@ -634,7 +634,7 @@ class ReleaseManager:
             try:
                 parsed = parse_version(tag, fork)
                 current_parsed.append((parsed, tag))
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 # Skip versions we can't parse
                 logger.debug(f"Could not parse current version: {tag}")
                 continue

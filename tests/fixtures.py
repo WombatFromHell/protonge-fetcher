@@ -14,6 +14,7 @@ from typing import Any, Callable, TypedDict
 
 import pytest
 
+from protonfetcher.archive_extractor import ArchiveExtractor
 from protonfetcher.common import DEFAULT_TIMEOUT, ForkName
 
 
@@ -218,6 +219,13 @@ def mock_tarfile_operations(mocker: Any) -> Any:
         raise_on_open: Exception | None = None,
     ) -> dict[str, Any]:
         mock_tarfile = mocker.patch("tarfile.open")
+        mocker.patch(
+            "protonfetcher.archive_extractor.os.path.getsize", return_value=1024
+        )
+        mocker.patch("builtins.open", mocker.mock_open(read_data=b""))
+        mocker.patch.object(
+            ArchiveExtractor, "_open_decompressor", return_value=mocker.MagicMock()
+        )
 
         if raise_on_open:
             mock_tarfile.side_effect = raise_on_open

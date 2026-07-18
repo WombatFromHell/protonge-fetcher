@@ -194,7 +194,7 @@ def _confirm_deletion() -> None:
 
     try:
         response = input("\nProceed with removal? [y/N]: ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
+    except EOFError, KeyboardInterrupt:
         print("\nAborted")
         raise SystemExit(1) from None
 

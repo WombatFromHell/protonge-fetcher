@@ -1,15 +1,48 @@
 """Archive extractor implementation for ProtonFetcher."""
 
+import gzip
 import logging
+import lzma
+import os
 import subprocess
 import tarfile
 from pathlib import Path
+from typing import IO, cast
 
 from .common import DEFAULT_TIMEOUT, FileSystemClientProtocol
 from .exceptions import ExtractionError, ProtonFetcherError
 from .spinner import Spinner
 
 logger = logging.getLogger(__name__)
+
+
+class _CountingReader:
+    """Wraps a file object; reports compressed bytes consumed to a callback.
+
+    ponytail: seekable=False forces tarfile into streaming mode (r|), which
+    avoids the double-open of a pre-scan while tracking progress.
+    """
+
+    def __init__(self, fp: IO[bytes], on_read) -> None:
+        self._fp = fp
+        self._on_read = on_read
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._fp.read(size)
+        self._on_read(len(chunk))
+        return chunk
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        raise OSError("seek not supported on CountingReader")
+
+    def close(self) -> None:
+        self._fp.close()
 
 
 class ArchiveExtractor:
@@ -27,12 +60,15 @@ class ArchiveExtractor:
         """Determine archive format from filename.
 
         Returns:
-            Format string: 'tar.gz', 'tar.xz', or 'other'
+            Format string: 'tar.gz', 'tar.xz', 'tar.zst', or 'other'
         """
-        if archive_path.name.endswith(".tar.gz"):
+        name = archive_path.name
+        if name.endswith((".tar.gz", ".tgz")):
             return "tar.gz"
-        elif archive_path.name.endswith(".tar.xz"):
+        elif name.endswith((".tar.xz", ".txz")):
             return "tar.xz"
+        elif name.endswith((".tar.zst", ".tzst")):
+            return "tar.zst"
         else:
             return "other"
 
@@ -83,6 +119,7 @@ class ArchiveExtractor:
     _EXTRACT_METHODS: dict[str, str] = {
         "tar.gz": "extract_gz_archive",
         "tar.xz": "extract_xz_archive",
+        "tar.zst": "extract_zst_archive",
     }
 
     def extract_archive(
@@ -157,7 +194,7 @@ class ArchiveExtractor:
         try:
             with tarfile.open(archive_path, "r:*") as _:
                 return True
-        except (tarfile.ReadError, FileNotFoundError, OSError):
+        except tarfile.ReadError, FileNotFoundError, OSError:
             return False
 
     def extract_with_tarfile(
@@ -167,26 +204,39 @@ class ArchiveExtractor:
         show_progress: bool = True,
         show_file_details: bool = True,
     ) -> Path:
-        """Extract archive using tarfile library.
+        """Extract archive using tarfile library with streaming progress.
 
-        ponytail: no pre-scan for stats — uses indeterminate spinner instead of
-        opening the archive twice.
+        ponytail: CountingReader tracks compressed bytes consumed in a single
+        pass — no pre-scan, no double-open. Uses r| streaming mode via
+        seekable() returning False on the counting wrapper.
         """
         self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
 
-        spinner = Spinner(
-            desc=f"Extracting {archive_path.name}",
-            disable=not show_progress,
-            fps_limit=10.0,
-            show_progress=show_progress,
-        )
-
         try:
+            total_size = os.path.getsize(archive_path)
+
+            spinner = Spinner(
+                desc=f"Extracting {archive_path.name}",
+                total=total_size,
+                unit="B",
+                unit_scale=True,
+                disable=not show_progress,
+                fps_limit=10.0,
+                show_progress=show_progress,
+            )
+
             with spinner:
-                with tarfile.open(archive_path, "r:*") as tar:
+                raw = open(archive_path, "rb")
+                counting = _CountingReader(raw, spinner.update)
+
+                decompressor = self._open_decompressor(archive_path, counting)
+
+                with tarfile.open(fileobj=decompressor, mode="r|") as tar:
                     for member in tar:
                         tar.extract(member, path=target_dir, filter="data")
-                        spinner.update(1)
+
+                decompressor.close()
+                raw.close()
 
                 spinner.finish()
 
@@ -196,6 +246,20 @@ class ArchiveExtractor:
             raise ExtractionError(f"Failed to extract archive {archive_path}: {e}")
 
         return target_dir
+
+    @staticmethod
+    def _open_decompressor(archive_path: Path, counting: _CountingReader):
+        """Open the appropriate decompressor for the archive format."""
+        name = archive_path.name
+        if name.endswith((".tar.gz", ".tgz")):
+            return gzip.GzipFile(fileobj=counting)
+        elif name.endswith((".tar.xz", ".txz")):
+            return lzma.LZMAFile(cast(IO[bytes], counting))
+        elif name.endswith((".tar.zst", ".tzst")):
+            from compression.zstd import ZstdFile
+
+            return ZstdFile(counting)
+        raise ExtractionError(f"Unsupported archive format: {archive_path}")
 
     def extract_gz_archive(self, archive_path: Path, target_dir: Path) -> Path:
         """Extract .tar.gz archive using system tar command with checkpoint features.
@@ -255,6 +319,41 @@ class ArchiveExtractor:
             "-xJf",  # Extract xzipped tar
             str(archive_path),
             "-C",  # Extract to target directory
+            str(target_dir),
+        ]
+
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+
+        if result.returncode != 0:
+            raise ExtractionError(result.stderr)
+
+        return target_dir
+
+    def extract_zst_archive(self, archive_path: Path, target_dir: Path) -> Path:
+        """Extract .tar.zst archive using system tar with --zstd filter.
+
+        Args:
+            archive_path: Path to the .tar.zst archive
+            target_dir: Directory to extract to
+
+        Returns:
+            Path to the target directory where archive was extracted
+
+        Raises:
+            ExtractionError: If extraction fails
+        """
+        self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
+
+        cmd = [
+            "tar",
+            "--checkpoint=1",
+            "--checkpoint-action=dot",
+            "--zstd",
+            "-xf",
+            str(archive_path),
+            "-C",
             str(target_dir),
         ]
 
