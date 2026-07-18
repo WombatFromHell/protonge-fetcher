@@ -39,29 +39,33 @@ graph TD
 ```mermaid
 graph LR
     subgraph TESTS["tests/"]
-        T_CLI["test_cli.py<br/>31 tests"]
-        T_DISPATCH["test_cli_dispatch.py<br/>30 tests"]
-        T_BASE["test_base_release_fetcher.py<br/>25 tests"]
-        T_PRUNE["test_prune.py<br/>27 tests"]
-        T_PRUNE_OPS["test_prune_operations.py<br/>20 tests"]
-        T_VERSION["test_version_finder.py<br/>19 tests"]
-        T_RELEASE_E2E["test_release_manager_e2e.py<br/>28 tests"]
-        T_INTEGRATION["test_integration.py<br/>22 tests"]
-        T_LINK_STATUS["test_link_status.py<br/>16 tests"]
-        T_RELEASE_OPS["test_release_operations.py<br/>16 tests"]
-        T_FORGEJO["test_forgejo_fetcher.py<br/>23 tests"]
-        T_SYMLINK_OPS["test_symlink_operations.py<br/>14 tests"]
-        T_CLI_HANDLERS["test_cli_handlers.py<br/>9 tests"]
-        T_CLI_VALIDATORS["test_cli_validators.py<br/>7 tests"]
-        T_GITHUB["test_github_fetcher.py<br/>12 tests"]
-        T_EXTRACTION["test_extraction.py<br/>12 tests"]
-        T_LINK_MGR["test_link_manager_e2e.py<br/>10 tests"]
-        T_UTILS["test_utils.py<br/>10 tests"]
-        C["conftest.py<br/>shared fixtures"]
+        T_CLI["test_cli.py"]
+        T_DISPATCH["test_cli_dispatch.py"]
+        T_HANDLERS["test_cli_handlers.py"]
+        T_VALIDATORS["test_cli_validators.py"]
+        T_BASE["test_base_release_fetcher.py"]
+        T_PRUNE["test_prune.py"]
+        T_PRUNE_OPS["test_prune_operations.py"]
+        T_VERSION["test_version_finder.py"]
+        T_RELEASE_E2E["test_release_manager_e2e.py"]
+        T_INTEGRATION["test_integration.py"]
+        T_LINK_STATUS["test_link_status.py"]
+        T_RELEASE_OPS["test_release_operations.py"]
+        T_FORGEJO["test_forgejo_fetcher.py"]
+        T_SYMLINK_OPS["test_symlink_operations.py"]
+        T_GITHUB["test_github_fetcher.py"]
+        T_EXTRACTION["test_extraction.py"]
+        T_LINK_MGR["test_link_manager_e2e.py"]
+        T_UTILS["test_utils.py"]
+        C["conftest.py\nshared fixtures"]
     end
 
     subgraph SRC["src/protonfetcher/"]
-        S_CLI["cli.py"]
+        S_CLI_CORE["cli/core.py"]
+        S_CLI_DISPATCH["cli/dispatch.py"]
+        S_CLI_HANDLERS["cli/handlers.py"]
+        S_CLI_VALIDATORS["cli/validators.py"]
+        S_CLI_ARGPARSE["cli/argparse_builder.py"]
         S_FETCHER["base_release_fetcher.py"]
         S_GITHUB["github_fetcher.py"]
         S_FORGEJO["forgejo_fetcher.py"]
@@ -79,17 +83,16 @@ graph LR
         S_UTILS["utils.py"]
         S_SPINNER["spinner.py"]
         S_VERSION["version_finder.py"]
-        S_CANDIDATE["candidate_selection.py"]
         S_SYMLINK_OPS["symlink_operations.py"]
     end
 
-    T_CLI --> S_CLI
-    T_DISPATCH --> S_CLI
+    T_CLI --> S_CLI_CORE
+    T_DISPATCH --> S_CLI_DISPATCH
     T_DISPATCH --> S_GITHUB & S_FORGEJO
-    T_CLI_HANDLERS --> S_CLI
-    T_CLI_VALIDATORS --> S_CLI
+    T_HANDLERS --> S_CLI_HANDLERS
+    T_VALIDATORS --> S_CLI_VALIDATORS
     T_BASE --> S_FETCHER
-    T_PRUNE --> S_LINK & S_CLI
+    T_PRUNE --> S_LINK & S_CLI_CORE
     T_PRUNE_OPS --> S_PRUNE_OPS & S_VERSION
     T_LINK_STATUS --> S_LINK_STATUS & S_COMMON
     T_RELEASE_OPS --> S_RELEASE_OPS & S_FS
@@ -172,7 +175,7 @@ classDiagram
 
     note for GitHubReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
     note for ForgejoReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
-    note for BaseReleaseFetcher["~400 lines, ALL logic<br/>Test: test_base_release_fetcher.py (20 tests)"]
+    note for BaseReleaseFetcher["~645 lines, ALL logic<br/>Test: test_base_release_fetcher.py"]
     note for PlatformAdapter["URL/header construction<br/>Test: test_forgejo_fetcher.py + test_release_manager_e2e.py (Pattern 8)"]
 ```
 
@@ -396,9 +399,9 @@ graph TD
 
 ```mermaid
 graph LR
-    subgraph CLI_MAIN["test_cli.py — Main Entry (31 tests)"]
+    subgraph CLI_MAIN["test_cli.py — Main Entry"]
         OP_CHECK["--check<br/>TestCheckOperationFlow<br/>TestCheckCLI"]
-        OP_DRYRUN["--dry-run<br/>TestDryRunCLI<br/>TestDryRunWorkflow<br/>TestDryRunOutput<br/>TestDryRunIntegration"]
+        OP_DRYRUN["--dry-run<br/>TestDryRunCLI<br/>TestDryRunIntegration"]
         OP_LIST["--list<br/>TestListReleasesOperation"]
         OP_LINKS["--list-links<br/>TestListLinksOperation"]
         OP_REMOVE["--remove<br/>TestRemoveOperation"]
@@ -408,22 +411,21 @@ graph LR
         OP_FORK["--fork flag<br/>TestForkConversion<br/>TestForkFlagWithoutValue"]
         OP_DEBUG["--debug<br/>TestDebugLogging"]
         OP_ERROR["Error handling<br/>TestErrorHandling"]
+        OP_PARSE["Argument Parsing<br/>TestArgumentParsing"]
+        OP_VALID["Validation<br/>TestArgumentValidation"]
+        OP_PLATFORM["Platform Dispatch<br/>TestForkConfigPlatformDispatch"]
     end
 
-    subgraph CLI_DISPATCH["test_cli_dispatch.py — Dispatch Logic (30 tests)"]
-        DD["Operation routing per flag<br/>30 tests<br/>Verify _dispatch() paths"]
+    subgraph CLI_DISPATCH["test_cli_dispatch.py — Dispatch Logic"]
+        DD["_get_explicit_flags, _get_operation_from_args<br/>_dispatch, _resolve_default_operation"]
     end
 
-    subgraph CLI_HANDLERS["test_cli_handlers.py — Handler Functions (9 tests)"]
-        DH["_handle_* functions<br/>9 tests<br/>Verify handler behavior"]
+    subgraph CLI_HANDLERS["test_cli_handlers.py — Handler Functions"]
+        DH["_handle_check_operation, _handle_ls_operation<br/>_handle_list_operation, _handle_relink_operation<br/>_handle_rm_operation, _handle_prune_operation"]
     end
 
-    subgraph CLI_VALIDATORS["test_cli_validators.py — Validation (7 tests)"]
-        DV["Mutual exclusivity, defaults<br/>7 tests<br/>Verify _validate_* functions"]
-    end
-
-    subgraph PARSING["Argument Parsing"]
-        PARSE["TestArgumentParsing<br/>test_cli.py"]
+    subgraph CLI_VALIDATORS["test_cli_validators.py — Validation"]
+        DV["_set_default_fork, _validate_mutually_exclusive_args"]
     end
 
     subgraph VERSIONS["Version Checks"]
@@ -432,17 +434,15 @@ graph LR
         NEWER["TestCheckForNewerRelease"]
     end
 
-    PARSING --> CLI_MAIN
-    VERSIONS --> OP_CHECK
     CLI_MAIN --> CLI_DISPATCH
     CLI_MAIN --> CLI_HANDLERS
     CLI_MAIN --> CLI_VALIDATORS
+    VERSIONS --> OP_CHECK
 
     style CLI_MAIN fill:#e1f5e1
     style CLI_DISPATCH fill:#fff4e1
     style CLI_HANDLERS fill:#fff4e1
     style CLI_VALIDATORS fill:#fff4e1
-    style PARSING fill:#fff4e1
     style VERSIONS fill:#fff4e1
 ```
 
@@ -533,25 +533,25 @@ graph TD
 
 ## 12. New Source Modules — Extracted from LinkManager
 
-> LinkManager (~400 lines) was refactored into 5 focused modules. Each has its own test file.
+> LinkManager (~509 lines) was refactored into 6 focused modules. Each has its own test file.
 
 ```mermaid
 graph LR
     subgraph EXTRACTED["Extracted Modules"]
         VF["version_finder.py<br/>Version discovery & dedup<br/>find_version_candidates()"]
         CS["candidate_selection.py<br/>Top-3 candidate selection<br/>select_top_3_candidates()"]
-        LS["link_status.py<br/>Read-only link inspection<br/>list_links(), get_link_status()"]
-        SO["symlink_operations.py<br/>Symlink CRUD<br/>create_symlink_specs(), cleanup_symlinks()"]
-        PO["prune_operations.py<br/>Prune plan & execution<br/>get_installed_versions(), execute_prune()"]
-        RO["release_operations.py<br/>Release removal<br/>remove_release()"]
+        LS["link_status.py<br/>Read-only link inspection<br/>list_links(), has_managed_links()"]
+        SO["symlink_operations.py<br/>Symlink CRUD<br/>create_symlinks(), cleanup_unwanted_links()"]
+        PO["prune_operations.py<br/>Prune plan & execution<br/>get_installed_versions(), execute_prune_removals()"]
+        RO["release_operations.py<br/>Release removal<br/>remove_release(), cleanup_stale_symlinks()"]
     end
 
     subgraph TESTS["Test Files"]
-        TVF["test_version_finder.py<br/>19 tests"]
-        TLS["test_link_status.py<br/>16 tests"]
-        TSO["test_symlink_operations.py<br/>14 tests"]
-        TPO["test_prune_operations.py<br/>20 tests"]
-        TRO["test_release_operations.py<br/>16 tests"]
+        TVF["test_version_finder.py"]
+        TLS["test_link_status.py"]
+        TSO["test_symlink_operations.py"]
+        TPO["test_prune_operations.py"]
+        TRO["test_release_operations.py"]
     end
 
     VF --> TVF
@@ -567,14 +567,14 @@ graph LR
 
 **Module responsibilities:**
 
-| Module                   | Responsibility                                | Key Functions                                  |
-| ------------------------ | --------------------------------------------- | ---------------------------------------------- |
-| `version_finder.py`      | Scan directories, parse versions, deduplicate | `find_version_candidates()`                    |
-| `candidate_selection.py` | Select top-3 candidates for symlinks          | `select_top_3_candidates()`                    |
-| `link_status.py`         | Read-only link inspection                     | `list_links()`, `get_link_status()`            |
-| `symlink_operations.py`  | Symlink CRUD (create, cleanup, manage)        | `create_symlink_specs()`, `cleanup_symlinks()` |
-| `prune_operations.py`    | Prune plan computation & execution            | `get_installed_versions()`, `execute_prune()`  |
-| `release_operations.py`  | Remove specific releases                      | `remove_release()`                             |
+| Module                   | Responsibility                                | Key Functions                                                                  |
+| ------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------ |
+| `version_finder.py`      | Scan directories, parse versions, deduplicate | `find_version_candidates()`, `_deduplicate_candidates()`                        |
+| `candidate_selection.py` | Select top-3 candidates for symlinks          | `select_top_3_candidates()`, `select_manual_release_candidates()`              |
+| `link_status.py`         | Read-only link inspection                     | `list_links()`, `has_managed_links()`, `build_expected_link_mapping()`         |
+| `symlink_operations.py`  | Symlink CRUD (create, cleanup, manage)        | `create_symlinks()`, `create_symlink_specs()`, `cleanup_unwanted_links()`      |
+| `prune_operations.py`    | Prune plan computation & execution            | `get_installed_versions()`, `compute_prune_plan()`, `execute_prune_removals()` |
+| `release_operations.py`  | Remove specific releases                      | `remove_release()`, `cleanup_stale_symlinks()`                                 |
 
 ---
 
@@ -582,9 +582,11 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph E2E_COV["One E2E Test Covers 8+ Modules"]
+    subgraph E2E_COV["One E2E Test Covers 10+ Modules"]
         USER["User: 'fetch latest GE-Proton'"]
-        CLI_MOD["cli.py — argument parsing"]
+        CLI_MOD["cli/core.py — entry + parsing"]
+        DISPATCH_MOD["cli/dispatch.py — routing"]
+        HANDLER_MOD["cli/handlers.py — operation handlers"]
         FETCHER_MOD["github_fetcher.py — orchestrate()"]
         RELEASE_MOD["release_manager.py — find_asset()"]
         DOWNLOAD_MOD["asset_downloader.py — download()"]
@@ -596,7 +598,7 @@ graph TD
         RESULT["Symlinks created ✓"]
     end
 
-    USER --> CLI_MOD --> FETCHER_MOD --> RELEASE_MOD --> DOWNLOAD_MOD --> EXTRACT_MOD --> VERSION_MOD --> CANDIDATE_MOD --> SYMLINK_MOD --> LINK_STATUS_MOD --> RESULT
+    USER --> CLI_MOD --> DISPATCH_MOD --> HANDLER_MOD --> FETCHER_MOD --> RELEASE_MOD --> DOWNLOAD_MOD --> EXTRACT_MOD --> VERSION_MOD --> CANDIDATE_MOD --> SYMLINK_MOD --> LINK_STATUS_MOD --> RESULT
 
     style E2E_COV fill:#e1f5e1
 ```
@@ -607,31 +609,30 @@ graph TD
 
 ```mermaid
 mindmap
-    root((Test Suite - 331 tests))
+    root((Test Suite - 328 tests))
         Files
             conftest.py - shared fixtures
-            test_cli.py - 31 tests - CLI main entry
-            test_cli_dispatch.py - 30 tests - CLI dispatch logic
-            test_base_release_fetcher.py - 25 tests - shared workflow
-            test_prune.py - 27 tests - prune feature
-            test_release_manager_e2e.py - 28 tests - discovery
-            test_integration.py - 22 tests - NetworkClient, Spinner
-            test_prune_operations.py - 20 tests - prune standalone ops
-            test_version_finder.py - 19 tests - version discovery
-            test_link_status.py - 16 tests - link inspection
-            test_release_operations.py - 16 tests - release removal
-            test_forgejo_fetcher.py - 23 tests - Forgejo + adapters
-            test_symlink_operations.py - 14 tests - symlink CRUD
-            test_github_fetcher.py - 12 tests - GitHub edge cases
-            test_extraction.py - 12 tests - archive extraction
-            test_link_manager_e2e.py - 10 tests - symlink E2E
-            test_utils.py - 10 tests - version parsing
-            test_cli_handlers.py - 9 tests - CLI handler functions
-            test_cli_validators.py - 7 tests - CLI validation
+            test_cli.py - CLI main entry + parsing + validation
+            test_cli_dispatch.py - dispatch logic
+            test_cli_handlers.py - handler functions
+            test_cli_validators.py - CLI validation
+            test_base_release_fetcher.py - shared workflow + adapter selection
+            test_prune.py - prune feature
+            test_release_manager_e2e.py - discovery + caching
+            test_integration.py - NetworkClient + Spinner
+            test_prune_operations.py - standalone prune ops
+            test_version_finder.py - version discovery
+            test_link_status.py - link inspection
+            test_release_operations.py - release removal
+            test_forgejo_fetcher.py - Forgejo + adapters
+            test_symlink_operations.py - symlink CRUD
+            test_github_fetcher.py - GitHub edge cases
+            test_extraction.py - archive extraction
+            test_link_manager_e2e.py - symlink E2E
+            test_utils.py - version parsing
         Stats
             18 test files
-            331 tests total
-            ~85% coverage
+            328 tests total
             <0.5s execution
         Markers
             integration
@@ -641,17 +642,7 @@ mindmap
             uv run pytest -xvs
             uv run pytest -k ge_proton
             uv run pytest --cov=protonfetcher
-            uv run make quality
-        Recent Additions
-            2026-05 - 8 new test files (323 → 331)
-            CLI split: dispatch, handlers, validators
-            New modules: version_finder, prune_operations,
-            release_operations, symlink_operations,
-            link_status, candidate_selection
-            Adapter selection tests
-            URL delegation tests
-            Platform dispatch tests
-            ReleaseManager adapter tests
+            make quality
 ```
 
 ---
@@ -724,110 +715,43 @@ graph TB
 
 ---
 
-## 16. New Test Classes — 2026-05 Refinement
+## 16. Test Classes — CLI Split & Extracted Modules
 
 ```mermaid
 graph TB
-    subgraph NEW_CLASSES["8 New Test Files (323 → 331)"]
-        subgraph BASE_TESTS["test_base_release_fetcher.py — 8 tests"]
-            AT["TestAdapterSelection<br/>2 tests<br/>Verify adapter per fetcher"]
-            BD["TestBuildDownloadUrl<br/>2 tests<br/>Verify URL per platform"]
-            HA["TestHandleAlreadyExtracted<br/>2 tests<br/>Verify DRY helper behavior"]
-            UF["TestUpdateAllManagedForksPlatformFiltering<br/>2 tests<br/>Verify platform filtering"]
-        end
-
-        subgraph CLI_TESTS["test_cli.py + test_cli_dispatch.py — 4 tests"]
-            FD["TestForkConfigPlatformDispatch<br/>4 tests<br/>Verify CLI dispatch per fork"]
-        end
-
-        subgraph RM_TESTS["test_release_manager_e2e.py — 5 tests"]
-            RA["TestReleaseManagerForgejoAdapter<br/>5 tests<br/>Verify adapter integration"]
-        end
-
-        subgraph FJ_TESTS["test_forgejo_fetcher.py — 1 test"]
-            GA["test_github_adapter_url_construction<br/>1 test<br/>Symmetric adapter tests"]
-        end
-
-        subgraph CLI_SPLIT["test_cli_dispatch.py — 30 tests"]
-            CD["CLI dispatch logic<br/>30 tests<br/>Verify operation routing per flag"]
-        end
-
-        subgraph CLI_HANDLERS["test_cli_handlers.py — 9 tests"]
-            CH["CLI handler functions<br/>9 tests<br/>Verify _handle_* function behavior"]
-        end
-
-        subgraph CLI_VALIDATORS["test_cli_validators.py — 7 tests"]
-            CV["CLI validation<br/>7 tests<br/>Verify mutual exclusivity, defaults"]
-        end
-
-        subgraph PRUNE_OPS["test_prune_operations.py — 20 tests"]
-            PO["prune_operations.py<br/>20 tests<br/>Standalone prune functions"]
-        end
-
-        subgraph VERSION["test_version_finder.py — 19 tests"]
-            VF["version_finder.py<br/>19 tests<br/>Version discovery & dedup"]
-        end
-
-        subgraph LINK_STATUS["test_link_status.py — 16 tests"]
-            LS["link_status.py<br/>16 tests<br/>Read-only link inspection"]
-        end
-
-        subgraph RELEASE_OPS["test_release_operations.py — 16 tests"]
-            RO["release_operations.py<br/>16 tests<br/>Release removal functions"]
-        end
-
-        subgraph SYMLINK_OPS["test_symlink_operations.py — 14 tests"]
-            SO["symlink_operations.py<br/>14 tests<br/>Symlink CRUD operations"]
-        end
+    subgraph CLI_SPLIT["CLI Package Tests"]
+        CD["test_cli_dispatch.py<br/>dispatch logic"]
+        CH["test_cli_handlers.py<br/>handler functions"]
+        CV["test_cli_validators.py<br/>CLI validation"]
     end
 
-    AT --> BASE_TESTS
-    BD --> BASE_TESTS
-    HA --> BASE_TESTS
-    UF --> BASE_TESTS
-    FD --> CLI_TESTS
-    RA --> RM_TESTS
-    GA --> FJ_TESTS
+    subgraph EXTRACTED_TESTS["Extracted Module Tests"]
+        TVF["test_version_finder.py<br/>version discovery & dedup"]
+        TPO["test_prune_operations.py<br/>standalone prune functions"]
+        TLS["test_link_status.py<br/>link inspection"]
+        TRO["test_release_operations.py<br/>release removal"]
+        TSO["test_symlink_operations.py<br/>symlink CRUD"]
+    end
+
+    subgraph ADAPTER_TESTS["Adapter & Platform Tests"]
+        AT["TestAdapterSelection<br/>test_base_release_fetcher.py"]
+        BD["TestBuildDownloadUrl<br/>test_base_release_fetcher.py"]
+        HA["TestHandleAlreadyExtracted<br/>test_base_release_fetcher.py"]
+        UF["TestUpdateAllManagedForksPlatformFiltering<br/>test_base_release_fetcher.py"]
+        FD["TestForkConfigPlatformDispatch<br/>test_cli.py"]
+        RA["TestReleaseManagerForgejoAdapter<br/>test_release_manager_e2e.py"]
+    end
+
     CD --> CLI_SPLIT
-    CH --> CLI_HANDLERS
-    CV --> CLI_VALIDATORS
-    PO --> PRUNE_OPS
-    VF --> VERSION
-    LS --> LINK_STATUS
-    RO --> RELEASE_OPS
-    SO --> SYMLINK_OPS
+    CH --> CLI_SPLIT
+    CV --> CLI_SPLIT
+    TVF --> EXTRACTED_TESTS
+    TPO --> EXTRACTED_TESTS
+    TLS --> EXTRACTED_TESTS
+    TRO --> EXTRACTED_TESTS
+    TSO --> EXTRACTED_TESTS
 
-    style NEW_CLASSES fill:#e1f5e1
-    style BASE_TESTS fill:#e1f0f5
-    style CLI_TESTS fill:#fff4e1
-    style RM_TESTS fill:#f5e1e1
-    style FJ_TESTS fill:#e1f5e1
     style CLI_SPLIT fill:#e1f5e1
-    style CLI_HANDLERS fill:#e1f5e1
-    style CLI_VALIDATORS fill:#e1f5e1
-    style PRUNE_OPS fill:#e1f5e1
-    style VERSION fill:#e1f5e1
-    style LINK_STATUS fill:#e1f5e1
-    style RELEASE_OPS fill:#e1f5e1
-    style SYMLINK_OPS fill:#e1f5e1
+    style EXTRACTED_TESTS fill:#e1f5e1
+    style ADAPTER_TESTS fill:#fff4e1
 ```
-
-### Test Class Summary
-
-| Class                                        | File                                   | Tests | Purpose                                                    |
-| -------------------------------------------- | -------------------------------------- | ----- | ---------------------------------------------------------- |
-| `TestAdapterSelection`                       | `test_base_release_fetcher.py`         | 2     | Verify `github_adapter` / `forgejo_adapter` selection      |
-| `TestBuildDownloadUrl`                       | `test_base_release_fetcher.py`         | 2     | Verify `_build_download_url` delegates to adapter          |
-| `TestHandleAlreadyExtracted`                 | `test_base_release_fetcher.py`         | 2     | Verify DRY helper: skip vs. update paths                   |
-| `TestUpdateAllManagedForksPlatformFiltering` | `test_base_release_fetcher.py`         | 2     | Verify GitHub/Forgejo fork filtering                       |
-| `TestForkConfigPlatformDispatch`             | `test_cli.py` + `test_cli_dispatch.py` | 4     | Verify CLI dispatches DW-Proton→Forgejo, others→GitHub     |
-| `TestReleaseManagerForgejoAdapter`           | `test_release_manager_e2e.py`          | 5     | Verify adapter injection, URL construction, URL difference |
-| `test_github_adapter_url_construction`       | `test_forgejo_fetcher.py`              | 1     | Symmetric to existing `forgejo_adapter` tests              |
-| CLI dispatch logic                           | `test_cli_dispatch.py`                 | 30    | Verify operation routing per flag                          |
-| CLI handler functions                        | `test_cli_handlers.py`                 | 9     | Verify `_handle_*` function behavior                       |
-| CLI validation                               | `test_cli_validators.py`               | 7     | Verify mutual exclusivity, defaults                        |
-| prune_operations.py                          | `test_prune_operations.py`             | 20    | Standalone prune functions                                 |
-| version_finder.py                            | `test_version_finder.py`               | 19    | Version discovery & dedup                                  |
-| link_status.py                               | `test_link_status.py`                  | 16    | Read-only link inspection                                  |
-| release_operations.py                        | `test_release_operations.py`           | 16    | Release removal functions                                  |
-| symlink_operations.py                        | `test_symlink_operations.py`           | 14    | Symlink CRUD operations                                    |

@@ -9,9 +9,17 @@
 
 ```mermaid
 graph TD
-    cli["cli.py"] --> github_fetcher["github_fetcher.py"]
-    cli --> forgejo_fetcher["forgejo_fetcher.py"]
-    cli --> version["__version__.py"]
+    cli_core["cli/core.py"] --> github_fetcher["github_fetcher.py"]
+    cli_core --> forgejo_fetcher["forgejo_fetcher.py"]
+    cli_core --> cli_dispatch["cli/dispatch.py"]
+    cli_core --> cli_handlers["cli/handlers.py"]
+    cli_core --> cli_validators["cli/validators.py"]
+    cli_core --> cli_argparse["cli/argparse_builder.py"]
+
+    cli_dispatch --> cli_handlers
+    cli_handlers --> github_fetcher
+    cli_handlers --> forgejo_fetcher
+    cli_argparse --> cli_fork["cli/fork_utils.py"]
 
     github_fetcher --> base_fetcher["base_release_fetcher.py"]
     forgejo_fetcher --> base_fetcher
@@ -38,13 +46,19 @@ for spinner-based downloads"] -.-> asset_dl
     archive_ext --> fs
     archive_ext --> spinner
 
+    link_mgr --> version_finder["version_finder.py"]
+    link_mgr --> candidate_selection["candidate_selection.py"]
+    link_mgr --> link_status["link_status.py"]
+    link_mgr --> symlink_ops["symlink_operations.py"]
+    link_mgr --> prune_ops["prune_operations.py"]
+    link_mgr --> release_ops["release_operations.py"]
     link_mgr --> fs
 
     adapters --> common_ad["common.py"]
 
     net --> common_net["common.py"]
 
-    common["common.py"] -.-> cli
+    common["common.py"] -.-> cli_core
     common -.-> base_fetcher
     common -.-> release_mgr
     common -.-> asset_dl
@@ -53,7 +67,6 @@ for spinner-based downloads"] -.-> asset_dl
     common -.-> adapters
     common -.-> net
     common -.-> fs
-    common -.-> version
 
     exceptions["exceptions.py"] -.-> base_fetcher
     exceptions -.-> release_mgr
@@ -67,25 +80,23 @@ for spinner-based downloads"] -.-> asset_dl
     utils -.-> spinner
     utils -.-> adapters
 
-    entry["entry.py"] --> cli
-
     class common fill:#d4edda
     class exceptions fill:#f8d7da
     class utils fill:#d1ecf1
-    class version fill:#e8f5e9
 ```
 
 **Legend:** `-->` = direct import, `-.->` = shared dependency (common/exceptions/utils imported by many)
 
 **Notes on actual imports:**
 
-- `cli.py` does NOT import `base_release_fetcher` — it instantiates `GitHubReleaseFetcher` and `ForgejoReleaseFetcher` directly
+- `cli/core.py` instantiates `GitHubReleaseFetcher` and `ForgejoReleaseFetcher` directly (no import of `base_release_fetcher`)
 - `release_manager.py` imports `github_adapter` from `platform_adapters` directly (not via base_fetcher)
 - `asset_downloader.py` uses `urllib.request.urlopen()` for spinner-based downloads (bypasses `NetworkClient`)
 - `spinner.py` imports `format_rate` from `utils.py`
 - `network.py` imports `Headers`, `ProcessResult` from `common.py`
 - `archive_extractor.py` uses `subprocess` and `tarfile` from stdlib
-- `link_manager.py` uses `re` from stdlib; `resolve_directory()` and `resolve_directory_candidates()` are module-level functions (not class methods)
+- `link_manager.py` is a thin facade — delegates to 6 extracted modules (`version_finder`, `candidate_selection`, `link_status`, `symlink_operations`, `prune_operations`, `release_operations`)
+- `resolve_directory()` and `resolve_directory_candidates()` are module-level functions in `link_manager.py` (not class methods)
 
 ---
 
@@ -93,10 +104,11 @@ for spinner-based downloads"] -.-> asset_dl
 
 ```mermaid
 graph TD
-    L6["**Layer 6 — Interface**<br/>cli.py · entry.py"]
+    L6["**Layer 6 — Interface**<br/>cli/core.py · cli/dispatch.py · cli/handlers.py<br/>cli/validators.py · cli/argparse_builder.py · cli/fork_utils.py"]
     L5["**Layer 5 — Markers**<br/>github_fetcher.py · forgejo_fetcher.py"]
     L4["**Layer 4 — Orchestrator**<br/>base_release_fetcher.py"]
     L3["**Layer 3 — Components**<br/>release_manager.py · asset_downloader.py · archive_extractor.py · link_manager.py"]
+    L3a["**Layer 3a — Extracted**<br/>version_finder.py · candidate_selection.py · link_status.py<br/>symlink_operations.py · prune_operations.py · release_operations.py"]
     L3b["**Layer 3b — Progress**<br/>spinner.py"]
     L2["**Layer 2 — Adapters**<br/>platform_adapters.py (github_adapter · forgejo_adapter)"]
     L1["**Layer 1 — Clients**<br/>network.py · filesystem.py"]
@@ -106,8 +118,10 @@ graph TD
     L5 --> L4
     L4 --> L3
     L4 --> L3b
+    L3 --> L3a
     L3 --> L2
     L3 --> L3b
+    L3a --> L0
     L2 --> L1
     L1 --> L0
     L3 --> L0
@@ -118,6 +132,7 @@ graph TD
     class L1 fill:#e3f2fd,stroke:#2196f3
     class L2 fill:#fff3e0,stroke:#ff9800
     class L3 fill:#f3e5f5,stroke:#9c27b0
+    class L3a fill:#e1f5fe,stroke:#00bcd4
     class L3b fill:#e1f5fe,stroke:#00bcd4
     class L4 fill:#fce4ec,stroke:#e91e63
     class L5 fill:#fff9c4,stroke:#fdd835
@@ -130,6 +145,7 @@ graph TD
 - `asset_downloader` calls `release_manager.get_remote_asset_size()` (reverse dependency for size checks)
 - `asset_downloader` uses `urllib.request` directly for spinner downloads (bypasses `network.py`)
 - `spinner` imports `format_rate` from `utils`
+- `link_manager` delegates to Layer 3a extracted modules — it is a thin orchestration facade
 
 ---
 
@@ -252,7 +268,7 @@ sequenceDiagram
     RM-->>Fetcher: tag
 
     Fetcher->>Fetcher: _get_expected_directories(extract_dir, release_tag, fork)
-    Note over Fetcher: resolve_directory_candidates() from link_manager
+    Note over Fetcher: resolve_directory_candidates() from link_manager module-level
 
     Fetcher->>Fetcher: _check_existing_directory(unpacked, alternative, fork)
     alt already extracted
@@ -336,7 +352,7 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-    ROOT["CLI Entry\nentry.py → cli.main()"]
+    ROOT["CLI Entry\ncli/core.py::main()"]
 
     ROOT --> DEFAULT["default (no flags)\n→ ls all forks' links"]
     ROOT --> FETCH["--fork / -f VALUE\nfetch_and_extract()"]
@@ -373,9 +389,9 @@ graph TD
 
 **Default behavior (no flags):** Calls `_handle_ls_operation` with `list_all_forks=True` — lists links for ALL forks.
 
-**Dispatch logic in `_dispatch()`:** Operations are resolved by checking `args` flags in priority order: `ls` → `list` → `relink` → `rm` → `prune` → `check`. If none match, falls through to `_resolve_default_operation()` which checks for explicit `--fork`/`--release` flags or defaults to listing all forks' links.
+**Dispatch logic in `cli/dispatch.py::dispatch()`:** Operations are resolved by checking `args` flags in priority order: `ls` → `list` → `relink` → `rm` → `prune` → `check`. If none match, falls through to `_resolve_default_operation()` which checks for explicit `--fork`/`--release` flags or defaults to listing all forks' links.
 
-**Validation:** `_validate_mutually_exclusive_args()` enforces: `--check` vs `--dry-run`, `--check` vs `--list`/`--ls`, `--prune` vs `--check`, `--keep >= 1`, `--dry-run` vs read-only ops, `--relink` requires `--fork`. `--rm` is no longer mutually exclusive with other operations.
+**Validation:** `cli/validators.py::validate_mutually_exclusive_args()` enforces: `--check` vs `--dry-run`, `--check` vs `--list`/`--ls`, `--prune` vs `--check`, `--keep >= 1`, `--dry-run` vs read-only ops, `--relink` requires `--fork`. `--rm` is no longer mutually exclusive with other operations.
 
 ---
 
@@ -512,62 +528,88 @@ graph LR
 
     test_fetcher["test_base_release_fetcher.py"]
     test_cli["test_cli.py"]
+    test_cli_dispatch["test_cli_dispatch.py"]
+    test_cli_handlers["test_cli_handlers.py"]
+    test_cli_validators["test_cli_validators.py"]
     test_extract["test_extraction.py"]
     test_github["test_github_fetcher.py"]
     test_forgejo["test_forgejo_fetcher.py"]
     test_integration["test_integration.py"]
     test_links["test_link_manager_e2e.py"]
+    test_link_status["test_link_status.py"]
     test_prune["test_prune.py"]
+    test_prune_ops["test_prune_operations.py"]
     test_rm_e2e["test_release_manager_e2e.py"]
+    test_release_ops["test_release_operations.py"]
+    test_symlink_ops["test_symlink_operations.py"]
     test_utils["test_utils.py"]
+    test_version["test_version_finder.py"]
 
     conftest -.-> test_fetcher
     conftest -.-> test_cli
+    conftest -.-> test_cli_dispatch
+    conftest -.-> test_cli_handlers
+    conftest -.-> test_cli_validators
     conftest -.-> test_extract
     conftest -.-> test_github
     conftest -.-> test_forgejo
     conftest -.-> test_integration
     conftest -.-> test_links
+    conftest -.-> test_link_status
     conftest -.-> test_prune
+    conftest -.-> test_prune_ops
     conftest -.-> test_rm_e2e
+    conftest -.-> test_release_ops
+    conftest -.-> test_symlink_ops
     conftest -.-> test_utils
+    conftest -.-> test_version
 
     class test_fetcher fill:#fce4ec
     class test_cli fill:#e0f7fa
+    class test_cli_dispatch fill:#e0f7fa
+    class test_cli_handlers fill:#e0f7fa
+    class test_cli_validators fill:#e0f7fa
     class test_extract fill:#e8f5e9
     class test_github fill:#e3f2fd
     class test_forgejo fill:#fff3e0
     class test_integration fill:#f3e5f5
     class test_links fill:#e1f5fe
+    class test_link_status fill:#e1f5fe
     class test_prune fill:#fff9c4
+    class test_prune_ops fill:#fff9c4
     class test_rm_e2e fill:#ffebee
+    class test_release_ops fill:#ffebee
+    class test_symlink_ops fill:#e1f5fe
     class test_utils fill:#f1f8e9
+    class test_version fill:#f1f8e9
 ```
 
 ---
 
 ## 12. Quick Navigation — "Where Do I Find…"
 
-| Question                               | File                                             | Key Symbol                                                                          |
-| -------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Add a new fork?                        | `common.py`                                      | `ForkConfig`, `FORKS` dict, `ForkName` enum                                         |
-| Add a new platform?                    | `platform_adapters.py` + new fetcher marker      | `PlatformAdapter` protocol, singleton                                               |
-| Change URL construction?               | `platform_adapters.py`                           | `build_api_url`, `build_download_url`                                               |
-| Change download logic?                 | `asset_downloader.py`                            | `download_asset()`, `download_with_spinner()`                                       |
-| Change extraction?                     | `archive_extractor.py`                           | `extract_archive()`, `extract_gz_archive()`                                         |
-| Change symlink behavior?               | `link_manager.py`                                | `manage_proton_links()`, `create_symlinks()`                                        |
-| Directory resolution (tag → path)?     | `link_manager.py`                                | `resolve_directory()`, `resolve_directory_candidates()` (module-level)              |
-| Change CLI flags?                      | `cli.py`                                         | `argparse.ArgumentParser`, `_handle_*`, `_dispatch()`                               |
-| Change version parsing?                | `utils.py` + `common.py`                         | `parse_version()`, `ForkConfig.version_pattern`                                     |
-| Change caching?                        | `release_manager.py`                             | `_cache_*` methods, XDG path                                                        |
-| Change progress display?               | `spinner.py`                                     | `Spinner` class, `format_progress_bar()`, `build_display_line()`                    |
-| Change error types?                    | `exceptions.py`                                  | `ProtonFetcherError` hierarchy                                                      |
-| Wire up a new operation?               | `base_release_fetcher.py`                        | Orchestrator methods                                                                |
-| Network calls?                         | `network.py`                                     | `NetworkClient` (curl subprocess)                                                   |
-| Filesystem abstraction?                | `filesystem.py`                                  | `FileSystemClient` (pathlib wrapper)                                                |
-| Version string?                        | `__version__.py`                                 | `__version__`, `_get_version()`                                                     |
-| Asset discovery (API → HTML fallback)? | `release_manager.py`                             | `_try_api_approach()`, `_try_html_fallback()`                                       |
-| Multi-fork update loop?                | `base_release_fetcher.py`                        | `update_all_managed_forks()`                                                        |
-| Dry-run logic?                         | `base_release_fetcher.py`                        | `_dry_run_workflow()`                                                               |
-| Pruning logic?                         | `prune_operations.py`                            | `prune_releases()`, `compute_prune_plan()` (symlinks are candidates, not protected) |
-| Update checking?                       | `base_release_fetcher.py` + `release_manager.py` | `check_for_updates()`, `check_for_newer_release()`                                  |
+| Question                               | File                                             | Key Symbol                                                                           |
+| -------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Add a new fork?                        | `common.py`                                      | `ForkConfig`, `FORKS` dict, `ForkName` enum                                          |
+| Add a new platform?                    | `platform_adapters.py` + new fetcher marker      | `PlatformAdapter` protocol, singleton                                                |
+| Change URL construction?               | `platform_adapters.py`                           | `build_api_url`, `build_download_url`                                                |
+| Change download logic?                 | `asset_downloader.py`                            | `download_asset()`, `download_with_spinner()`                                        |
+| Change extraction?                     | `archive_extractor.py`                           | `extract_archive()`, `extract_gz_archive()`                                          |
+| Change symlink behavior?               | `symlink_operations.py`                          | `create_symlinks()`, `cleanup_unwanted_links()`                                      |
+| Directory resolution (tag → path)?     | `link_manager.py` + `version_finder.py`          | `resolve_directory()`, `resolve_directory_candidates()`, `find_version_candidates()` |
+| Change CLI flags?                      | `cli/argparse_builder.py`                        | `build_parser()`, `parse_args()`                                                     |
+| Change CLI dispatch?                   | `cli/dispatch.py` + `cli/handlers.py`            | `dispatch()`, `handle_*()` functions                                                 |
+| Change CLI validation?                 | `cli/validators.py`                              | `validate_mutually_exclusive_args()`, `set_default_fork()`                           |
+| Change version parsing?                | `utils.py` + `common.py`                         | `parse_version()`, `ForkConfig.version_pattern`                                      |
+| Change caching?                        | `release_manager.py`                             | `_cache_*` methods, XDG path                                                         |
+| Change progress display?               | `spinner.py`                                     | `Spinner` class, `format_progress_bar()`, `build_display_line()`                     |
+| Change error types?                    | `exceptions.py`                                  | `ProtonFetcherError` hierarchy                                                       |
+| Wire up a new operation?               | `cli/handlers.py` + `cli/dispatch.py`            | Add handler, register in `dispatch()`                                                |
+| Network calls?                         | `network.py`                                     | `NetworkClient` (curl subprocess)                                                    |
+| Filesystem abstraction?                | `filesystem.py`                                  | `FileSystemClient` (pathlib wrapper)                                                 |
+| Version string?                        | `__version__.py`                                 | `__version__`, `_get_version()`                                                      |
+| Asset discovery (API → HTML fallback)? | `release_manager.py`                             | `_try_api_approach()`, `_try_html_fallback()`                                        |
+| Multi-fork update loop?                | `base_release_fetcher.py`                        | `update_all_managed_forks()`                                                         |
+| Dry-run logic?                         | `base_release_fetcher.py`                        | `_dry_run_workflow()`                                                                |
+| Pruning logic?                         | `prune_operations.py`                            | `prune_releases()`, `compute_prune_plan()` (symlinks are protected as keep-eligible) |
+| Update checking?                       | `base_release_fetcher.py` + `release_manager.py` | `check_for_updates()`, `check_for_newer_release()`                                   |
