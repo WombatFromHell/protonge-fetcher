@@ -107,16 +107,15 @@ def _remove_all_fork_symlinks(
 def _cleanup_stale_symlinks(
     extract_dir: Path,
     fork: ForkName,
-    link_manager,
+    file_system,
 ) -> None:
     """Remove dangling symlinks and update stale ones.
 
     Delegates to release_operations.cleanup_stale_symlinks.
     """
-    from protonfetcher.filesystem import FileSystemClient
     from protonfetcher.release_operations import cleanup_stale_symlinks as _cleanup
 
-    _cleanup(extract_dir, fork, FileSystemClient())
+    _cleanup(extract_dir, fork, file_system)
 
 
 def handle_rm_operation(
@@ -163,7 +162,7 @@ def handle_rm_operation(
             print(f"Removed all symlinks for {rm_fork.value}")
 
     # Always clean up dangling/stale symlinks after removal
-    _cleanup_stale_symlinks(extract_dir, rm_fork, fork_fetcher.link_manager)
+    _cleanup_stale_symlinks(extract_dir, rm_fork, fork_fetcher.file_system_client)
 
 
 def _collect_prune_candidates(
@@ -309,12 +308,12 @@ def handle_check_operation(
         forks_to_check = list(FORKS.keys())
         check_managed_only = True
 
-    updates_available = any(
-        _check_single_fork(
+    updates_available = False
+    for fork in forks_to_check:
+        if _check_single_fork(
             fetcher, forgejo_fetcher, extract_dir, fork, check_managed_only
-        )
-        for fork in forks_to_check
-    )
+        ):
+            updates_available = True
 
     if updates_available:
         raise SystemExit(0)

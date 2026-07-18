@@ -13,7 +13,6 @@ from .common import (
     NetworkClientProtocol,
 )
 from .exceptions import NetworkError
-from .release_manager import ReleaseManager
 from .spinner import Spinner
 from .utils import format_bytes
 
@@ -80,8 +79,8 @@ class AssetDownloader:
         tag: str,
         asset_name: str,
         out_path: Path,
-        release_manager: ReleaseManager,
         download_url: str | None = None,
+        remote_size: int | None = None,
     ) -> Path:
         """Download a specific asset from a release with progress bar.
         If a local file with the same name and size already exists, skip download.
@@ -91,14 +90,14 @@ class AssetDownloader:
             tag: Release tag
             asset_name: Asset filename to download
             out_path: Path where the asset will be saved
-            release_manager: ReleaseManager instance to get remote asset size
             download_url: Optional custom download URL (defaults to GitHub URL)
+            remote_size: Pre-fetched remote file size; if None, size check is skipped
 
         Returns:
             Path to the downloaded file
 
         Raises:
-            FetchError: If download fails or asset not found
+            NetworkError: If download fails or asset not found
         """
         if download_url is None:
             download_url = (
@@ -107,9 +106,8 @@ class AssetDownloader:
         logger.info(f"Checking if asset needs download from: {download_url}")
 
         # Check if local file already exists and has the same size as remote
-        if self.file_system_client.exists(out_path):
+        if self.file_system_client.exists(out_path) and remote_size is not None:
             local_size = self.file_system_client.size(out_path)
-            remote_size = release_manager.get_remote_asset_size(repo, tag, asset_name)
 
             if local_size == remote_size:
                 logger.info(

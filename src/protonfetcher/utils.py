@@ -1,56 +1,8 @@
 """Utility functions for ProtonFetcher."""
 
 import re
-from typing import Type
 
 from .common import FORKS, ForkName
-
-
-def validate_protocol_instance(obj: object, protocol: Type) -> bool:
-    """Validate that an object implements a protocol at runtime.
-
-    This utility function checks if an object conforms to a given protocol by verifying
-    that all required methods and attributes are present and have the correct types.
-    Useful for debugging and testing protocol implementations during development.
-
-    Args:
-        obj: Object to validate
-        protocol: Protocol class to validate against
-
-    Returns:
-        True if object implements the protocol, False otherwise
-
-    Example:
-        >>> from protonfetcher.common import NetworkClientProtocol
-        >>> from protonfetcher.network import NetworkClient
-        >>> client = NetworkClient(timeout=30)
-        >>> validate_protocol_instance(client, NetworkClientProtocol)
-        True
-
-    Note:
-        This is a runtime validation utility and should not be used in production
-        performance-critical code. It's primarily intended for debugging and testing.
-    """
-    try:
-        # Check if all protocol methods and attributes are present
-        for attr_name in dir(protocol):
-            if attr_name.startswith("_"):
-                continue
-
-            attr = getattr(protocol, attr_name)
-
-            if callable(attr):
-                # It's a method - check if object has callable with same name
-                obj_attr = getattr(obj, attr_name, None)
-                if not callable(obj_attr):
-                    return False
-            else:
-                # It's an attribute - check if object has it
-                if not hasattr(obj, attr_name):
-                    return False
-        return True
-    except Exception:
-        return False
 
 
 def parse_version(
@@ -123,7 +75,7 @@ def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
     return template.format(tag=tag)
 
 
-def format_size(bytes_value: int) -> str:
+def format_bytes(bytes_value: int) -> str:
     """Format bytes into a human-readable string using binary units (KiB, MiB, GiB)."""
     if bytes_value < 1024:
         return f"{bytes_value} B"
@@ -133,10 +85,6 @@ def format_size(bytes_value: int) -> str:
         return f"{bytes_value / (1024 * 1024):.2f} MiB"
     else:
         return f"{bytes_value / (1024 * 1024 * 1024):.2f} GiB"
-
-
-# Backward-compat alias
-format_bytes = format_size
 
 
 def format_rate(bytes_per_sec: float) -> str:

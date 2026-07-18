@@ -5,10 +5,6 @@ class ProtonFetcherError(Exception):
     """Base exception for ProtonFetcher operations."""
 
 
-# For backward compatibility with existing code
-FetchError = ProtonFetcherError
-
-
 class NetworkError(ProtonFetcherError):
     """Raised when network operations fail."""
 

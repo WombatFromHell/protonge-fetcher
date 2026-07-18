@@ -8,15 +8,12 @@ import logging
 from pathlib import Path
 
 from .common import (
-    FORKS,
     FileSystemClientProtocol,
     ForkName,
-    VersionCandidateList,
-    VersionTuple,
 )
 from .exceptions import LinkManagementError
-from .filesystem import FileSystemClient
-from .version_finder import find_version_candidates
+from .link_status import _get_link_names
+from .version_finder import _deduplicate_candidates, find_version_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +39,9 @@ def get_installed_versions(
     if not candidates:
         return []
 
-    # Remove duplicates, preferring standard naming
     candidates = _deduplicate_candidates(candidates)
-
-    # Sort by version (newest first)
     candidates.sort(key=lambda t: t[0], reverse=True)
 
-    # Extract tag names from directory paths
     return [path.name for _, path in candidates]
 
 
@@ -80,42 +73,6 @@ def get_linked_versions(
     return linked
 
 
-def _deduplicate_candidates(
-    candidates: VersionCandidateList,
-) -> VersionCandidateList:
-    """Remove duplicate versions, preferring standard naming.
-
-    Args:
-        candidates: List of (version, path) tuples
-
-    Returns:
-        Deduplicated list of (version, path) tuples
-    """
-    seen: set[VersionTuple] = set()
-    deduplicated: VersionCandidateList = []
-
-    for version, path in candidates:
-        if version not in seen:
-            seen.add(version)
-            deduplicated.append((version, path))
-
-    return deduplicated
-
-
-def _get_fork_link_names(extract_dir: Path, fork: ForkName) -> tuple[Path, Path, Path]:
-    """Get the three symlink paths for a fork.
-
-    Returns:
-        Tuple of (main, fb1, fb2) symlink paths
-    """
-    suffixes = FORKS[fork].link_names
-    return (
-        extract_dir / suffixes[0],
-        extract_dir / suffixes[1] if len(suffixes) > 1 else Path(),
-        extract_dir / suffixes[2] if len(suffixes) > 2 else Path(),
-    )
-
-
 def compute_prune_plan(
     extract_dir: Path,
     fork: ForkName,
@@ -143,7 +100,7 @@ def compute_prune_plan(
         return [], []
 
     # Get symlink paths for this fork
-    main, fb1, fb2 = _get_fork_link_names(extract_dir, fork)
+    main, fb1, fb2 = _get_link_names(extract_dir, fork)
     symlink_paths = [main, fb1, fb2]
 
     # Build mapping: symlink_path -> target_dir_name
@@ -231,7 +188,7 @@ def prune_releases(
         fork: The Proton fork name to prune
         keep: Number of symlinked versions to retain (0 = prune all)
         dry_run: If True, only report what would be removed
-        file_system: File system client (uses default if None)
+        file_system: File system client
 
     Returns:
         Tuple of (kept_versions, pruned_versions) lists
@@ -243,6 +200,8 @@ def prune_releases(
         raise ValueError("keep must be at least 0")
 
     if file_system is None:
+        from .filesystem import FileSystemClient
+
         file_system = FileSystemClient()
 
     kept, pruned = compute_prune_plan(extract_dir, fork, keep, file_system)

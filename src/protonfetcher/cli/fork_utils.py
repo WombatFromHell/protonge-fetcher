@@ -10,6 +10,7 @@ from typing import Any, Union
 from protonfetcher.common import DEFAULT_FORK, FORKS, ForkName
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
+from protonfetcher.link_status import _get_link_names
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +119,4 @@ def get_link_names_for_fork(
     Returns:
         Tuple of (main, fb1, fb2) Path objects
     """
-    suffixes = FORKS[fork].link_names
-    return (
-        extract_dir / suffixes[0],
-        extract_dir / suffixes[1],
-        extract_dir / suffixes[2],
-    )
+    return _get_link_names(extract_dir, fork)

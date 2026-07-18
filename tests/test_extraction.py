@@ -164,66 +164,6 @@ class TestSystemTarFallback:
 
 
 # =============================================================================
-# Archive Info Tests
-# =============================================================================
-
-
-class TestArchiveInfo:
-    """Test archive information retrieval."""
-
-    @pytest.mark.parametrize(
-        "archive_name,members,expected_count,expected_size",
-        [
-            (
-                "test.tar.gz",
-                [{"name": "file.txt", "is_dir": False, "size": 1024}],
-                1,
-                1024,
-            ),
-            ("test.tar.xz", [{"name": "dir", "is_dir": True, "size": 0}], 1, 0),
-            ("empty.tar.gz", [], 0, 0),
-        ],
-    )
-    def test_get_archive_info(
-        self,
-        archive_name: str,
-        members: list[dict],
-        expected_count: int,
-        expected_size: int,
-        mocker: Any,
-        mock_filesystem_client: Any,
-        mock_tarfile_operations: Any,
-    ) -> None:
-        """Test getting info from archives."""
-        extractor = ArchiveExtractor(mock_filesystem_client)
-        archive_path = Path(f"/mock/{archive_name}")
-
-        mock_filesystem_client.exists.return_value = True
-        mock_tarfile_operations(members=members)
-
-        info = extractor.get_archive_info(archive_path)
-
-        assert info["file_count"] == expected_count
-        assert info["total_size"] == expected_size
-
-    def test_get_archive_info_read_error(
-        self,
-        mocker: Any,
-        mock_filesystem_client: Any,
-        mock_tarfile_operations: Any,
-    ) -> None:
-        """Test getting info from corrupted archive raises error."""
-        extractor = ArchiveExtractor(mock_filesystem_client)
-        archive_path = Path("/mock/corrupted.tar.gz")
-
-        mock_filesystem_client.exists.return_value = True
-        mock_tarfile_operations(raise_on_open=tarfile.TarError("corrupted"))
-
-        with pytest.raises(ExtractionError, match="Error reading archive"):
-            extractor.get_archive_info(archive_path)
-
-
-# =============================================================================
 # Asset Download Tests
 # =============================================================================
 

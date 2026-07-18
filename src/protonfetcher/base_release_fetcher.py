@@ -52,7 +52,6 @@ class BaseReleaseFetcher:
         timeout: int = DEFAULT_TIMEOUT,
         network_client: Optional[NetworkClientProtocol] = None,
         file_system_client: Optional[FileSystemClientProtocol] = None,
-        spinner_cls: Optional[Any] = None,
     ) -> None:
         self.timeout = timeout
         self.network_client = network_client or NetworkClient(timeout=timeout)
@@ -473,13 +472,16 @@ class BaseReleaseFetcher:
 
         archive_path = output_dir / asset_name
         download_url = self._build_download_url(repo, release_tag, asset_name)
+        remote_size = self.release_manager.get_remote_asset_size(
+            repo, release_tag, asset_name
+        )
         self.asset_downloader.download_asset(
             repo,
             release_tag,
             asset_name,
             archive_path,
-            self.release_manager,
             download_url=download_url,
+            remote_size=remote_size,
         )
         return archive_path
 

@@ -14,7 +14,7 @@ from .common import (
     VersionTuple,
 )
 from .utils import parse_version
-from .version_finder import find_version_candidates
+from .version_finder import _deduplicate_candidates, find_version_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -101,23 +101,3 @@ def select_regular_release_candidates(
     candidates.sort(key=lambda t: t[0], reverse=True)
     top_3: VersionCandidateList = candidates[:3]
     return top_3
-
-
-def _deduplicate_candidates(
-    candidates: VersionCandidateList,
-) -> VersionCandidateList:
-    """Remove duplicate versions, preferring standard naming.
-
-    Args:
-        candidates: List of (version, path) tuples
-
-    Returns:
-        Deduplicated list of candidates
-    """
-    seen: set[VersionTuple] = set()
-    result: VersionCandidateList = []
-    for version, path in candidates:
-        if version not in seen:
-            seen.add(version)
-            result.append((version, path))
-    return result

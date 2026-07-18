@@ -4,12 +4,10 @@ import logging
 import subprocess
 import tarfile
 from pathlib import Path
-from typing import Dict
 
 from .common import DEFAULT_TIMEOUT, FileSystemClientProtocol
 from .exceptions import ExtractionError, ProtonFetcherError
 from .spinner import Spinner
-from .utils import format_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -24,22 +22,6 @@ class ArchiveExtractor:
     ) -> None:
         self.file_system_client = file_system_client
         self.timeout = timeout
-
-    def get_archive_info(self, archive_path: Path) -> Dict[str, int]:
-        """
-        Get information about the archive without fully extracting it.
-
-        Returns:
-            Dictionary with archive info: {"file_count": int, "total_size": int}
-        """
-        try:
-            with tarfile.open(archive_path, "r:*") as tar:
-                members = tar.getmembers()
-                total_files = len(members)
-                total_size = sum(m.size for m in members)
-                return {"file_count": total_files, "total_size": total_size}
-        except Exception as e:
-            raise ExtractionError(f"Error reading archive: {e}")
 
     def _get_archive_format(self, archive_path: Path) -> str:
         """Determine archive format from filename.
@@ -66,12 +48,9 @@ class ArchiveExtractor:
         Raises:
             ProtonFetcherError: If extraction fails
         """
-        if show_progress and show_file_details:
-            return self.extract_with_tarfile(archive_path, target_dir)
-        else:
-            return self.extract_with_tarfile(
-                archive_path, target_dir, show_progress, show_file_details
-            )
+        return self.extract_with_tarfile(
+            archive_path, target_dir, show_progress, show_file_details
+        )
 
     def _extract_with_fallback(
         self,
@@ -188,61 +167,27 @@ class ArchiveExtractor:
         show_progress: bool = True,
         show_file_details: bool = True,
     ) -> Path:
-        """Extract archive using tarfile library."""
+        """Extract archive using tarfile library.
+
+        ponytail: no pre-scan for stats — uses indeterminate spinner instead of
+        opening the archive twice.
+        """
         self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
 
-        # Get archive info
-        try:
-            archive_info = self.get_archive_info(archive_path)
-            total_files = archive_info["file_count"]
-            total_size = archive_info["total_size"]
-            logger.info(
-                f"Archive contains {total_files} files, total size: {format_bytes(total_size)}"
-            )
-        except Exception as e:
-            logger.error(f"Error reading archive: {e}")
-            raise ExtractionError(f"Failed to read archive {archive_path}: {e}")
-
-        # Initialize spinner
         spinner = Spinner(
             desc=f"Extracting {archive_path.name}",
-            disable=False,
-            fps_limit=10.0,  # Reduced FPS to prevent excessive terminal updates
+            disable=not show_progress,
+            fps_limit=10.0,
             show_progress=show_progress,
         )
 
         try:
             with spinner:
                 with tarfile.open(archive_path, "r:*") as tar:
-                    extracted_files = 0
-                    extracted_size = 0
-
                     for member in tar:
-                        # Extract the file
                         tar.extract(member, path=target_dir, filter="data")
-                        extracted_files += 1
-                        extracted_size += member.size
+                        spinner.update(1)
 
-                        # Format file name to fit in terminal
-                        filename = member.name
-                        if len(filename) > 30:
-                            filename = "..." + filename[-27:]
-
-                        # Update the spinner with current progress
-                        if show_file_details:
-                            spinner.update_progress(
-                                extracted_files,
-                                total_files,
-                                prefix=filename,  # Just show the filename, not "Extracting: ..."
-                                suffix=f"({extracted_files}/{total_files}) [{format_bytes(extracted_size)}/{format_bytes(total_size)}]",
-                            )
-                        else:
-                            spinner.update_progress(
-                                extracted_files,
-                                total_files,
-                            )
-
-                # Ensure the spinner shows 100% completion
                 spinner.finish()
 
             logger.info(f"Extracted {archive_path} to {target_dir}")

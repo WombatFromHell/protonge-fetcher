@@ -14,6 +14,9 @@ from .common import (
 )
 from .exceptions import LinkManagementError
 from .link_status import (
+    _get_link_names as _get_link_names_from_status,
+)
+from .link_status import (
     build_expected_link_mapping as _build_expected_link_mapping,
 )
 from .link_status import (
@@ -114,12 +117,7 @@ class LinkManager:
         Returns:
             Tuple of three Path objects: (main, fallback1, fallback2)
         """
-        suffixes = FORKS[fork].link_names
-        return (
-            extract_dir / suffixes[0],
-            extract_dir / suffixes[1],
-            extract_dir / suffixes[2],
-        )
+        return _get_link_names_from_status(extract_dir, fork)
 
     def _find_tag_directory(self, extract_dir: Path, tag: str, fork: ForkName) -> Path:
         """Find tag directory using fork-specific templates.
@@ -279,7 +277,7 @@ class LinkManager:
         self, extract_dir: Path, fork: ForkName
     ) -> tuple[Path, Path, Path]:
         """Get the symlink names for the fork."""
-        return self.get_link_names_for_fork(extract_dir, fork)
+        return _get_link_names_from_status(extract_dir, fork)
 
     def _get_expected_manual_release_path(
         self, extract_dir: Path, tag: str, fork: ForkName

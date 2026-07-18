@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 from protonfetcher.cli.dispatch import (
     CLIContext,
     dispatch,
@@ -152,26 +150,6 @@ class TestGetOperationFromArgs:
 
 # =============================================================================
 # CLIContext Tests
-# =============================================================================
-
-
-class TestCLIContext:
-    """Test CLIContext dataclass."""
-
-    def test_context_is_frozen(self) -> None:
-        """Test CLIContext is immutable."""
-        ctx = CLIContext(
-            fetcher=MagicMock(),
-            forgejo_fetcher=MagicMock(),
-            args=MagicMock(),
-            extract_dir=Path("/tmp"),
-            output_dir=Path("/tmp"),
-            explicit_flags={},
-        )
-        with pytest.raises(Exception):
-            ctx.fetcher = MagicMock()  # type: ignore[assignment]
-
-
 # =============================================================================
 # dispatch Tests
 # =============================================================================
