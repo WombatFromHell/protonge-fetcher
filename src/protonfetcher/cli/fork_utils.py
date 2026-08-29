@@ -52,8 +52,8 @@ def get_fork_fetcher(
     forgejo_fetcher: ForgejoReleaseFetcher,
     fork: ForkName,
 ):
-    """Return the appropriate fetcher for the given fork."""
-    if fork == ForkName.DW_PROTON:
+    """Return the appropriate fetcher for the given fork (by its platform)."""
+    if FORKS[fork].platform == "forgejo":
         return forgejo_fetcher
     return fetcher
 

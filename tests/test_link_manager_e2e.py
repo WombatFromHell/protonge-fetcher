@@ -308,3 +308,37 @@ class TestGetInstalledVersions:
         result = lm.get_installed_versions(extract_dir, fork)
 
         assert result == []
+
+
+class TestGeProtonArchDirectory:
+    """Regression: recent GE-Proton archives extract to a *-x86_64 directory."""
+
+    def test_resolves_x86_64_directory(self, tmp_path: Path) -> None:
+        """find_tag_directory resolves GE-Proton<ver>-x86_64 for manual releases."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+        (extract_dir / "GE-Proton11-6-x86_64").mkdir()
+
+        fs = FileSystemClient()
+        lm = LinkManager(fs)
+
+        result = lm.find_tag_directory(
+            extract_dir, "GE-Proton11-6", ForkName.GE_PROTON, is_manual_release=True
+        )
+
+        assert result == extract_dir / "GE-Proton11-6-x86_64"
+
+    def test_legacy_directory_still_resolves(self, tmp_path: Path) -> None:
+        """The legacy (no-arch-suffix) directory name remains supported."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+        (extract_dir / "GE-Proton11-6").mkdir()
+
+        fs = FileSystemClient()
+        lm = LinkManager(fs)
+
+        result = lm.find_tag_directory(
+            extract_dir, "GE-Proton11-6", ForkName.GE_PROTON, is_manual_release=True
+        )
+
+        assert result == extract_dir / "GE-Proton11-6"

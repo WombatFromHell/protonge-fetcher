@@ -435,7 +435,7 @@ FORKS: dict[ForkName, ForkConfig] = {
             ["EM-", "proton-EM-", "cachyos-", "proton-cachyos-", "dwproton-"]
         ),
         asset_template="{tag}.tar.gz",
-        dir_name_templates=("{tag}",),
+        dir_name_templates=("{tag}-x86_64", "{tag}"),
         platform="github",
     ),
     ForkName.PROTON_EM: ForkConfig(

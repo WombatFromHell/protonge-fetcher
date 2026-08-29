@@ -31,10 +31,7 @@ from .link_status import (
 from .prune_operations import prune_releases as _prune_releases
 from .release_operations import remove_release as _remove_release
 from .symlink_operations import create_symlinks as _create_symlinks
-from .version_finder import (
-    _deduplicate_candidates,
-    find_version_candidates,
-)
+from .version_finder import _deduplicate_candidates, find_version_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -119,40 +116,6 @@ class LinkManager:
         """
         return _get_link_names_from_status(extract_dir, fork)
 
-    def _find_tag_directory(self, extract_dir: Path, tag: str, fork: ForkName) -> Path:
-        """Find tag directory using fork-specific templates.
-
-        Args:
-            extract_dir: Directory to search
-            tag: Release tag
-            fork: The fork name
-
-        Returns:
-            Path to the found directory
-
-        Raises:
-            LinkManagementError: If directory not found
-        """
-        return resolve_directory(extract_dir, tag, fork, self.file_system_client)
-
-    def _validate_find_tag_inputs(
-        self,
-        extract_dir: Path,
-        tag: str,
-        fork: ForkName,
-    ) -> None:
-        """Validate inputs for find_tag_directory.
-
-        Raises:
-            ValueError: If inputs are invalid
-        """
-        if not isinstance(extract_dir, Path):
-            raise ValueError(f"extract_dir must be a Path, got {type(extract_dir)}")
-        if not isinstance(tag, str) or not tag:
-            raise ValueError(f"tag must be a non-empty string, got {tag}")
-        if not isinstance(fork, ForkName):
-            raise ValueError(f"fork must be a ForkName, got {type(fork)}")
-
     def find_tag_directory(
         self,
         extract_dir: Path,
@@ -175,17 +138,11 @@ class LinkManager:
             LinkManagementError: If manual release directory is not found when expected
             ValueError: If fork is not supported
         """
-        # Validate input
-        self._validate_find_tag_inputs(extract_dir, tag, fork)
-
-        # Not a manual release
         if not is_manual_release:
             return None
-
-        # Dispatch to fork-specific implementation
         if fork not in FORKS:
             raise ValueError(f"Unsupported fork: {fork}")
-        return self._find_tag_directory(extract_dir, tag, fork)
+        return resolve_directory(extract_dir, tag, fork, self.file_system_client)
 
     def find_version_candidates(
         self, extract_dir: Path, fork: ForkName
@@ -244,6 +201,15 @@ class LinkManager:
         """
         return _has_managed_links(extract_dir, fork, self.file_system_client)
 
+    def deduplicate_candidates(
+        self, candidates: VersionCandidateList
+    ) -> VersionCandidateList:
+        """Remove duplicate versions, preferring standard naming.
+
+        Delegates to the version_finder submodule.
+        """
+        return _deduplicate_candidates(candidates)
+
     def remove_release(
         self, extract_dir: Path, tag: str, fork: ForkName = ForkName.GE_PROTON
     ) -> bool:
@@ -264,25 +230,13 @@ class LinkManager:
         self.manage_proton_links(extract_dir, tag, fork)
         return True
 
-    def _deduplicate_candidates(
-        self, candidates: VersionCandidateList
-    ) -> VersionCandidateList:
-        """Remove duplicate versions, preferring standard naming.
-
-        Delegates to the version_finder submodule.
-        """
-        return _deduplicate_candidates(candidates)
-
-    def _get_link_names(
-        self, extract_dir: Path, fork: ForkName
-    ) -> tuple[Path, Path, Path]:
-        """Get the symlink names for the fork."""
-        return _get_link_names_from_status(extract_dir, fork)
-
     def _get_expected_manual_release_path(
         self, extract_dir: Path, tag: str, fork: ForkName
     ) -> Path:
         """Get the expected path for a manual release directory.
+
+        Derived from the fork's primary directory-name template so it stays
+        in sync with extraction naming (single source of truth).
 
         Args:
             extract_dir: Base extraction directory
@@ -292,12 +246,8 @@ class LinkManager:
         Returns:
             Expected path for the manual release directory
         """
-        if fork == ForkName.GE_PROTON:
-            return extract_dir / tag
-        elif fork == ForkName.CACHYOS:
-            return extract_dir / f"proton-{tag}-x86_64"
-        else:
-            return extract_dir / f"proton-{tag}"
+        template = FORKS[fork].dir_name_templates[0]
+        return extract_dir / template.format(tag=tag)
 
     def _log_manual_release_warning(self, expected_path: Path) -> None:
         """Log a warning when expected manual release directory is not found."""
@@ -338,28 +288,6 @@ class LinkManager:
 
         return tag_dir
 
-    def _build_expected_link_mapping(
-        self,
-        link_names: tuple[Path, Path, Path],
-        top_3: VersionCandidateList,
-    ) -> dict[str, str]:
-        """Build expected link mapping from link names and top 3 candidates.
-
-        Delegates to the link_status submodule.
-        """
-        return _build_expected_link_mapping(link_names, top_3)
-
-    def _compare_link_targets(
-        self,
-        current_links: dict[str, str | None],
-        expected_links: dict[str, str],
-    ) -> bool:
-        """Compare current vs expected link targets.
-
-        Delegates to the link_status submodule.
-        """
-        return _compare_link_targets(current_links, expected_links)
-
     def are_links_up_to_date(
         self,
         extract_dir: Path,
@@ -380,7 +308,7 @@ class LinkManager:
         Returns:
             True if links are already correct, False if they need updating
         """
-        main, fb1, fb2 = self._get_link_names(extract_dir, fork)
+        main, fb1, fb2 = _get_link_names_from_status(extract_dir, fork)
         link_names = (main, fb1, fb2)
 
         tag_dir = self._handle_manual_release_directory(
@@ -397,9 +325,9 @@ class LinkManager:
             return False
 
         current_links = self.list_links(extract_dir, fork)
-        expected_links = self._build_expected_link_mapping(link_names, top_3)
+        expected_links = _build_expected_link_mapping(link_names, top_3)
 
-        return self._compare_link_targets(current_links, expected_links)
+        return _compare_link_targets(current_links, expected_links)
 
     def manage_proton_links(
         self,
@@ -415,7 +343,7 @@ class LinkManager:
         Returns:
             True if the operation was successful
         """
-        main, fb1, fb2 = self._get_link_names(extract_dir, fork)
+        main, fb1, fb2 = _get_link_names_from_status(extract_dir, fork)
 
         tag_dir = self._handle_manual_release_directory(
             extract_dir, tag, fork, is_manual_release

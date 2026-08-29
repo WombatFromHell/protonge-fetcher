@@ -218,30 +218,6 @@ class ReleaseManager:
             if asset["name"].lower().endswith(expected_extension)
         ]
 
-    def _find_asset_for_cachyos(
-        self, assets: list[dict[str, Any]], tag: str
-    ) -> Optional[str]:
-        """Find the x86_64 asset for CachyOS releases.
-
-        CachyOS releases have multiple architecture variants (arm64, x86_64, x86_64_v2, etc.).
-        This method specifically looks for the x86_64 variant.
-
-        Args:
-            assets: List of asset dictionaries from GitHub API
-            tag: Release tag (e.g., 'cachyos-10.0-20260207-slr')
-
-        Returns:
-            Asset name if found, None otherwise
-        """
-        # Generate the expected asset name for x86_64 architecture
-        expected_name = f"proton-{tag}-x86_64.tar.xz"
-
-        for asset in assets:
-            if asset["name"] == expected_name:
-                return asset["name"]
-
-        return None
-
     def _handle_api_response(
         self,
         assets: list[dict[str, Any]],
@@ -249,17 +225,19 @@ class ReleaseManager:
         fork: Optional[ForkName] = None,
         tag: Optional[str] = None,
     ) -> str:
-        """Handle the API response to find the appropriate asset."""
-        # For CachyOS, specifically look for the x86_64 asset
-        if fork == ForkName.CACHYOS and tag is not None:
-            cachyos_asset = self._find_asset_for_cachyos(assets, tag)
-            if cachyos_asset:
-                logger.debug(f"Found CachyOS x86_64 asset via API: {cachyos_asset}")
-                return cachyos_asset
+        """Handle the API response to find the appropriate asset.
 
+        When multiple architecture variants exist, the x86_64 build is
+        preferred (our supported architecture).
+        """
         matching_assets = self._find_matching_assets(assets, expected_extension)
 
         if matching_assets:
+            # When multiple architecture variants exist, prefer x86_64
+            for asset in matching_assets:
+                if "x86_64" in asset["name"]:
+                    logger.debug(f"Found x86_64 asset via API: {asset['name']}")
+                    return asset["name"]
             # Return the name of the first matching asset
             asset_name = matching_assets[0]["name"]
             logger.debug(f"Found asset via API: {asset_name}")

@@ -51,10 +51,6 @@ class NetworkClient:
         ]
         base_cmd = self._add_headers(base_cmd, headers)
 
-        if stream:
-            # For streaming, we'll handle differently
-            pass
-
         base_cmd.append(url)
         cmd = self._build_curl_cmd(base_cmd)
 

@@ -254,6 +254,43 @@ class TestFindAssetByName:
         # Assert - Should specifically select x86_64, not arm64 or other variants
         assert asset_name == "proton-cachyos-10.0-20260207-slr-x86_64.tar.xz"
 
+    def test_find_asset_via_api_ge_proton_selects_x86_64(
+        self,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test GE-Proton selects the x86_64 asset when an aarch64 variant also exists."""
+        api_response = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "assets": [
+                        {
+                            "name": "GE-Proton11-6-aarch64.tar.gz",
+                            "size": 1048576,
+                        },
+                        {
+                            "name": "GE-Proton11-6-x86_64.tar.gz",
+                            "size": 2097152,
+                        },
+                    ]
+                }
+            ),
+            stderr="",
+        )
+        mock_network_client.get.return_value = api_response
+
+        release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
+
+        asset_name = release_manager.find_asset_by_name(
+            repo="GloriousEggroll/proton-ge-custom",
+            tag="GE-Proton11-6",
+            fork=ForkName.GE_PROTON,
+        )
+
+        assert asset_name == "GE-Proton11-6-x86_64.tar.gz"
+
     def test_find_asset_html_fallback(
         self,
         mock_network_client: Any,

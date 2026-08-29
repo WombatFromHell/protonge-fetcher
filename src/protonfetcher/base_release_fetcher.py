@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from .archive_extractor import ArchiveExtractor
 from .asset_downloader import AssetDownloader
+from .candidate_selection import select_top_3_candidates
 from .common import (
     DEFAULT_TIMEOUT,
     DirectoryTuple,
@@ -196,16 +197,9 @@ class BaseReleaseFetcher:
         """Force recreation of symbolic links for a specific fork."""
         self._ensure_directory_is_writable(extract_dir)
 
-        candidates = self.link_manager.find_version_candidates(extract_dir, fork)
-
-        if not candidates:
-            raise LinkManagementError(
-                f"No valid {fork} versions found in {extract_dir} to relink"
-            )
-
-        candidates = self.link_manager._deduplicate_candidates(candidates)
-        candidates.sort(key=lambda t: t[0], reverse=True)
-        top_3 = candidates[:3]
+        top_3 = select_top_3_candidates(
+            extract_dir, fork, False, None, self.file_system_client
+        )
 
         if not top_3:
             raise LinkManagementError(
@@ -525,7 +519,7 @@ class BaseReleaseFetcher:
         # Show what symlinks would be created
         candidates = self.link_manager.find_version_candidates(extract_dir, fork)
         candidates.append((parse_version(release_tag, fork), unpacked))
-        candidates = self.link_manager._deduplicate_candidates(candidates)
+        candidates = self.link_manager.deduplicate_candidates(candidates)
         candidates.sort(key=lambda t: t[0], reverse=True)
         top_3 = candidates[:3]
 
