@@ -3,6 +3,7 @@
 Tests the standalone release removal functions independently of LinkManager.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -202,6 +203,10 @@ class TestRemoveReleaseDirectory:
 
         assert not release_path.exists()
 
+    @pytest.mark.skipif(
+        os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() == 0,
+        reason="permission-denial check is meaningless when running as root",
+    )
     def test_raises_on_failure(self, tmp_path: Path) -> None:
         """Test that removal failure raises LinkManagementError."""
         release_path = tmp_path / "GE-Proton10-20"

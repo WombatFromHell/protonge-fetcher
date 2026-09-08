@@ -3,89 +3,39 @@
 
   inputs = {
     nixpkgs.url = "https://flakehub.com/f/DeterminateSystems/nixpkgs-26.05-chilled/0.1";
-    pyproject-nix = {
-      url = "github:pyproject-nix/pyproject.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    uv2nix = {
-      url = "github:pyproject-nix/uv2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    pyproject-build-systems = {
-      url = "github:pyproject-nix/build-system-pkgs";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs = {
     self,
     nixpkgs,
-    pyproject-nix,
-    uv2nix,
-    pyproject-build-systems,
   }: let
-    # Read version from pyproject.toml as source of truth
-    version = let
-      content = builtins.readFile ./pyproject.toml;
-      lines = builtins.split "\n" content;
-      filtered = builtins.filter (line: builtins.isString line && (builtins.substring 0 9 line) == "version =") lines;
-      match = builtins.match ".*version = \"([^\"]+)\".*" (builtins.head filtered);
-    in
-      if match != null
-      then builtins.head match
-      else throw "Version not found in pyproject.toml";
+    forAllSystems = nixpkgs.lib.genAttrs ["x86_64-linux"];
 
-    # Use epoch 1 for maximum determinism (Jan 1, 1970)
-    epoch = 1;
+    # Source of truth for version. Nix ships a TOML parser as a builtin,
+    # so there's no need to hand-roll a regex against pyproject.toml.
+    # Assumes a PEP 621 `[project]` table (uv-managed projects have this).
+    version = (builtins.fromTOML (builtins.readFile ./pyproject.toml)).project.version;
 
-    forAllSystems = nixpkgs.lib.genAttrs ["x86_64-linux" "aarch64-linux"];
+    # zip stores timestamps as DOS dates, which can't represent anything
+    # before 1980-01-01 — zip silently clamps earlier dates to that floor.
+    # Epoch 1 (1970) was clamped too, so it wasn't buying any determinism
+    # it didn't already have; pin it to the real floor instead.
+    epoch = 315532800;
 
-    # Read Python version from .python-version
-    pyVerRaw = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./.python-version);
-    pyVerAttr = "python" + builtins.replaceStrings ["."] [""] pyVerRaw;
+    # Read Python version from .python-version. nixpkgs only publishes
+    # major.minor attrs (python312, not python3125), so truncate any patch
+    # component, and trim more than just trailing "\n" while we're at it.
+    pyVerParts = nixpkgs.lib.take 2 (
+      nixpkgs.lib.splitString "." (nixpkgs.lib.trim (builtins.readFile ./.python-version))
+    );
+    pyVerAttr = "python" + builtins.concatStringsSep "" pyVerParts;
 
     mkPkgs = system: import nixpkgs {inherit system;};
-    python = pkgs: pkgs.${pyVerAttr};
+    py = pkgs: pkgs.${pyVerAttr};
 
-    # Load workspace from uv.lock and create overlay for reproducible Python packages
-    workspace = uv2nix.lib.workspace.loadWorkspace {
-      workspaceRoot = ./.;
-    };
-    projectOverlay = workspace.mkPyprojectOverlay {
-      sourcePreference = "wheel";
-    };
-
-    mkPythonSet = system: let
-      pkgs' = mkPkgs system;
-    in
-      (pkgs'.callPackage pyproject-nix.build.packages {
-        python = python pkgs';
-      }).overrideScope (nixpkgs.lib.composeManyExtensions [
-        pyproject-build-systems.overlays.wheel
-        projectOverlay
-      ]);
-
-    mkZipapp = system: let
-      pkgs = mkPkgs system;
-      py = python pkgs;
-      pythonSet = mkPythonSet system;
-      venv = pythonSet.mkVirtualEnv "protonfetcher-env" [];
-
-      # Step A: Prepare source with version injection
-      src = pkgs.stdenvNoCC.mkDerivation {
-        name = "protonge-fetcher-src";
-        buildInputs = [pkgs.gnused];
-        phases = ["installPhase"];
-        installPhase = ''
-          mkdir -p $out
-          cp -r ${./src} staging
-          chmod -R u+w staging
-          sed -i 's/^__version__ = .*/__version__ = "${version}"/' \
-            "staging/protonfetcher/__version__.py"
-          cp -r staging/* $out/
-        '';
-      };
-    in
+    # zipapp bundles source only, no third-party deps. If runtime deps are
+    # ever needed, vendor site-packages into `staging` before zipping.
+    mkZipapp = pkgs:
       pkgs.stdenvNoCC.mkDerivation {
         name = "protonfetcher.pyz";
 
@@ -94,50 +44,72 @@
           findutils
           gnused
           zip
-          python3
-          uv
         ];
-
-        PYTHON = "${py}/bin/python3";
-
-        buildPhase = ''
-          mkdir -p staging
-          cp -r ${src}/* staging
-
-          # Create __main__.py entry point
-          echo "from entry import main; main()" > staging/__main__.py
-
-          # Normalize permissions and timestamps for determinism
-          chmod -R u+w staging
-          find staging -exec touch -d "@${builtins.toString epoch}" {} +
-
-          # Build deterministic zip: sorted file list, no extra attributes (-X)
-          (cd staging && find . \( -type d -o -type f \) | LC_ALL=C sort | zip -X -q -@ archive.zip)
-
-          # Prepend shebang to create executable pyz
-          echo '#!/usr/bin/env python3' > $out
-          cat staging/archive.zip >> $out
-          chmod +x $out
-        '';
 
         dontUnpack = true;
         dontInstall = true;
+        dontPatchShebangs = true;
+
+        buildPhase = ''
+          mkdir -p staging
+          cp -r ${./src}/. staging
+          chmod -R u+w staging
+
+          sed -i 's/^__version__ = .*/__version__ = "${version}"/' \
+            "staging/protonfetcher/__version__.py"
+          echo "from entry import main; main()" > staging/__main__.py
+
+          find staging -type f -exec chmod 644 {} +
+          find staging -type d -exec chmod 755 {} +
+          find staging -exec touch -d "@${toString epoch}" {} +
+
+          (cd staging && find . \( -type d -o -type f \) | LC_ALL=C sort | zip -X -q -@ ../archive.zip)
+
+          echo '#!/usr/bin/env python3' > $out
+          cat archive.zip >> $out
+          chmod +x $out
+        '';
       };
+
+    # $bin wrapper so the pyz is installable on $PATH by home-manager / NixOS
+    # (the raw pyz output is a file, not a directory). `py` is in
+    # nativeBuildInputs so an explicit `patchShebangs` rewrites
+    # `#!/usr/bin/python3` to an absolute store path, making it run on NixOS
+    # (the fixup-phase auto-patch doesn't resolve the interpreter here).
+    mkProtonfetcher = pkgs: zipapp:
+      pkgs.runCommand "protonfetcher" {
+        passthru = {inherit zipapp;};
+      } ''
+        mkdir -p $out/bin
+        cp ${zipapp} $out/bin/protonfetcher
+        chmod +x $out/bin/protonfetcher
+      '';
   in {
-    packages = forAllSystems (system: {
-      default = mkZipapp system;
+    packages = forAllSystems (system: let
+      pkgs = mkPkgs system;
+      zipapp = mkZipapp pkgs;
+    in {
+      default = zipapp;
+      protonfetcher = mkProtonfetcher pkgs zipapp;
     });
+
+    homeModules.default = {pkgs, ...}: {
+      home.packages = [self.packages.${pkgs.system}.protonfetcher];
+    };
+    nixosModules.default = {pkgs, ...}: {
+      environment.systemPackages = [self.packages.${pkgs.system}.protonfetcher];
+    };
 
     devShells = forAllSystems (system: let
       pkgs = mkPkgs system;
-      pythonSet = mkPythonSet system;
-      venv = pythonSet.mkVirtualEnv "protonge-fetcher-dev" [];
-    in
-      pkgs.mkShell {
+    in {
+      # Standard `devShells.<system>.default` shape so `nix develop` resolves it
+      # (and not the default package).
+      default = pkgs.mkShell {
         name = "protonge-fetcher";
 
-        packages = with pkgs;
-          [
+        packages =
+          (with pkgs; [
             bashInteractive
             coreutils
             findutils
@@ -150,24 +122,17 @@
             uv
             which
             zip
-          ]
-          ++ [
-            # Drop-in replacement for `uv run` — deterministic venv from uv2nix
-            venv
-          ];
+          ])
+          ++ [(py pkgs)];
 
         shellHook = ''
-          export PYTHONPATH="${venv}":$PYTHONPATH
-
           echo "ProtonFetcher development environment loaded"
-          echo "Python: $(${python pkgs}/bin/python3 --version)"
+          echo "Python: $(${py pkgs}/bin/python3 --version)"
           echo ""
           echo "Build with: make build  (local)"
           echo "Nix build: nix build    (reproducible)"
         '';
-
-        VIRTUAL_ENV = "${venv}";
-        PATH = "${venv}/bin:$PATH";
-      });
+      };
+    });
   };
 }
