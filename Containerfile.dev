@@ -14,12 +14,14 @@ RUN cat <<'INIT' > /usr/local/bin/container-init.sh && chmod +x /usr/local/bin/c
 set -eu
 
 # One-time Nix bootstrap into the (optionally volume-mounted) /nix store root.
-# The marker lives inside /nix so it persists across container restarts.
-marker=/nix/.protonfetcher-store-initialized
-nix_etc=/nix/.protonfetcher-nix-etc
+# The marker lives inside /nix so it persists across container restarts. The
+# store is a single named volume shared by all three projects, so marker and
+# config snapshot are project-independent (no re-init per project).
+marker=/nix/.nix-store-initialized
+nix_etc=/nix/.nix-etc
 
 if [ ! -f "$marker" ]; then
-    echo "[protonfetcher-init] Initializing Nix store under /nix ..."
+    echo "[nix-init] Initializing shared Nix store under /nix ..."
     curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
         | sh -s -- install linux \
             --init none \
