@@ -72,17 +72,20 @@
       };
 
     # $bin wrapper so the pyz is installable on $PATH by home-manager / NixOS
-    # (the raw pyz output is a file, not a directory). `py` is in
-    # nativeBuildInputs so an explicit `patchShebangs` rewrites
-    # `#!/usr/bin/python3` to an absolute store path, making it run on NixOS
-    # (the fixup-phase auto-patch doesn't resolve the interpreter here).
+    # (the raw pyz output is a file, not a directory). The pyz keeps its
+    # Linux `#!/usr/bin/env python3` shebang so the artifact is byte-identical
+    # everywhere (reproducible); this wrapper ignores that shebang entirely
+    # and execs the store-pinned python3, which is what NixOS home-manager
+    # needs (no reliance on PATH python3 / /usr/bin/env there).
     mkProtonfetcher = pkgs: zipapp:
       pkgs.runCommand "protonfetcher" {
+        nativeBuildInputs = [pkgs.makeWrapper];
         passthru = {inherit zipapp;};
       } ''
-        mkdir -p $out/bin
-        cp ${zipapp} $out/bin/protonfetcher
-        chmod +x $out/bin/protonfetcher
+        mkdir -p $out/bin $out/libexec
+        cp ${zipapp} $out/libexec/protonfetcher.pyz
+        makeWrapper ${py pkgs}/bin/python3 $out/bin/protonfetcher \
+          --add-flags "$out/libexec/protonfetcher.pyz"
       '';
   in {
     packages = forAllSystems (system: let
