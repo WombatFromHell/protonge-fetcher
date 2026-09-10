@@ -5,20 +5,21 @@ Extracted from cli.py to separate parser construction from dispatch logic.
 
 import argparse
 
-from protonfetcher.__version__ import __version__
+from protonfetcher.__version__ import _get_version
 from protonfetcher.common import DEFAULT_FORK, FORKS
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the argument parser with all defined arguments."""
+    ver = _get_version()
     parser = argparse.ArgumentParser(
-        description=f"ProtonFetcher v{__version__} - Fetch and extract the latest ProtonGE release asset."
+        description=f"ProtonFetcher v{ver} - Fetch and extract the latest ProtonGE release asset."
     )
     parser.add_argument(
         "--version",
         "-V",
         action="version",
-        version=f"%(prog)s v{__version__}",
+        version=f"%(prog)s v{ver}",
         help="show program's version number and exit",
     )
     parser.add_argument(

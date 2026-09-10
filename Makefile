@@ -4,13 +4,12 @@ ENTRY_MODULE = entry
 ENTRY_FUNC = main
 ARTIFACT = protonfetcher.pyz
 OUT = $(BUILD_DIR)/$(ARTIFACT)
-VERSION_FILE = $(SRC_DIR)/protonfetcher/__version__.py
 
 CONTAINER_IMAGE = protonfetcher-nix
 CONTAINER_FILE = Containerfile.dev
-# Single named volume shared by all three projects (protonge-fetcher,
-# neoscopebuddy, beryl-gamemode) so the Nix store isn't duplicated per
-# project. NOTE: clean-container removes it for all three.
+# Single named volume shared by all four workspace projects (protonge-fetcher,
+# neoscopebuddy, beryl-gamemode, ublue-rebase-helper) so the Nix store isn't
+# duplicated per project. NOTE: clean-container removes it for all four.
 NIX_STORE_VOLUME = nix-store
 UV_CACHE_VOLUME = protonfetcher-uv-cache
 
@@ -92,10 +91,11 @@ check-host-tools:
 build: clean check-host-tools
 	@echo "Building $(ARTIFACT) (version $(VERSION))"
 	mkdir -p $(BUILD_DIR)
-	sed -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' $(VERSION_FILE)
 	rm -rf $(BUILD_DIR)/staging
 	mkdir -p $(BUILD_DIR)/staging
 	cp -r $(SRC_DIR)/* $(BUILD_DIR)/staging/
+	sed -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' \
+		$(BUILD_DIR)/staging/protonfetcher/__version__.py
 	find $(BUILD_DIR)/staging -type f -exec chmod 644 {} +
 	find $(BUILD_DIR)/staging -type d -exec chmod 755 {} +
 	echo "from $(ENTRY_MODULE) import $(ENTRY_FUNC); $(ENTRY_FUNC)()" > $(BUILD_DIR)/staging/__main__.py
