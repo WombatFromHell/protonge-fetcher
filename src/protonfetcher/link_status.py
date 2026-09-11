@@ -5,16 +5,66 @@ and determine whether they match expected targets.
 """
 
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Mapping
 
-from .common import FileSystemClientProtocol, ForkName, VersionCandidateList
+from .common import (
+    FileSystemClientProtocol,
+    ForkName,
+    VersionCandidateList,
+)
+from .dirs import get_link_names
+from .version_finder import _deduplicate_candidates, find_version_candidates
+from .filesystem import FileSystemClient
+
+
+def get_installed_versions(
+    extract_dir: Path,
+    fork: ForkName,
+    file_system: FileSystemClientProtocol | None = None,
+) -> list[str]:
+    """Get list of currently installed version tags for a fork.
+
+    Finds all version directories for the specified fork and returns
+    their tag names, sorted by version (newest first).
+    """
+    file_system = file_system or FileSystemClient()
+    candidates = find_version_candidates(extract_dir, fork, file_system)
+
+    if not candidates:
+        return []
+
+    candidates = _deduplicate_candidates(candidates)
+    candidates.sort(key=lambda t: t[0], reverse=True)
+
+    return [path.name for _, path in candidates]
+
+
+def get_linked_versions(
+    extract_dir: Path,
+    fork: ForkName,
+    file_system: FileSystemClientProtocol | None = None,
+) -> set[str]:
+    """Get set of version directories currently referenced by symlinks.
+
+    Resolves all managed symlinks for the fork and returns the directory
+    names they point to.
+    """
+    file_system = file_system or FileSystemClient()
+    linked: set[str] = set()
+    links_info = list_links(extract_dir, fork, file_system)
+
+    for target_path in links_info.values():
+        if target_path is not None:
+            linked.add(Path(target_path).name)
+
+    return linked
 
 
 def list_links(
     extract_dir: Path,
     fork: ForkName,
-    file_system: FileSystemClientProtocol,
-) -> dict[str, Optional[str]]:
+    file_system: FileSystemClientProtocol | None = None,
+) -> dict[str, str | None]:
     """List recognized symbolic links and their associated Proton fork folders.
 
     Args:
@@ -25,9 +75,10 @@ def list_links(
     Returns:
         Dictionary mapping link names to their target paths (or None if link doesn't exist)
     """
-    link_names = _get_link_names(extract_dir, fork)
+    file_system = file_system or FileSystemClient()
+    link_names = get_link_names(extract_dir, fork)
 
-    links_info: dict[str, Optional[str]] = {}
+    links_info: dict[str, str | None] = {}
 
     for link_path in link_names:
         if file_system.exists(link_path) and file_system.is_symlink(link_path):
@@ -45,7 +96,7 @@ def list_links(
 def has_managed_links(
     extract_dir: Path,
     fork: ForkName,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> bool:
     """Check if a fork has any managed symbolic links.
 
@@ -57,7 +108,8 @@ def has_managed_links(
     Returns:
         True if at least one managed symlink exists for the fork, False otherwise
     """
-    link_names = _get_link_names(extract_dir, fork)
+    file_system = file_system or FileSystemClient()
+    link_names = get_link_names(extract_dir, fork)
 
     for link_path in link_names:
         if file_system.exists(link_path) and file_system.is_symlink(link_path):
@@ -86,7 +138,7 @@ def build_expected_link_mapping(
 
 
 def compare_link_targets(
-    current_links: Mapping[str, Optional[str]],
+    current_links: Mapping[str, str | None],
     expected_links: dict[str, str],
 ) -> bool:
     """Compare current vs expected link targets.
@@ -113,26 +165,3 @@ def compare_link_targets(
             return False
 
     return True
-
-
-def _get_link_names(
-    extract_dir: Path,
-    fork: ForkName,
-) -> tuple[Path, Path, Path]:
-    """Get the symlink names for the fork.
-
-    Args:
-        extract_dir: Directory where symlinks will be created
-        fork: The Proton fork name
-
-    Returns:
-        Tuple of three Path objects: (main, fallback1, fallback2)
-    """
-    from .common import FORKS
-
-    suffixes = FORKS[fork].link_names
-    return (
-        extract_dir / suffixes[0],
-        extract_dir / suffixes[1],
-        extract_dir / suffixes[2],
-    )

@@ -12,17 +12,16 @@ Tests in this file verify:
 Adapter selection is tested in test_base_release_fetcher.py.
 """
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from protonfetcher.common import ForkName
-from protonfetcher.filesystem import FileSystemClient
+from protonfetcher.dirs import get_link_names
+from protonfetcher.common import HttpResponse
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
-from protonfetcher.link_manager import LinkManager
-from protonfetcher.utils import compare_versions, get_proton_asset_name, parse_version
+from protonfetcher.utils import get_proton_asset_name, parse_version
 from protonfetcher.version_finder import (
     _get_tag_name,
     _is_valid_proton_directory,
@@ -57,54 +56,47 @@ class TestParseVersionDWProton:
 
 
 # =============================================================================
-# compare_versions — DW-Proton
+# version ordering — DW-Proton (via parse_version tuple comparison)
 # =============================================================================
 
 
-class TestCompareVersionsDWProton:
-    """Tests for compare_versions() with DW-Proton tags."""
+class TestVersionOrderingDWProton:
+    """Tests for DW-Proton version ordering via parse_version tuples."""
 
     def test_dwproton_newer_version(self) -> None:
-        """Test that newer DW-Proton version compares correctly."""
-        assert (
-            compare_versions("dwproton-10.0-27", "dwproton-10.0-26", ForkName.DW_PROTON)
-            == 1
-        )
+        """Test that newer DW-Proton version sorts after older."""
+        newer = parse_version("dwproton-10.0-27", ForkName.DW_PROTON)
+        older = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
+        assert newer > older
 
     def test_dwproton_older_version(self) -> None:
-        """Test that older DW-Proton version compares correctly."""
-        assert (
-            compare_versions("dwproton-10.0-25", "dwproton-10.0-26", ForkName.DW_PROTON)
-            == -1
-        )
+        """Test that older DW-Proton version sorts before newer."""
+        older = parse_version("dwproton-10.0-25", ForkName.DW_PROTON)
+        newer = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
+        assert older < newer
 
     def test_dwproton_equal_version(self) -> None:
-        """Test that equal DW-Proton versions compare as equal."""
-        assert (
-            compare_versions("dwproton-10.0-26", "dwproton-10.0-26", ForkName.DW_PROTON)
-            == 0
-        )
+        """Test that equal DW-Proton versions parse identically."""
+        v1 = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
+        v2 = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
+        assert v1 == v2
 
     def test_dwproton_major_version_comparison(self) -> None:
         """Test that major version differences are detected."""
-        assert (
-            compare_versions("dwproton-11.0-1", "dwproton-10.0-26", ForkName.DW_PROTON)
-            == 1
+        assert parse_version("dwproton-11.0-1", ForkName.DW_PROTON) > parse_version(
+            "dwproton-10.0-26", ForkName.DW_PROTON
         )
-        assert (
-            compare_versions("dwproton-9.0-25", "dwproton-10.0-26", ForkName.DW_PROTON)
-            == -1
+        assert parse_version("dwproton-9.0-25", ForkName.DW_PROTON) < parse_version(
+            "dwproton-10.0-26", ForkName.DW_PROTON
         )
 
     def test_dwproton_minor_version_comparison(self) -> None:
         """Test that minor version differences are detected."""
-        assert (
-            compare_versions("dwproton-10.1-0", "dwproton-10.0-26", ForkName.DW_PROTON)
-            == 1
+        assert parse_version("dwproton-10.1-0", ForkName.DW_PROTON) > parse_version(
+            "dwproton-10.0-26", ForkName.DW_PROTON
         )
-        assert (
-            compare_versions("dwproton-10.0-25", "dwproton-10.0-26", ForkName.DW_PROTON)
-            == -1
+        assert parse_version("dwproton-10.0-25", ForkName.DW_PROTON) < parse_version(
+            "dwproton-10.0-26", ForkName.DW_PROTON
         )
 
 
@@ -138,10 +130,8 @@ class TestLinkManagerDWProton:
     """Tests for LinkManager with DW-Proton fork."""
 
     def test_get_link_names_for_fork_dwproton(self, tmp_path: Path) -> None:
-        """Test get_link_names_for_fork returns correct DW-Proton symlink names."""
-        fs = FileSystemClient()
-        lm = LinkManager(fs)
-        main, fb1, fb2 = lm.get_link_names_for_fork(tmp_path, ForkName.DW_PROTON)
+        """Test get_link_names returns correct DW-Proton symlink names."""
+        main, fb1, fb2 = get_link_names(tmp_path, ForkName.DW_PROTON)
         assert main == tmp_path / "DW-Proton"
         assert fb1 == tmp_path / "DW-Proton-Fallback"
         assert fb2 == tmp_path / "DW-Proton-Fallback2"
@@ -241,9 +231,7 @@ class TestForgejoReleaseFetcher:
         """Test fetch_latest_tag raises on API error."""
         mock_network = mock_network_factory(custom_returncode=22)
         # fetch_latest_tag uses head(), not get()
-        mock_network.head.return_value = subprocess.CompletedProcess(
-            args=[], returncode=22, stdout="", stderr="API error"
-        )
+        mock_network.head.return_value = HttpResponse(status=404)
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
         with pytest.raises(Exception):  # NetworkError
             fetcher.fetch_latest_tag("dawn-winery/dwproton")
@@ -338,9 +326,7 @@ class TestForgejoReleaseFetcher:
         )
         # HTML contains the expected asset name
         html_response = '<a href="/releases/download/dwproton-10.0-26/dwproton-10.0-26-x86_64.tar.xz">dwproton-10.0-26-x86_64.tar.xz</a>'
-        mock_network.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=html_response, stderr=""
-        )
+        mock_network.get.return_value = HttpResponse(status=200, body=html_response)
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
         mocker.patch.object(
             fetcher.release_manager, "_get_cached_asset_size", return_value=None
@@ -361,9 +347,7 @@ class TestForgejoReleaseFetcher:
         )
         # HTML does not contain the expected asset name
         html_response = "<p>No assets found</p>"
-        mock_network.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=html_response, stderr=""
-        )
+        mock_network.get.return_value = HttpResponse(status=200, body=html_response)
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
         asset = fetcher.find_asset_by_name(
             "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON

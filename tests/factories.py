@@ -7,7 +7,7 @@ Contains:
 - sample_archive_factory — Sample archive creation factory
 """
 
-import subprocess
+import json
 import tarfile
 from pathlib import Path
 from typing import Any, Callable
@@ -17,6 +17,7 @@ import pytest
 from protonfetcher.common import (
     DEFAULT_TIMEOUT,
     FileSystemClientProtocol,
+    HttpResponse,
     NetworkClientProtocol,
 )
 
@@ -34,7 +35,6 @@ def mock_network_factory(mocker: Any) -> Callable[..., Any]:
         def test_with_custom_response(mock_network_factory):
             mock_network = mock_network_factory(
                 get_response={"assets": [{"name": "test.tar.gz", "size": 1024}]},
-                rate_limit=False,
             )
 
         def test_rate_limit(mock_network_factory):
@@ -44,7 +44,6 @@ def mock_network_factory(mocker: Any) -> Callable[..., Any]:
     def _create_mock(
         get_response: dict | str | None = None,
         head_response: dict | str | None = None,
-        download_response: dict | None = None,
         rate_limit: bool = False,
         not_found: bool = False,
         custom_returncode: int | None = None,
@@ -52,29 +51,26 @@ def mock_network_factory(mocker: Any) -> Callable[..., Any]:
         mock_network = mocker.MagicMock(spec=NetworkClientProtocol)
         mock_network.timeout = DEFAULT_TIMEOUT
 
+        def _get_status() -> int:
+            return 404 if custom_returncode == 22 else 200
+
         if rate_limit:
-            mock_network.get.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout='{"message": "API rate limit exceeded"}',
-                stderr="403 Forbidden",
+            mock_network.get.return_value = HttpResponse(
+                status=403,
+                body='{"message": "API rate limit exceeded"}',
             )
         elif not_found:
-            mock_response = subprocess.CompletedProcess(
-                args=[], returncode=22, stdout="", stderr="404 Not Found"
-            )
+            mock_response = HttpResponse(status=404)
             mock_network.get.return_value = mock_response
             mock_network.head.return_value = mock_response
         else:
-            import json
-
             if get_response is None:
                 get_response = {"assets": [{"name": "test.tar.gz", "size": 1048576}]}
             if isinstance(get_response, dict):
                 get_response = json.dumps(get_response)
 
-            mock_network.get.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=get_response, stderr=""
+            mock_network.get.return_value = HttpResponse(
+                status=_get_status(), body=get_response
             )
 
             if head_response is None:
@@ -82,20 +78,19 @@ def mock_network_factory(mocker: Any) -> Callable[..., Any]:
             if isinstance(head_response, dict):
                 head_response = "\n".join(f"{k}: {v}" for k, v in head_response.items())
 
-            mock_network.head.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=head_response, stderr=""
-            )
-
-        if download_response:
-            mock_network.download.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=download_response.get("returncode", 0),
-                stdout=download_response.get("stdout", ""),
-                stderr=download_response.get("stderr", ""),
-            )
-        else:
-            mock_network.download.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="", stderr=""
+            # head_response is a header dump — parse into headers + final_url
+            headers: dict[str, str] = {}
+            final_url = ""
+            for line in head_response.splitlines():
+                if ":" not in line:
+                    continue
+                key, _, value = line.partition(":")
+                key, value = key.strip().lower(), value.strip()
+                headers[key] = value
+                if key == "location" and value.startswith("http"):
+                    final_url = value
+            mock_network.head.return_value = HttpResponse(
+                status=_get_status(), headers=headers, final_url=final_url
             )
 
         return mock_network
@@ -129,7 +124,6 @@ def mock_filesystem_factory(mocker: Any, tmp_path: Path) -> Callable[..., Any]:
         use_tmp_path: bool = False,
     ) -> Any:
         mock_fs = mocker.MagicMock(spec=FileSystemClientProtocol)
-        mock_fs.PROTOCOL_VERSION = "1.0"
 
         if use_tmp_path:
             mock_fs.exists.side_effect = lambda p: p.exists()

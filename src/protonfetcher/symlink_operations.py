@@ -14,6 +14,7 @@ from .common import (
     SymlinkSpec,
     VersionCandidateList,
 )
+from .filesystem import FileSystemClient
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,13 @@ def create_symlink_specs(
     specs: LinkSpecList = []
 
     if len(top_3) > 0:
-        specs.append(SymlinkSpec(link_path=main, target_path=top_3[0][1], priority=0))
+        specs.append(SymlinkSpec(link_path=main, target_path=top_3[0][1]))
 
     if len(top_3) > 1:
-        specs.append(SymlinkSpec(link_path=fb1, target_path=top_3[1][1], priority=1))
+        specs.append(SymlinkSpec(link_path=fb1, target_path=top_3[1][1]))
 
     if len(top_3) > 2:
-        specs.append(SymlinkSpec(link_path=fb2, target_path=top_3[2][1], priority=2))
+        specs.append(SymlinkSpec(link_path=fb2, target_path=top_3[2][1]))
 
     return specs
 
@@ -51,7 +52,7 @@ def cleanup_unwanted_links(
     fb1: Path,
     fb2: Path,
     wants: Dict[Path, Path],
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> None:
     """Remove unwanted symlinks and any real directories that conflict with wanted symlinks.
 
@@ -62,6 +63,7 @@ def cleanup_unwanted_links(
         wants: Mapping of link paths to their expected target paths
         file_system: File system client
     """
+    file_system = file_system or FileSystemClient()
     for link in (main, fb1, fb2):
         if file_system.is_symlink(link) and link not in wants:
             file_system.unlink(link)
@@ -72,7 +74,9 @@ def cleanup_unwanted_links(
 
 
 def compare_targets(
-    current_target: Path, expected_target: Path, file_system: FileSystemClientProtocol
+    current_target: Path,
+    expected_target: Path,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> bool:
     """Compare if two targets are the same by checking the resolved paths.
 
@@ -84,6 +88,7 @@ def compare_targets(
     Returns:
         True if targets match, False otherwise
     """
+    file_system = file_system or FileSystemClient()
     try:
         resolved_current = file_system.resolve(current_target)
         resolved_expected = file_system.resolve(expected_target)
@@ -95,7 +100,9 @@ def compare_targets(
 
 
 def handle_existing_symlink(
-    link: Path, expected_target: Path, file_system: FileSystemClientProtocol
+    link: Path,
+    expected_target: Path,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> None:
     """Handle an existing symlink to check if it points to the correct target.
 
@@ -104,6 +111,7 @@ def handle_existing_symlink(
         expected_target: Expected target path
         file_system: File system client
     """
+    file_system = file_system or FileSystemClient()
     try:
         current_target = file_system.resolve(link)
         paths_match = compare_targets(current_target, expected_target, file_system)
@@ -118,7 +126,9 @@ def handle_existing_symlink(
 
 
 def cleanup_existing_path_before_symlink(
-    link: Path, expected_target: Path, file_system: FileSystemClientProtocol
+    link: Path,
+    expected_target: Path,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> None:
     """Clean up existing path before creating a symlink.
 
@@ -127,6 +137,7 @@ def cleanup_existing_path_before_symlink(
         expected_target: Expected target path
         file_system: File system client
     """
+    file_system = file_system or FileSystemClient()
     # Double check: If link exists as a real directory, remove it before creating symlink
     if file_system.exists(link) and not file_system.is_symlink(link):
         file_system.rmtree(link)
@@ -148,7 +159,7 @@ def create_symlinks(
     fb1: Path,
     fb2: Path,
     top_3: VersionCandidateList,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> bool:
     """Create symlinks for the top 3 Proton versions.
 
@@ -162,6 +173,7 @@ def create_symlinks(
     Returns:
         True if symlink creation was attempted (even if some failed)
     """
+    file_system = file_system or FileSystemClient()
     # Create SymlinkSpec objects for all symlinks we want to create
     wanted_specs = create_symlink_specs(main, fb1, fb2, top_3)
 

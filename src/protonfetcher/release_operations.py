@@ -7,8 +7,11 @@ associated symbolic links.
 import logging
 from pathlib import Path
 
-from .common import FileSystemClientProtocol, ForkName
+from .common import FORKS, FileSystemClientProtocol, ForkName
+from .dirs import resolve_directory
 from .exceptions import LinkManagementError
+from .link_status import get_installed_versions
+from .filesystem import FileSystemClient
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +20,7 @@ def remove_release(
     extract_dir: Path,
     tag: str,
     fork: ForkName,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> bool:
     """Remove a specific Proton fork release folder and its associated symbolic links.
 
@@ -33,6 +36,7 @@ def remove_release(
     Raises:
         LinkManagementError: If the release directory does not exist
     """
+    file_system = file_system or FileSystemClient()
     release_path = _determine_release_path(extract_dir, tag, fork, file_system)
 
     # Check if the release directory exists
@@ -56,16 +60,15 @@ def _determine_release_path(
     extract_dir: Path,
     tag: str,
     fork: ForkName,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> Path:
     """Determine the correct release path using fork-specific templates."""
-    from .link_manager import resolve_directory
-
+    file_system = file_system or FileSystemClient()
     return resolve_directory(extract_dir, tag, fork, file_system)
 
 
 def _check_release_exists(
-    release_path: Path, file_system: FileSystemClientProtocol
+    release_path: Path, file_system: FileSystemClientProtocol | None = None
 ) -> None:
     """Check if the release directory exists, raise error if not.
 
@@ -76,6 +79,7 @@ def _check_release_exists(
     Raises:
         LinkManagementError: If the directory does not exist
     """
+    file_system = file_system or FileSystemClient()
     if not file_system.exists(release_path):
         raise LinkManagementError(f"Release directory does not exist: {release_path}")
 
@@ -84,7 +88,7 @@ def _identify_links_to_remove(
     extract_dir: Path,
     release_path: Path,
     fork: ForkName,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> list[Path]:
     """Identify symbolic links that point to the release directory.
 
@@ -97,8 +101,7 @@ def _identify_links_to_remove(
     Returns:
         List of Path objects pointing to the release
     """
-    from .common import FORKS
-
+    file_system = file_system or FileSystemClient()
     suffixes = FORKS[fork].link_names
     links_to_remove: list[Path] = []
 
@@ -121,7 +124,7 @@ def _identify_links_to_remove(
 
 def _remove_release_directory(
     release_path: Path,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> None:
     """Remove the release directory.
 
@@ -132,6 +135,7 @@ def _remove_release_directory(
     Raises:
         LinkManagementError: If the directory cannot be removed
     """
+    file_system = file_system or FileSystemClient()
     try:
         file_system.rmtree(release_path)
         logger.info("Removed release directory: %s", release_path)
@@ -143,7 +147,7 @@ def _remove_release_directory(
 
 def _remove_symbolic_links(
     links_to_remove: list[Path],
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> None:
     """Remove the associated symbolic links.
 
@@ -151,6 +155,7 @@ def _remove_symbolic_links(
         links_to_remove: List of symlink paths to remove
         file_system: File system client
     """
+    file_system = file_system or FileSystemClient()
     for link in links_to_remove:
         try:
             file_system.unlink(link)
@@ -162,7 +167,7 @@ def _remove_symbolic_links(
 def cleanup_stale_symlinks(
     extract_dir: Path,
     fork: ForkName,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> None:
     """Remove dangling symlinks and update stale ones.
 
@@ -175,14 +180,11 @@ def cleanup_stale_symlinks(
         fork: The Proton fork name to determine link naming
         file_system: File system client
     """
-    from .common import FORKS
-
+    file_system = file_system or FileSystemClient()
     suffixes = FORKS[fork].link_names
     symlinks = [extract_dir / suffix for suffix in suffixes]
 
     # Get installed versions sorted newest-first
-    from .prune_operations import get_installed_versions
-
     versions = get_installed_versions(extract_dir, fork, file_system)
     if not versions:
         # No versions at all — remove all dangling symlinks
@@ -194,7 +196,7 @@ def cleanup_stale_symlinks(
                     logger.warning("Failed to remove symlink %s: %s", link, e)
         return
 
-    # Get the top-N versions to keep (use keep=1 as default)
+    # Symlinks should point at the newest installed version
     kept = versions[:1]
     kept_set = set(kept)
     newest = extract_dir / kept[0]

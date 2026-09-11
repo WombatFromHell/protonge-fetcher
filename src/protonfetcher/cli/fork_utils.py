@@ -10,9 +10,19 @@ from typing import Any, Union
 from protonfetcher.common import DEFAULT_FORK, FORKS, ForkName
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
-from protonfetcher.link_status import _get_link_names
 
 logger = logging.getLogger(__name__)
+
+
+def is_flag_passed(argv_list: list[str], long_flag: str, short_flag: str) -> bool:
+    """Check if a flag was explicitly passed (standalone or with value)."""
+    return any(
+        arg == long_flag
+        or arg == short_flag
+        or arg.startswith(f"{long_flag}=")
+        or arg.startswith(f"{short_flag}=")
+        for arg in argv_list
+    )
 
 
 def convert_fork_to_enum(fork_arg: Union[str, ForkName, None]) -> ForkName:
@@ -105,18 +115,3 @@ def print_links_for_fork(
             print(f"  ○ {version}")
 
     return True
-
-
-def get_link_names_for_fork(
-    extract_dir: Path, fork: ForkName
-) -> tuple[Path, Path, Path]:
-    """Get the symlink paths for a given fork.
-
-    Args:
-        extract_dir: Base directory for symlinks
-        fork: The Proton fork name
-
-    Returns:
-        Tuple of (main, fb1, fb2) Path objects
-    """
-    return _get_link_names(extract_dir, fork)

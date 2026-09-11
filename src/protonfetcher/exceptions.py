@@ -15,7 +15,3 @@ class ExtractionError(ProtonFetcherError):
 
 class LinkManagementError(ProtonFetcherError):
     """Raised when link management operations fail."""
-
-
-class MultiLinkManagementError(ProtonFetcherError, ExceptionGroup):
-    """Raised when multiple link management operations fail."""

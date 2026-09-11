@@ -6,10 +6,8 @@ import logging
 import os
 import re
 import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .common import (
     FORKS,
@@ -18,7 +16,6 @@ from .common import (
     ForkName,
     NetworkClientProtocol,
     PlatformAdapter,
-    ProcessResult,
     ReleaseTagsList,
     VersionTuple,
 )
@@ -48,52 +45,18 @@ class ReleaseManager:
             platform_adapter if platform_adapter is not None else github_adapter
         )
 
-        # Initialize cache directory
+        # Cache directory path (created lazily on first write)
         xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
         if xdg_cache_home:
             self._cache_dir = Path(xdg_cache_home) / "protonfetcher"
         else:
             self._cache_dir = Path.home() / ".cache" / "protonfetcher"
 
-        # Create cache directory if it doesn't exist
-        self.file_system_client.mkdir(self._cache_dir, parents=True, exist_ok=True)
-
-    def _extract_redirect_url(self, response_stdout: str, original_url: str) -> str:
-        """Extract the redirected URL from HEAD response headers.
-
-        Tries Location header first, falls back to URL: field, then original URL.
+    def _extract_tag_from_url(self, url: str) -> str:
+        """Extract tag name from a GitHub releases URL.
 
         Args:
-            response_stdout: stdout from the HEAD request
-            original_url: Original URL as final fallback
-
-        Returns:
-            Redirected URL path or original URL
-        """
-        # Try Location header first
-        location_match = re.search(
-            r"Location: [^\r\n]*?(/releases/tag/[^/?#\r\n]+)",
-            response_stdout,
-            re.IGNORECASE,
-        )
-        if location_match:
-            return location_match.group(1)
-
-        # Fallback: try URL: field
-        url_match = re.search(
-            r"URL:\s*(https?://[^\s\r\n]+)", response_stdout, re.IGNORECASE
-        )
-        if url_match:
-            full_url = url_match.group(1).strip()
-            return urllib.parse.urlparse(full_url).path
-
-        return original_url
-
-    def _extract_tag_from_url(self, url_path: str) -> str:
-        """Extract tag name from GitHub releases URL path.
-
-        Args:
-            url_path: URL path containing /releases/tag/{tag}
+            url: URL containing /releases/tag/{tag}
 
         Returns:
             Extracted tag name
@@ -101,9 +64,9 @@ class ReleaseManager:
         Raises:
             NetworkError: If tag cannot be extracted
         """
-        match = re.search(GITHUB_URL_PATTERN, url_path)
+        match = re.search(GITHUB_URL_PATTERN, url)
         if not match:
-            raise NetworkError(f"Could not determine latest tag from URL: {url_path}")
+            raise NetworkError(f"Could not determine latest tag from URL: {url}")
         return match.group(1)
 
     def fetch_latest_tag(self, repo: str) -> str:
@@ -121,18 +84,14 @@ class ReleaseManager:
         url = self.platform_adapter.build_host_url(repo, "releases", "latest")
         try:
             response = self.network_client.head(url)
-            if response.returncode != 0:
+            if response.status >= 400:
                 raise NetworkError(
-                    f"Failed to fetch latest tag for {repo}: {response.stderr}"
+                    f"Failed to fetch latest tag for {repo}: HTTP {response.status}"
                 )
-        except Exception as e:
+        except NetworkError as e:
             raise NetworkError(f"Failed to fetch latest tag for {repo}: {e}")
 
-        # Extract redirected URL from response
-        redirected_url = self._extract_redirect_url(response.stdout, url)
-
-        # Extract tag from URL
-        tag = self._extract_tag_from_url(redirected_url)
+        tag = self._extract_tag_from_url(response.final_url)
         logger.debug(f"Found latest tag: {tag}")
         return tag
 
@@ -161,7 +120,7 @@ class ReleaseManager:
 
     def _get_cached_asset_size(
         self, repo: str, tag: str, asset_name: str
-    ) -> Optional[int]:
+    ) -> int | None:
         """Get cached asset size if available and not expired."""
         cache_path = self._get_cache_path(repo, tag, asset_name)
 
@@ -173,7 +132,7 @@ class ReleaseManager:
                 # Validate that size is an integer
                 if isinstance(size, int):
                     return size
-            except json.JSONDecodeError, KeyError, IOError:
+            except json.JSONDecodeError, IOError:
                 # If cache file is invalid, return None to force a fresh fetch
                 pass
         return None
@@ -185,6 +144,7 @@ class ReleaseManager:
         cache_path = self._get_cache_path(repo, tag, asset_name)
 
         try:
+            self.file_system_client.mkdir(self._cache_dir, parents=True, exist_ok=True)
             cache_data = {
                 "size": size,
                 "timestamp": time.time(),
@@ -196,17 +156,6 @@ class ReleaseManager:
             self.file_system_client.write(cache_path, cache_data_bytes)
         except IOError as e:
             logger.debug(f"Failed to write to cache: {e}")
-
-    def _get_expected_extension(self, fork: ForkName | str) -> str:
-        """Get the expected archive extension based on the fork."""
-        # Convert string to ForkName if necessary, then check if it's valid
-        if isinstance(fork, str):
-            try:
-                fork = ForkName(fork)
-            except ValueError:
-                # Invalid fork string, return default extension
-                return ".tar.gz"
-        return FORKS[fork].archive_format if fork in FORKS else ".tar.gz"
 
     def _find_matching_assets(
         self, assets: list[dict[str, Any]], expected_extension: str
@@ -222,8 +171,8 @@ class ReleaseManager:
         self,
         assets: list[dict[str, Any]],
         expected_extension: str,
-        fork: Optional[ForkName] = None,
-        tag: Optional[str] = None,
+        fork: ForkName | None = None,
+        tag: str | None = None,
     ) -> str:
         """Handle the API response to find the appropriate asset.
 
@@ -260,14 +209,11 @@ class ReleaseManager:
 
         headers = dict(self.platform_adapter.default_headers)
         response = self.network_client.get(api_url, headers=headers)
-        if response.returncode != 0:
-            logger.debug(f"API request failed: {response.stderr}")
-            raise NetworkError(
-                f"API request failed with return code {response.returncode}"
-            )
+        if response.status >= 400:
+            raise NetworkError(f"API request failed with status {response.status}")
 
         try:
-            release_data: dict[str, Any] = json.loads(response.stdout)
+            release_data: dict[str, Any] = json.loads(response.body)
         except json.JSONDecodeError as e:
             logger.debug(f"Failed to parse JSON response: {e}")
             raise NetworkError(f"Failed to parse JSON: {e}")
@@ -277,8 +223,7 @@ class ReleaseManager:
             raise NetworkError("No assets found in release API response")
 
         assets: list[dict[str, Any]] = release_data["assets"]
-        expected_extension = self._get_expected_extension(fork)
-        return self._handle_api_response(assets, expected_extension, fork, tag)
+        return self._handle_api_response(assets, FORKS[fork].archive_format, fork, tag)
 
     def _try_html_fallback(self, repo: str, tag: str, fork: ForkName) -> str:
         """Try to find the asset by HTML parsing if API fails."""
@@ -287,25 +232,20 @@ class ReleaseManager:
         url = self.platform_adapter.build_host_url(repo, "releases", "tag", tag)
         logger.info(f"Fetching release page: {url}")
 
-        try:
-            response = self.network_client.get(url)
-            if response.returncode != 0:
-                raise NetworkError(
-                    f"Failed to fetch release page for {repo}/{tag}: {response.stderr}"
-                )
-        except Exception as e:
-            raise NetworkError(f"Failed to fetch release page for {repo}/{tag}: {e}")
+        response = self.network_client.get(url)
+        if response.status >= 400:
+            raise NetworkError(
+                f"Failed to fetch release page for {repo}/{tag}: HTTP {response.status}"
+            )
 
         # Look for the expected asset name in the page
-        if expected_asset_name in response.stdout:
+        if expected_asset_name in response.body:
             logger.info(f"Found asset: {expected_asset_name}")
             return expected_asset_name
 
         # Log a snippet of the HTML for debugging
         html_snippet = (
-            response.stdout[:500] + "..."
-            if len(response.stdout) > 500
-            else response.stdout
+            response.body[:500] + "..." if len(response.body) > 500 else response.body
         )
         logger.debug(f"HTML snippet: {html_snippet}")
 
@@ -351,139 +291,6 @@ class ReleaseManager:
                 # Re-raise other errors
                 raise fallback_error
 
-    def _extract_size_from_response(self, response_text: str) -> Optional[int]:
-        """Extract content-length from response headers.
-
-        Args:
-            response_text: Response text from the HEAD request
-
-        Returns:
-            Size in bytes if found and greater than 0, otherwise None
-        """
-        # Split the response into lines and search each one for content-length
-        for line in response_text.splitlines():
-            # Look for content-length in the line, case insensitive
-            if "content-length" in line.lower():
-                # Extract the numeric value after the colon
-                length_match = re.search(r":\s*(\d+)", line, re.IGNORECASE)
-                if length_match:
-                    size = int(length_match.group(1))
-                    if size > 0:  # Only return if size is greater than 0
-                        return size
-
-        # If not found in individual lines, try regex on full response
-        content_length_match = re.search(r"(?i)content-length:\s*(\d+)", response_text)
-        if content_length_match:
-            size = int(content_length_match.group(1))
-            if size > 0:  # Only return if size is greater than 0
-                return size
-        return None
-
-    @staticmethod
-    def _is_not_found_error(result: ProcessResult) -> bool:
-        """Check if the result indicates a 404 / not found error."""
-        stdout = getattr(result, "stdout", "")
-        stderr = getattr(result, "stderr", "")
-        for content in (stdout, stderr):
-            if isinstance(content, str) and (
-                "404" in content or "not found" in content.lower()
-            ):
-                return True
-        return False
-
-    def _follow_redirect_and_get_size(
-        self,
-        initial_result: ProcessResult,
-        url: str,
-        repo: str,
-        tag: str,
-        asset_name: str,
-        in_test: bool,
-    ) -> Optional[int]:
-        """Follow redirect if present in the response and attempt to get the content size from the redirected URL.
-
-        Args:
-            initial_result: The initial HEAD request response
-            url: Original URL that was requested
-            repo: Repository in format 'owner/repo'
-            tag: Release tag
-            asset_name: Asset filename
-            in_test: Whether we are in a test environment
-
-        Returns:
-            Size in bytes if found and greater than 0, otherwise None
-        """
-        location_match = re.search(r"(?i)location:\s*(.+)", initial_result.stdout)
-        if not location_match:
-            return None
-
-        redirect_url = location_match.group(1).strip()
-        if not redirect_url or redirect_url == url:
-            return None
-
-        logger.debug(f"Following redirect to: {redirect_url}")
-        result = self.network_client.head(redirect_url, follow_redirects=False)
-        if result.returncode != 0:
-            return None
-
-        if self._is_not_found_error(result):
-            raise NetworkError(f"Remote asset not found: {asset_name}")
-
-        size = self._extract_size_from_response(result.stdout)
-        if not size:
-            return None
-
-        logger.debug(f"Remote asset size: {format_bytes(size)}")
-        if not in_test:
-            self._cache_asset_size(repo, tag, asset_name, size)
-        return size
-
-    def _fetch_size_with_head_request(self, url: str, asset_name: str) -> ProcessResult:
-        """Execute HEAD request to fetch asset size.
-
-        Raises:
-            NetworkError: If the request fails
-        """
-        result = self.network_client.head(url, follow_redirects=True)
-        if result.returncode != 0:
-            stderr = getattr(result, "stderr", "")
-            if self._is_not_found_error(result):
-                raise NetworkError(f"Remote asset not found: {asset_name}")
-            raise NetworkError(
-                f"Failed to get remote asset size for {asset_name}: {stderr}"
-            )
-
-        # Check for 404 or similar errors even if returncode is 0
-        if self._is_not_found_error(result):
-            raise NetworkError(f"Remote asset not found: {asset_name}")
-        return result
-
-    def _extract_and_cache_size(
-        self,
-        result: ProcessResult,
-        url: str,
-        repo: str,
-        tag: str,
-        asset_name: str,
-    ) -> Optional[int]:
-        """Extract size from response and cache it.
-
-        Returns:
-            Size in bytes if found, None otherwise
-        """
-        size = self._extract_size_from_response(result.stdout)
-        if size:
-            logger.debug(f"Remote asset size: {format_bytes(size)}")
-            if self._cache_enabled:
-                self._cache_asset_size(repo, tag, asset_name, size)
-            return size
-
-        # If content-length not available, try following redirects
-        size = self._follow_redirect_and_get_size(
-            result, url, repo, tag, asset_name, not self._cache_enabled
-        )
-        return size
-
     def get_remote_asset_size(self, repo: str, tag: str, asset_name: str) -> int:
         """Get the size of a remote asset using HEAD request.
 
@@ -496,7 +303,7 @@ class ReleaseManager:
             Size of the asset in bytes
 
         Raises:
-            FetchError: If unable to get asset size
+            NetworkError: If unable to get asset size
         """
         # Try cache first (skip when caching is disabled)
         if self._cache_enabled:
@@ -510,22 +317,35 @@ class ReleaseManager:
         url = self.platform_adapter.build_download_url(repo, tag, asset_name)
         logger.debug(f"Getting remote asset size from: {url}")
 
-        try:
-            # Fetch size with HEAD request
-            result = self._fetch_size_with_head_request(url, asset_name)
+        response = self.network_client.head(url)
+        if response.status == 404:
+            raise NetworkError(f"Remote asset not found: {asset_name}")
+        if response.status >= 400:
+            raise NetworkError(
+                f"Failed to get remote asset size for {asset_name}: HTTP {response.status}"
+            )
 
-            # Extract and cache size
-            size = self._extract_and_cache_size(result, url, repo, tag, asset_name)
-            if size:
-                return size
-
-            # If we still can't find the content-length, log the response for debugging
-            logger.debug(f"Response headers received: {result.stdout}")
+        size = self._parse_content_length(response.headers.get("content-length"))
+        if not size:
             raise NetworkError(
                 f"Could not determine size of remote asset: {asset_name}"
             )
-        except Exception as e:
-            raise NetworkError(f"Failed to get remote asset size for {asset_name}: {e}")
+
+        logger.debug(f"Remote asset size: {format_bytes(size)}")
+        if self._cache_enabled:
+            self._cache_asset_size(repo, tag, asset_name, size)
+        return size
+
+    @staticmethod
+    def _parse_content_length(value: str | None) -> int | None:
+        """Parse a content-length header value into a positive size."""
+        if not value:
+            return None
+        try:
+            size = int(value)
+        except ValueError:
+            return None
+        return size if size > 0 else None
 
     def list_recent_releases(self, repo: str) -> ReleaseTagsList:
         """Fetch and return a list of recent release tags from the GitHub API.
@@ -541,28 +361,19 @@ class ReleaseManager:
         """
         url = self.platform_adapter.build_api_url(repo, "releases")
 
-        try:
-            response = self.network_client.get(url)
-            if response.returncode != 0:
-                # Check if it's a rate limit error (HTTP 403) or contains rate limit message
-                if "403" in response.stderr or "rate limit" in response.stderr.lower():
-                    raise NetworkError(
-                        "API rate limit exceeded. Please wait a few minutes before trying again."
-                    )
-                raise NetworkError(
-                    f"Failed to fetch releases for {repo}: {response.stderr}"
-                )
-        except Exception as e:
-            raise NetworkError(f"Failed to fetch releases for {repo}: {e}")
-
-        # Check for rate limiting in stdout as well
-        if "rate limit" in response.stdout.lower():
+        response = self.network_client.get(url)
+        if response.status == 403:
+            logger.error("API rate limit exceeded")
             raise NetworkError(
                 "API rate limit exceeded. Please wait a few minutes before trying again."
             )
+        if response.status >= 400:
+            raise NetworkError(
+                f"Failed to fetch releases for {repo}: HTTP {response.status}"
+            )
 
         try:
-            releases_data: list[dict[str, Any]] = json.loads(response.stdout)
+            releases_data: list[dict[str, Any]] = json.loads(response.body)
         except json.JSONDecodeError as e:
             raise NetworkError(f"Failed to parse JSON response: {e}")
 
@@ -598,28 +409,13 @@ class ReleaseManager:
         # Fetch the latest tag
         latest_tag = self.fetch_latest_tag(repo)
 
-        # Parse the latest version
-        try:
-            latest_version = parse_version(latest_tag, fork)
-        except ValueError, IndexError:
-            # If we can't parse the latest version, assume no update
-            logger.debug(f"Could not parse latest version: {latest_tag}")
-            return None
+        # parse_version returns a fallback tuple on non-match; it never raises.
+        latest_version = parse_version(latest_tag, fork)
 
         # Parse all current versions and find the newest one
-        current_parsed: list[tuple[VersionTuple, str]] = []
-        for tag in current_versions:
-            try:
-                parsed = parse_version(tag, fork)
-                current_parsed.append((parsed, tag))
-            except ValueError, IndexError:
-                # Skip versions we can't parse
-                logger.debug(f"Could not parse current version: {tag}")
-                continue
-
-        if not current_parsed:
-            # No valid current versions, return latest
-            return latest_tag
+        current_parsed: list[tuple[VersionTuple, str]] = [
+            (parse_version(tag, fork), tag) for tag in current_versions
+        ]
 
         # Find the newest current version
         current_parsed.sort(key=lambda t: t[0], reverse=True)

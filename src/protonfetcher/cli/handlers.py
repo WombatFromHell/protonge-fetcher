@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from protonfetcher.common import DEFAULT_FORK, FORKS, ForkName
+from protonfetcher.dirs import get_link_names
 from protonfetcher.exceptions import ProtonFetcherError
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
@@ -15,7 +16,6 @@ from protonfetcher.github_fetcher import GitHubReleaseFetcher
 from .fork_utils import (
     get_fork_fetcher,
     get_fork_from_args,
-    get_link_names_for_fork,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ def _identify_fork_symlinks(
     Returns:
         List of symlink paths that would be removed.
     """
-    main, fb1, fb2 = get_link_names_for_fork(extract_dir, fork)
+    main, fb1, fb2 = get_link_names(extract_dir, fork)
     return [link for link in (main, fb1, fb2) if link.exists() or link.is_symlink()]
 
 
@@ -271,26 +271,31 @@ def _check_single_fork(
     extract_dir: Path,
     fork: ForkName,
     check_managed_only: bool,
-) -> bool:
-    """Check for updates on a single fork. Returns True if update available."""
+) -> str:
+    """Check for updates on a single fork.
+
+    Returns 'update' if a newer release is available, 'current' if up-to-date
+    (or skipped), or 'error' if the check itself failed.
+    """
     if check_managed_only:
         lm = get_fork_fetcher(fetcher, forgejo_fetcher, fork).link_manager
         if not lm.has_managed_links(extract_dir, fork):
             logger.debug(f"Skipping {fork}: no managed links found")
-            return False
+            return "current"
 
     try:
         fork_fetcher = get_fork_fetcher(fetcher, forgejo_fetcher, fork)
         newer_release = fork_fetcher.check_for_updates(extract_dir, fork)
     except ProtonFetcherError as e:
         logger.error(f"Failed to check {fork}: {e}")
-        return False
+        print(f"{fork}: check failed")
+        return "error"
 
     if newer_release:
         print(f"New release available for {fork}: {newer_release}!")
-        return True
+        return "update"
     print(f"{fork}: up-to-date")
-    return False
+    return "current"
 
 
 def handle_check_operation(
@@ -308,35 +313,23 @@ def handle_check_operation(
         forks_to_check = list(FORKS.keys())
         check_managed_only = True
 
-    updates_available = False
+    # Exit codes: 0 = up-to-date, 1 = updates available, 2 = a check failed.
+    saw_update = False
+    saw_error = False
     for fork in forks_to_check:
-        if _check_single_fork(
+        status = _check_single_fork(
             fetcher, forgejo_fetcher, extract_dir, fork, check_managed_only
-        ):
-            updates_available = True
+        )
+        if status == "update":
+            saw_update = True
+        elif status == "error":
+            saw_error = True
 
-    if updates_available:
-        raise SystemExit(0)
-    raise SystemExit(1)
-
-
-def handle_default_fetch(
-    fetcher: GitHubReleaseFetcher,
-    repo: str,
-    output_dir: Path,
-    extract_dir: Path,
-    args: Any,
-) -> None:
-    """Handle the default fetch and extract operation flow (GitHub forks only)."""
-    actual_fork = get_fork_from_args(args) or DEFAULT_FORK
-    fetcher.fetch_and_extract(
-        repo,
-        output_dir,
-        extract_dir,
-        release_tag=args.release,
-        fork=actual_fork,
-        dry_run=args.dry_run,
-    )
+    if saw_error:
+        raise SystemExit(2)
+    if saw_update:
+        raise SystemExit(1)
+    raise SystemExit(0)
 
 
 def handle_fetch_with_fork(

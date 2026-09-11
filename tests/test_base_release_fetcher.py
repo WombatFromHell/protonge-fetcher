@@ -52,7 +52,7 @@ class TestBaseReleaseFetcherSharedWorkflow:
 
         assert result == version_dir
         # Should not have called download since directory existed
-        mock_network.download.assert_not_called()
+        mock_network.get.assert_not_called()
 
     def test_relink_fork_success(
         self,
@@ -216,7 +216,6 @@ class TestBaseReleaseFetcherSharedWorkflow:
             extract_dir=extract_dir,
             release_tag="dwproton-10.0-26",
             fork=ForkName.DW_PROTON,
-            is_manual_release=True,
         )
 
         assert result is None
@@ -415,11 +414,10 @@ class TestHandleAlreadyExtracted:
             extract_dir,
             "GE-Proton10-20",
             ForkName.GE_PROTON,
-            version_dir,
             is_manual_release=False,
         )
 
-        assert result == (True, version_dir)
+        assert result is None
         mock_manage.assert_not_called()
 
     def test_handle_already_extracted_updates_links_when_needed(
@@ -457,11 +455,10 @@ class TestHandleAlreadyExtracted:
             extract_dir,
             "GE-Proton10-20",
             ForkName.GE_PROTON,
-            version_dir,
             is_manual_release=True,
         )
 
-        assert result == (True, version_dir)
+        assert result is None
         mock_manage.assert_called_once_with(
             extract_dir, "GE-Proton10-20", ForkName.GE_PROTON, is_manual_release=True
         )
@@ -590,16 +587,8 @@ class TestDryRunWorkflow:
         mocker.patch.object(
             mock_fetcher.release_manager, "get_remote_asset_size", return_value=1048576
         )
-        mocker.patch.object(
-            mock_fetcher.link_manager, "find_version_candidates", return_value=[]
-        )
         mocker.patch(
-            "protonfetcher.base_release_fetcher.parse_version",
-            return_value=("GE-Proton", 10, 20, 0),
-        )
-        mocker.patch.object(
-            mock_fetcher.link_manager,
-            "get_link_names_for_fork",
+            "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
                 Path("/tmp/GE-Proton"),
                 Path("/tmp/GE-Proton-Fallback"),
@@ -614,7 +603,7 @@ class TestDryRunWorkflow:
             dry_run=True,
         )
 
-        assert mock_network_client.download.call_count == 0
+        assert mock_network_client.get.call_count == 0
         assert result is None
 
     def test_dry_run_resolves_asset_info(
@@ -634,16 +623,8 @@ class TestDryRunWorkflow:
         mocker.patch.object(
             mock_fetcher.release_manager, "get_remote_asset_size", return_value=1048576
         )
-        mocker.patch.object(
-            mock_fetcher.link_manager, "find_version_candidates", return_value=[]
-        )
         mocker.patch(
-            "protonfetcher.base_release_fetcher.parse_version",
-            return_value=("GE-Proton", 10, 20, 0),
-        )
-        mocker.patch.object(
-            mock_fetcher.link_manager,
-            "get_link_names_for_fork",
+            "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
                 Path("/tmp/GE-Proton"),
                 Path("/tmp/GE-Proton-Fallback"),
@@ -697,16 +678,8 @@ class TestDryRunWorkflow:
         mocker.patch.object(
             mock_fetcher.release_manager, "get_remote_asset_size", return_value=1048576
         )
-        mocker.patch.object(
-            mock_fetcher.link_manager, "find_version_candidates", return_value=[]
-        )
         mocker.patch(
-            "protonfetcher.base_release_fetcher.parse_version",
-            return_value=("GE-Proton", 10, 20, 0),
-        )
-        mocker.patch.object(
-            mock_fetcher.link_manager,
-            "get_link_names_for_fork",
+            "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
                 Path(f"/tmp/{fork.value}"),
                 Path(f"/tmp/{fork.value}-Fallback"),
@@ -762,16 +735,8 @@ class TestDryRunOutput:
         mocker.patch.object(
             mock_fetcher.release_manager, "get_remote_asset_size", return_value=1048576
         )
-        mocker.patch.object(
-            mock_fetcher.link_manager, "find_version_candidates", return_value=[]
-        )
         mocker.patch(
-            "protonfetcher.base_release_fetcher.parse_version",
-            return_value=("GE-Proton", 10, 20, 0),
-        )
-        mocker.patch.object(
-            mock_fetcher.link_manager,
-            "get_link_names_for_fork",
+            "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
                 Path("/tmp/GE-Proton"),
                 Path("/tmp/GE-Proton-Fallback"),
@@ -814,16 +779,8 @@ class TestDryRunOutput:
         mocker.patch.object(
             mock_fetcher.release_manager, "get_remote_asset_size", return_value=1048576
         )
-        mocker.patch.object(
-            mock_fetcher.link_manager, "find_version_candidates", return_value=[]
-        )
         mocker.patch(
-            "protonfetcher.base_release_fetcher.parse_version",
-            return_value=("GE-Proton", 10, 20, 0),
-        )
-        mocker.patch.object(
-            mock_fetcher.link_manager,
-            "get_link_names_for_fork",
+            "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
                 Path("/tmp/extract/GE-Proton"),
                 Path("/tmp/extract/GE-Proton-Fallback"),

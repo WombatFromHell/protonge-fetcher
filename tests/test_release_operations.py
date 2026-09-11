@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from protonfetcher.common import ForkName
-from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.release_operations import (
     _check_release_exists,
     _determine_release_path,
@@ -37,7 +36,6 @@ class TestDetermineReleasePath:
             extract_dir=extract_dir,
             tag="GE-Proton10-20",
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         assert result == version_dir
@@ -54,7 +52,6 @@ class TestDetermineReleasePath:
             extract_dir=extract_dir,
             tag="EM-10.0-30",
             fork=ForkName.PROTON_EM,
-            file_system=FileSystemClient(),
         )
 
         assert result == version_dir
@@ -71,7 +68,6 @@ class TestDetermineReleasePath:
             extract_dir=extract_dir,
             tag="CachyOS-10-20",
             fork=ForkName.CACHYOS,
-            file_system=FileSystemClient(),
         )
 
         assert result == version_dir
@@ -86,14 +82,14 @@ class TestCheckReleaseExists:
         release_path.mkdir()
 
         # Should not raise
-        _check_release_exists(release_path, FileSystemClient())
+        _check_release_exists(release_path)
 
     def test_nonexistent_directory_raises(self, tmp_path: Path) -> None:
         """Test that nonexistent directory raises error."""
         release_path = tmp_path / "NonExistent"
 
         with pytest.raises(Exception, match="does not exist"):
-            _check_release_exists(release_path, FileSystemClient())
+            _check_release_exists(release_path)
 
 
 class TestIdentifyLinksToRemove:
@@ -114,7 +110,6 @@ class TestIdentifyLinksToRemove:
             extract_dir=extract_dir,
             release_path=release_path,
             fork=fork,
-            file_system=FileSystemClient(),
         )
 
         # Main link should be identified
@@ -142,7 +137,6 @@ class TestIdentifyLinksToRemove:
             extract_dir=extract_dir,
             release_path=release_path,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         # Broken symlink should NOT be identified (can't match release_path)
@@ -160,7 +154,6 @@ class TestIdentifyLinksToRemove:
             extract_dir=extract_dir,
             release_path=release_path,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         assert links_to_remove == []
@@ -184,7 +177,6 @@ class TestIdentifyLinksToRemove:
             extract_dir=extract_dir,
             release_path=release_path,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         # Link pointing to other directory should NOT be identified
@@ -199,7 +191,7 @@ class TestRemoveReleaseDirectory:
         release_path = tmp_path / "GE-Proton10-20"
         release_path.mkdir()
 
-        _remove_release_directory(release_path, FileSystemClient())
+        _remove_release_directory(release_path)
 
         assert not release_path.exists()
 
@@ -217,7 +209,7 @@ class TestRemoveReleaseDirectory:
 
         try:
             with pytest.raises(Exception, match="Failed to remove"):
-                _remove_release_directory(release_path, FileSystemClient())
+                _remove_release_directory(release_path)
         finally:
             release_path.chmod(0o755)
 
@@ -236,14 +228,14 @@ class TestRemoveSymbolicLinks:
         fb1_link = tmp_path / "GE-Proton-Fallback"
         fb1_link.symlink_to(version_dir)
 
-        _remove_symbolic_links([main_link, fb1_link], FileSystemClient())
+        _remove_symbolic_links([main_link, fb1_link])
 
         assert not main_link.exists()
         assert not fb1_link.exists()
 
     def test_handles_empty_list(self, tmp_path: Path) -> None:
         """Test that empty list does nothing."""
-        _remove_symbolic_links([], FileSystemClient())
+        _remove_symbolic_links([])
 
 
 class TestRemoveRelease:
@@ -265,7 +257,6 @@ class TestRemoveRelease:
             extract_dir=extract_dir,
             tag=tag,
             fork=fork,
-            file_system=FileSystemClient(),
         )
 
         assert result is True
@@ -283,7 +274,6 @@ class TestRemoveRelease:
             extract_dir=extract_dir,
             tag="EM-10.0-30",
             fork=ForkName.PROTON_EM,
-            file_system=FileSystemClient(),
         )
 
         assert result is True
@@ -299,7 +289,6 @@ class TestRemoveRelease:
                 extract_dir=extract_dir,
                 tag="NonExistent-10-20",
                 fork=ForkName.GE_PROTON,
-                file_system=FileSystemClient(),
             )
 
 
@@ -321,9 +310,7 @@ class TestCleanupStaleSymlinks:
         v1.rmdir()
 
         # Run cleanup
-        from protonfetcher.filesystem import FileSystemClient
-
-        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON, FileSystemClient())
+        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON)
 
         # Symlink should be gone
         assert not main_link.exists()
@@ -344,7 +331,7 @@ class TestCleanupStaleSymlinks:
         main_link = extract_dir / "GE-Proton"
         main_link.symlink_to(v2)
 
-        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON, FileSystemClient())
+        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON)
 
         # Symlink should now point to newest version
         assert main_link.resolve() == v1
@@ -360,7 +347,7 @@ class TestCleanupStaleSymlinks:
         main_link = extract_dir / "GE-Proton"
         main_link.symlink_to(v1)
 
-        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON, FileSystemClient())
+        cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON)
 
         # Symlink should still point to v1
         assert main_link.resolve() == v1

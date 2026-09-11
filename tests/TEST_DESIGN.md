@@ -57,7 +57,7 @@ graph LR
         T_EXTRACTION["test_extraction.py"]
         T_LINK_MGR["test_link_manager_e2e.py"]
         T_UTILS["test_utils.py"]
-        C["conftest.py\nshared fixtures"]
+        C["conftest.py\nfixture module hub"]
     end
 
     subgraph SRC["src/protonfetcher/"]
@@ -84,6 +84,7 @@ graph LR
         S_SPINNER["spinner.py"]
         S_VERSION["version_finder.py"]
         S_SYMLINK_OPS["symlink_operations.py"]
+        S_DIRS["dirs.py"]
     end
 
     T_CLI --> S_CLI_CORE
@@ -91,14 +92,14 @@ graph LR
     T_DISPATCH --> S_GITHUB & S_FORGEJO
     T_HANDLERS --> S_CLI_HANDLERS
     T_VALIDATORS --> S_CLI_VALIDATORS
-    T_BASE --> S_FETCHER
+    T_BASE --> S_FETCHER & S_DIRS
     T_PRUNE --> S_LINK & S_CLI_CORE
     T_PRUNE_OPS --> S_PRUNE_OPS & S_VERSION
     T_LINK_STATUS --> S_LINK_STATUS & S_COMMON
     T_RELEASE_OPS --> S_RELEASE_OPS & S_FS
     T_RELEASE_E2E --> S_RELEASE & S_ADAPTER
     T_GITHUB --> S_GITHUB & S_FETCHER
-    T_FORGEJO --> S_FORGEJO & S_ADAPTER
+    T_FORGEJO --> S_FORGEJO & S_ADAPTER & S_DIRS
     T_EXTRACTION --> S_EXTRACTION & S_DOWNLOAD
     T_INTEGRATION --> S_NETWORK & S_SPINNER
     T_UTILS --> S_UTILS
@@ -154,7 +155,7 @@ classDiagram
 
     class ReleaseManager {
         +platform_adapter: PlatformAdapter
-        +find_asset()
+        +find_asset_by_name()
         +list_recent_releases()
     }
 
@@ -175,7 +176,7 @@ classDiagram
 
     note for GitHubReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
     note for ForgejoReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
-    note for BaseReleaseFetcher["~645 lines, ALL logic<br/>Test: test_base_release_fetcher.py"]
+    note for BaseReleaseFetcher["~500 lines, ALL logic<br/>Test: test_base_release_fetcher.py"]
     note for PlatformAdapter["URL/header construction<br/>Test: test_forgejo_fetcher.py + test_release_manager_e2e.py (Pattern 8)"]
 ```
 
@@ -225,62 +226,58 @@ graph TB
 
 ```mermaid
 graph TD
-    subgraph FACTORIES["Factory Fixtures"]
+    subgraph DATA["Data Fixtures (tests/data.py)"]
+        TEST_DATA["test_data<br/>centralized fork configs"]
+    end
+
+    subgraph FACTORIES["Factory Fixtures (tests/factories.py)"]
         NET_FACTORY["mock_network_factory"]
         FS_FACTORY["mock_filesystem_factory"]
         ARCHIVE_FACTORY["sample_archive_factory"]
     end
 
-    subgraph ENVIRONMENT["Environment Fixtures"]
-        ENV_BUILDER["test_environment_builder<br/>fluent builder"]
+    subgraph ENVIRONMENT["Environment Fixtures (tests/fixtures.py)"]
+        TEMP_ENV["temp_environment"]
+        EXTRACT_DIR["extract_dir"]
+        INSTALLED["installed_proton_versions"]
+        SYMLINK_ENV["symlink_environment"]
     end
 
-    subgraph DATA["Test Data Fixtures"]
-        TEST_DATA["test_data<br/>centralized fork configs"]
+    subgraph FORK_PARAM["Fork Parametrization (tests/fixtures.py)"]
         FORK_FIXTURE["fork (parametrized)"]
-        FORK_REPO["fork_repo"]
-        FORK_FORMAT["fork_archive_format"]
     end
 
-    subgraph COMPONENTS["Component Fixtures"]
-        RM_FIXTURE["release_manager"]
+    subgraph COMPONENTS["Component Fixtures (tests/fixtures.py)"]
         LM_FIXTURE["link_manager"]
-        GF_FIXTURE["github_fetcher"]
     end
 
-    subgraph MOCKS["Mock Fixtures"]
+    subgraph MOCKS["Mock Fixtures (tests/fixtures.py)"]
         NET_CLIENT["mock_network_client"]
         FS_CLIENT["mock_filesystem_client"]
         TAR_OPS["mock_tarfile_operations"]
         URL_DL["mock_urllib_download"]
         SUB_TAR["mock_subprocess_tar"]
         BUILTIN_OPEN["mock_builtin_open"]
-        RATE_LIMIT["mock_network_with_rate_limit"]
+        TAR_GZ["sample_tar_gz_archive"]
+        TAR_XZ["sample_tar_xz_archive"]
     end
 
     NET_FACTORY --> NET_CLIENT
-    NET_FACTORY --> RATE_LIMIT
     FS_FACTORY --> FS_CLIENT
     FS_FACTORY --> LM_FIXTURE
-    FS_FACTORY --> RM_FIXTURE
-    FS_FACTORY --> GF_FIXTURE
-    ARCHIVE_FACTORY --> TAR_OPS
+    ARCHIVE_FACTORY --> TAR_GZ
+    ARCHIVE_FACTORY --> TAR_XZ
 
-    FORK_FIXTURE --> FORK_REPO
-    FORK_FIXTURE --> FORK_FORMAT
+    FORK_FIXTURE --> INSTALLED
+    FORK_FIXTURE --> SYMLINK_ENV
     TEST_DATA --> FORK_FIXTURE
 
-    ENV_BUILDER --> COMPONENTS
-
-    NET_CLIENT --> RM_FIXTURE
-    NET_CLIENT --> GF_FIXTURE
-    FS_CLIENT --> LM_FIXTURE
-    FS_CLIENT --> RM_FIXTURE
-    FS_CLIENT --> GF_FIXTURE
+    NET_CLIENT --> LM_FIXTURE
 
     style FACTORIES fill:#e1f5e1
     style ENVIRONMENT fill:#e1f0f5
     style DATA fill:#fff4e1
+    style FORK_PARAM fill:#fff4e1
     style COMPONENTS fill:#f5e1f5
     style MOCKS fill:#f5e1e1
 ```
@@ -417,15 +414,15 @@ graph LR
     end
 
     subgraph CLI_DISPATCH["test_cli_dispatch.py — Dispatch Logic"]
-        DD["_get_explicit_flags, _get_operation_from_args<br/>_dispatch, _resolve_default_operation"]
+        DD["get_explicit_flags, get_operation_from_args<br/>dispatch, _default_operation"]
     end
 
     subgraph CLI_HANDLERS["test_cli_handlers.py — Handler Functions"]
-        DH["_handle_check_operation, _handle_ls_operation<br/>_handle_list_operation, _handle_relink_operation<br/>_handle_rm_operation, _handle_prune_operation"]
+        DH["handle_check_operation, handle_ls_operation<br/>handle_list_operation, handle_relink_operation<br/>handle_rm_operation, handle_prune_operation"]
     end
 
     subgraph CLI_VALIDATORS["test_cli_validators.py — Validation"]
-        DV["_set_default_fork, _validate_mutually_exclusive_args"]
+        DV["set_default_fork, validate_mutually_exclusive_args"]
     end
 
     subgraph VERSIONS["Version Checks"]
@@ -460,7 +457,7 @@ sequenceDiagram
     participant MOCK as Mocks (network, fs, tar)
     participant FS as Real FS (tmp_path)
 
-    PY->>CF: Load shared fixtures
+    PY->>CF: Import fixture modules<br/>(data, factories, fixtures)
     CF->>FIX: Register factories, mock fixtures, test_data
     PY->>FIX: Resolve fixture dependencies per test
     FIX->>MOCK: Create protocol-based mocks
@@ -533,7 +530,7 @@ graph TD
 
 ## 12. New Source Modules — Extracted from LinkManager
 
-> LinkManager (~509 lines) was refactored into 6 focused modules. Each has its own test file.
+> LinkManager (~355 lines) was refactored into 6 focused modules. Each has its own test file.
 
 ```mermaid
 graph LR
@@ -542,7 +539,7 @@ graph LR
         CS["candidate_selection.py<br/>Top-3 candidate selection<br/>select_top_3_candidates()"]
         LS["link_status.py<br/>Read-only link inspection<br/>list_links(), has_managed_links()"]
         SO["symlink_operations.py<br/>Symlink CRUD<br/>create_symlinks(), cleanup_unwanted_links()"]
-        PO["prune_operations.py<br/>Prune plan & execution<br/>get_installed_versions(), execute_prune_removals()"]
+        PO["prune_operations.py<br/>Prune plan & execution<br/>compute_prune_plan(), execute_prune_removals()"]
         RO["release_operations.py<br/>Release removal<br/>remove_release(), cleanup_stale_symlinks()"]
     end
 
@@ -570,10 +567,10 @@ graph LR
 | Module                   | Responsibility                                | Key Functions                                                                  |
 | ------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------ |
 | `version_finder.py`      | Scan directories, parse versions, deduplicate | `find_version_candidates()`, `_deduplicate_candidates()`                        |
-| `candidate_selection.py` | Select top-3 candidates for symlinks          | `select_top_3_candidates()`, `select_manual_release_candidates()`              |
-| `link_status.py`         | Read-only link inspection                     | `list_links()`, `has_managed_links()`, `build_expected_link_mapping()`         |
+| `candidate_selection.py` | Select top-3 candidates for symlinks          | `select_top_3_candidates()`                                                     |
+| `link_status.py`         | Read-only link inspection                     | `list_links()`, `has_managed_links()`, `get_installed_versions()`, `get_linked_versions()` |
 | `symlink_operations.py`  | Symlink CRUD (create, cleanup, manage)        | `create_symlinks()`, `create_symlink_specs()`, `cleanup_unwanted_links()`      |
-| `prune_operations.py`    | Prune plan computation & execution            | `get_installed_versions()`, `compute_prune_plan()`, `execute_prune_removals()` |
+| `prune_operations.py`    | Prune plan computation & execution            | `compute_prune_plan()`, `execute_prune_removals()`, `prune_releases()`          |
 | `release_operations.py`  | Remove specific releases                      | `remove_release()`, `cleanup_stale_symlinks()`                                 |
 
 ---
@@ -588,7 +585,7 @@ graph TD
         DISPATCH_MOD["cli/dispatch.py — routing"]
         HANDLER_MOD["cli/handlers.py — operation handlers"]
         FETCHER_MOD["github_fetcher.py — orchestrate()"]
-        RELEASE_MOD["release_manager.py — find_asset()"]
+        RELEASE_MOD["release_manager.py — find_asset_by_name()"]
         DOWNLOAD_MOD["asset_downloader.py — download()"]
         EXTRACT_MOD["archive_extractor.py — extract()"]
         VERSION_MOD["version_finder.py — discover versions"]
@@ -609,9 +606,12 @@ graph TD
 
 ```mermaid
 mindmap
-    root((Test Suite - 328 tests))
+    root((Test Suite - 425 tests))
         Files
-            conftest.py - shared fixtures
+            conftest.py - re-export layer
+            data.py - centralized test data
+            factories.py - factory fixtures
+            fixtures.py - clients, env, fork, SUT, mocks
             test_cli.py - CLI main entry + parsing + validation
             test_cli_dispatch.py - dispatch logic
             test_cli_handlers.py - handler functions
@@ -632,8 +632,8 @@ mindmap
             test_utils.py - version parsing
         Stats
             18 test files
-            328 tests total
-            <0.5s execution
+            425 tests total
+            <1s execution
         Markers
             integration
             unit
@@ -647,69 +647,66 @@ mindmap
 
 ---
 
-## 15. conftest.py Fixture Architecture
+## 15. Fixture Module Architecture
+
+Fixture code is split into three modules re-exported by `tests/conftest.py` (a thin import layer that also sets up `sys.path`).
 
 ```mermaid
-graph TB
-    subgraph ROOT["conftest.py — Fixture Hierarchy"]
-        subgraph PARAM["Parametrized Fixtures"]
-            FORK["fork<br/>params=[GE_PROTON, PROTON_EM, CACHYOS]"]
+graph TD
+    subgraph ROOT["conftest.py — Thin Re-Export Layer"]
+        subgraph DATA_FIXTURES["tests/data.py — Data Fixtures"]
+            TDATA["test_data<br/>fork repos / example tags /<br/>example assets / archive formats"]
         end
 
-        subgraph FACTORY_FIXTURES["Factory Fixtures"]
-            NET_FACT["mock_network_factory<br/>configurable mock creation"]
-            FS_FACT["mock_filesystem_factory<br/>configurable FS mock"]
-            ARCH_FACT["sample_archive_factory<br/>tarball simulation"]
+        subgraph FACTORY_FIXTURES["tests/factories.py — Factory Fixtures"]
+            NET_FACT["mock_network_factory<br/>get_response, head_response,<br/>rate_limit, not_found, custom_returncode"]
+            FS_FACT["mock_filesystem_factory<br/>exists/is_dir/is_symlink/read/size maps,<br/>use_tmp_path"]
+            ARCH_FACT["sample_archive_factory<br/>format, tag, files"]
         end
 
-        subgraph MOCK_FIXTURES["Mock Fixtures"]
+        subgraph MOCK_FIXTURES["tests/fixtures.py — Client & Mock Fixtures"]
             MC_NET["mock_network_client"]
             MC_FS["mock_filesystem_client"]
+            MC_TARGZ["sample_tar_gz_archive"]
+            MC_TARXZ["sample_tar_xz_archive"]
             MC_TAR["mock_tarfile_operations"]
             MC_URL["mock_urllib_download"]
             MC_SUB["mock_subprocess_tar"]
             MC_OPEN["mock_builtin_open"]
-            MC_RATE["mock_network_with_rate_limit"]
         end
 
-        subgraph DATA_FIXTURES["Data Fixtures"]
-            TDATA["test_data<br/>fork configurations"]
-            FREPO["fork_repo"]
-            FFORMAT["fork_archive_format"]
+        subgraph ENV_FIXTURES["tests/fixtures.py — Environment Fixtures"]
+            ENV_TEMP["temp_environment"]
+            ENV_EXTRACT["extract_dir"]
+            ENV_INSTALLED["installed_proton_versions"]
+            ENV_SYMLINK["symlink_environment"]
         end
 
-        subgraph ENV_FIXTURES["Environment Fixtures"]
-            ENVB["test_environment_builder<br/>fluent builder pattern"]
+        subgraph FORK_PARAM["tests/fixtures.py — Fork Parametrization"]
+            FORK["fork<br/>params=[GE_PROTON, PROTON_EM,<br/>CACHYOS, DW_PROTON]"]
         end
 
-        subgraph SUT_FIXTURES["SUT Fixtures"]
-            FMGR["release_manager"]
+        subgraph SUT_FIXTURES["tests/fixtures.py — SUT Fixtures"]
             LMGR["link_manager"]
-            GFETCH["github_fetcher"]
         end
-
-        FORK --> FREPO
-        FORK --> FFORMAT
-        TDATA --> FORK
 
         NET_FACT --> MC_NET
-        NET_FACT --> MC_RATE
         FS_FACT --> MC_FS
+        FS_FACT --> LMGR
+        ARCH_FACT --> MC_TARGZ
+        ARCH_FACT --> MC_TARXZ
 
-        MC_NET --> FMGR
-        MC_NET --> GFETCH
-        MC_FS --> LMGR
-        MC_FS --> FMGR
-        MC_FS --> GFETCH
-        ENVB --> SUT_FIXTURES
+        FORK --> ENV_INSTALLED
+        FORK --> ENV_SYMLINK
+        TDATA --> FORK
     end
 
     style ROOT fill:#f0f0f0
-    style PARAM fill:#e1f5e1
-    style FACTORY_FIXTURES fill:#fff4e1
+    style DATA_FIXTURES fill:#fff4e1
+    style FACTORY_FIXTURES fill:#e1f5e1
     style MOCK_FIXTURES fill:#f5e1e1
-    style DATA_FIXTURES fill:#e1f0f5
-    style ENV_FIXTURES fill:#f5e1f5
+    style ENV_FIXTURES fill:#e1f0f5
+    style FORK_PARAM fill:#f5e1f5
     style SUT_FIXTURES fill:#e1f5e1
 ```
 

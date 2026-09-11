@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from .candidate_selection import select_top_3_candidates as _select_top_3
 from .common import (
@@ -12,10 +11,8 @@ from .common import (
     ForkName,
     VersionCandidateList,
 )
+from .dirs import get_link_names, resolve_directory
 from .exceptions import LinkManagementError
-from .link_status import (
-    _get_link_names as _get_link_names_from_status,
-)
 from .link_status import (
     build_expected_link_mapping as _build_expected_link_mapping,
 )
@@ -26,6 +23,8 @@ from .link_status import (
     has_managed_links as _has_managed_links,
 )
 from .link_status import (
+    get_installed_versions as _get_installed,
+    get_linked_versions as _get_linked,
     list_links as _list_links,
 )
 from .prune_operations import prune_releases as _prune_releases
@@ -34,59 +33,6 @@ from .symlink_operations import create_symlinks as _create_symlinks
 from .version_finder import _deduplicate_candidates, find_version_candidates
 
 logger = logging.getLogger(__name__)
-
-
-def resolve_directory(
-    extract_dir: Path,
-    tag: str,
-    fork: ForkName,
-    file_system: FileSystemClientProtocol,
-) -> Path:
-    """Resolve the extracted directory for a release tag using fork-specific templates.
-
-    Tries each directory name template from ForkConfig in priority order.
-
-    Args:
-        extract_dir: Base directory to search
-        tag: Release tag
-        fork: The fork name
-        file_system: File system client for existence checks
-
-    Returns:
-        Path to the found directory
-
-    Raises:
-        LinkManagementError: If no template matches an existing directory
-    """
-    cfg = FORKS[fork]
-    for template in cfg.dir_name_templates:
-        candidate = extract_dir / template.format(tag=tag)
-        if file_system.exists(candidate) and file_system.is_dir(candidate):
-            return candidate
-
-    tried = ", ".join(t.format(tag=tag) for t in cfg.dir_name_templates)
-    raise LinkManagementError(f"Manual release directory not found: {tried}")
-
-
-def resolve_directory_candidates(
-    extract_dir: Path,
-    tag: str,
-    fork: ForkName,
-) -> list[Path]:
-    """Return all candidate directory paths for a tag, in priority order.
-
-    Does not check existence — just generates paths from templates.
-
-    Args:
-        extract_dir: Base directory to search
-        tag: Release tag
-        fork: The fork name
-
-    Returns:
-        List of candidate Path objects in priority order
-    """
-    cfg = FORKS[fork]
-    return [extract_dir / t.format(tag=tag) for t in cfg.dir_name_templates]
 
 
 class LinkManager:
@@ -100,29 +46,13 @@ class LinkManager:
         self.file_system_client = file_system_client
         self.timeout = timeout
 
-    def get_link_names_for_fork(
-        self,
-        extract_dir: Path,
-        fork: ForkName,
-    ) -> tuple[Path, Path, Path]:
-        """Get the symlink names for a specific fork with extract_dir.
-
-        Args:
-            extract_dir: The directory where symlinks will be created
-            fork: The Proton fork name
-
-        Returns:
-            Tuple of three Path objects: (main, fallback1, fallback2)
-        """
-        return _get_link_names_from_status(extract_dir, fork)
-
     def find_tag_directory(
         self,
         extract_dir: Path,
         tag: str,
         fork: ForkName,
         is_manual_release: bool = True,
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """Find the tag directory for manual releases.
 
         Args:
@@ -255,7 +185,7 @@ class LinkManager:
 
     def _handle_manual_release_directory(
         self, extract_dir: Path, tag: str, fork: ForkName, is_manual_release: bool
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """Handle manual release by finding the tag directory.
 
         Args:
@@ -308,7 +238,7 @@ class LinkManager:
         Returns:
             True if links are already correct, False if they need updating
         """
-        main, fb1, fb2 = _get_link_names_from_status(extract_dir, fork)
+        main, fb1, fb2 = get_link_names(extract_dir, fork)
         link_names = (main, fb1, fb2)
 
         tag_dir = self._handle_manual_release_directory(
@@ -318,9 +248,7 @@ class LinkManager:
         if is_manual_release and tag_dir is None:
             return False
 
-        top_3 = _select_top_3(
-            extract_dir, fork, is_manual_release, tag_dir, self.file_system_client
-        )
+        top_3 = _select_top_3(extract_dir, fork, tag_dir, self.file_system_client)
         if top_3 is None:
             return False
 
@@ -343,7 +271,7 @@ class LinkManager:
         Returns:
             True if the operation was successful
         """
-        main, fb1, fb2 = _get_link_names_from_status(extract_dir, fork)
+        main, fb1, fb2 = get_link_names(extract_dir, fork)
 
         tag_dir = self._handle_manual_release_directory(
             extract_dir, tag, fork, is_manual_release
@@ -352,9 +280,7 @@ class LinkManager:
         if is_manual_release and tag_dir is None:
             return True
 
-        top_3 = _select_top_3(
-            extract_dir, fork, is_manual_release, tag_dir, self.file_system_client
-        )
+        top_3 = _select_top_3(extract_dir, fork, tag_dir, self.file_system_client)
         if top_3 is None:
             logger.warning("No extracted Proton directories found – not touching links")
             return True
@@ -365,8 +291,6 @@ class LinkManager:
     def get_installed_versions(self, extract_dir: Path, fork: ForkName) -> list[str]:
         """Get list of currently installed version tags for a fork.
 
-        Delegates to the prune_operations submodule.
-
         Args:
             extract_dir: Directory to search for installed versions
             fork: The Proton fork name
@@ -374,14 +298,10 @@ class LinkManager:
         Returns:
             List of version tag strings, sorted newest first
         """
-        from .prune_operations import get_installed_versions as _get_installed
-
         return _get_installed(extract_dir, fork, self.file_system_client)
 
     def get_linked_versions(self, extract_dir: Path, fork: ForkName) -> set[str]:
         """Get set of version directories currently referenced by symlinks.
-
-        Delegates to the prune_operations submodule.
 
         Args:
             extract_dir: Directory to search for symlinks
@@ -390,8 +310,6 @@ class LinkManager:
         Returns:
             Set of directory names currently linked
         """
-        from .prune_operations import get_linked_versions as _get_linked
-
         return _get_linked(extract_dir, fork, self.file_system_client)
 
     def _compute_prune_plan(

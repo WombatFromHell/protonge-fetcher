@@ -42,23 +42,6 @@ def parse_version(
     return (tag, 0, 0, 0)
 
 
-def compare_versions(tag1: str, tag2: str, fork: ForkName = ForkName.GE_PROTON) -> int:
-    """
-    Compare two version tags to determine which is newer.
-
-    Args:
-        tag1: First tag to compare
-        tag2: Second tag to compare
-        fork: The fork name to determine parsing logic
-
-    Returns:
-        -1 if tag1 is older than tag2, 0 if equal, 1 if tag1 is newer than tag2
-    """
-    v1 = parse_version(tag1, fork)
-    v2 = parse_version(tag2, fork)
-    return (v1 > v2) - (v1 < v2)
-
-
 def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
     """
     Generate the expected Proton asset name from a tag and fork.

@@ -6,8 +6,10 @@ Consolidated integration tests for:
 - Spinner functionality in download/extraction workflows
 """
 
+import email.message
+import io
 import json
-import subprocess
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ import pytest
 
 from protonfetcher.archive_extractor import ArchiveExtractor
 from protonfetcher.asset_downloader import AssetDownloader
+from protonfetcher.exceptions import NetworkError
 from protonfetcher.network import NetworkClient
 from protonfetcher.spinner import Spinner
 
@@ -24,222 +27,129 @@ from protonfetcher.spinner import Spinner
 
 
 class TestNetworkClientIntegration:
-    """Test NetworkClient with mocked subprocess."""
+    """Test NetworkClient (urllib-based) with mocked urlopen."""
 
-    def test_get_follows_redirects_mocked(self, mocker: Any) -> None:
-        """Test GET request follows redirects (mocked subprocess)."""
-        mock_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps({"tag_name": "GE-Proton10-20"}),
-            stderr="",
+    def _fake_response(
+        self,
+        mocker: Any,
+        status: int = 200,
+        body: bytes = b"",
+        url: str = "https://example.com/",
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        resp = mocker.MagicMock()
+        resp.status = status
+        resp.url = url
+        resp.read.return_value = body
+        msg = email.message.EmailMessage()
+        for key, value in (headers or {}).items():
+            msg[key] = value
+        resp.headers = msg
+        resp.__enter__ = mocker.MagicMock(return_value=resp)
+        resp.__exit__ = mocker.MagicMock(return_value=False)
+        return resp
+
+    def test_get_returns_body(self, mocker: Any) -> None:
+        """Test GET returns decoded body and final URL."""
+        url = "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest"
+        mock_response = self._fake_response(
+            mocker,
+            status=200,
+            body=json.dumps({"tag_name": "GE-Proton10-20"}).encode(),
+            url=url,
         )
-        mock_run = mocker.patch(
-            "protonfetcher.network.subprocess.run",
+        mocker.patch(
+            "protonfetcher.network.urllib.request.urlopen",
             return_value=mock_response,
         )
 
         client = NetworkClient(timeout=30)
-        result = client.get(
-            "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest"
+        result = client.get(url)
+
+        assert result.status == 200
+        assert "GE-Proton10-20" in result.body
+        assert result.final_url == url
+
+    def test_get_with_headers(self, mocker: Any) -> None:
+        """Test GET request passes custom headers to urlopen."""
+        mock_response = self._fake_response(
+            mocker, status=200, body=b'{"data": "test"}'
         )
-
-        assert result.returncode == 0
-        assert "GE-Proton10-20" in result.stdout
-
-        call_args = mock_run.call_args[0][0]
-        assert "curl" in call_args
-        assert "-L" in call_args  # Follow redirects
-
-    @pytest.mark.parametrize(
-        "headers,expected_header",
-        [
-            (
-                {"Accept": "application/vnd.github.v3+json"},
-                "Accept: application/vnd.github.v3+json",
-            ),
-            ({"User-Agent": "ProtonFetcher/1.0"}, "User-Agent: ProtonFetcher/1.0"),
-        ],
-    )
-    def test_get_with_headers_mocked(
-        self,
-        headers: dict,
-        expected_header: str,
-        mocker: Any,
-    ) -> None:
-        """Test GET request includes custom headers."""
-        mock_response = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"data": "test"}', stderr=""
-        )
-        mock_run = mocker.patch(
-            "protonfetcher.network.subprocess.run",
+        mock_urlopen = mocker.patch(
+            "protonfetcher.network.urllib.request.urlopen",
             return_value=mock_response,
         )
 
         client = NetworkClient(timeout=30)
         result = client.get(
             "https://api.github.com/repos/test/repo/releases",
-            headers=headers,
+            headers={"Accept": "application/vnd.github.v3+json"},
         )
 
-        assert result.returncode == 0
+        assert result.status == 200
+        request = mock_urlopen.call_args[0][0]
+        assert request.get_header("Accept") == "application/vnd.github.v3+json"
 
-        call_args = mock_run.call_args[0][0]
-        assert "-H" in call_args
-        assert expected_header in call_args
-
-    @pytest.mark.parametrize(
-        "follow_redirects,should_have_L_flag",
-        [(True, True), (False, False)],
-    )
-    def test_head_redirect_handling_mocked(
-        self,
-        follow_redirects: bool,
-        should_have_L_flag: bool,
-        mocker: Any,
-    ) -> None:
-        """Test HEAD request redirect handling."""
-        mock_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: https://github.com/owner/repo/releases/download/v1.0/test.tar.gz",
-            stderr="",
-        )
-        mock_run = mocker.patch(
-            "protonfetcher.network.subprocess.run",
-            return_value=mock_response,
-        )
-
-        client = NetworkClient(timeout=30)
-        result = client.head(
-            "https://github.com/owner/repo/releases/latest",
-            follow_redirects=follow_redirects,
-        )
-
-        assert result.returncode == 0
-
-        call_args = mock_run.call_args[0][0]
-        assert "-I" in call_args  # HEAD request
-        if should_have_L_flag:
-            assert "-L" in call_args
-        else:
-            assert "-L" not in call_args
-
-    @pytest.mark.parametrize(
-        "headers,should_have_H_flag",
-        [({"Accept": "application/octet-stream"}, True), (None, False)],
-    )
-    def test_download_command_mocked(
-        self,
-        headers: dict | None,
-        should_have_H_flag: bool,
-        mocker: Any,
-        tmp_path: Path,
-    ) -> None:
-        """Test download constructs correct curl command."""
-        mock_response = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
-        mock_run = mocker.patch(
-            "protonfetcher.network.subprocess.run",
-            return_value=mock_response,
-        )
-
-        client = NetworkClient(timeout=30)
-        output_path = tmp_path / "test.tar.gz"
-
-        result = client.download(
+    def test_head_returns_final_url(self, mocker: Any) -> None:
+        """Test HEAD returns the final URL after redirects."""
+        mock_response = self._fake_response(
+            mocker,
+            status=200,
             url="https://github.com/owner/repo/releases/download/v1.0/test.tar.gz",
-            output_path=output_path,
-            headers=headers,
-        )
-
-        assert result.returncode == 0
-
-        call_args = mock_run.call_args[0][0]
-        assert "curl" in call_args
-        assert "-L" in call_args  # Follow redirects
-        assert "-s" in call_args  # Silent
-        assert "-f" in call_args  # Fail on error
-
-        if should_have_H_flag:
-            assert "-H" in call_args
-        else:
-            assert "-H" not in call_args
-
-    def test_get_handles_error_response_mocked(self, mocker: Any) -> None:
-        """Test GET handles HTTP error responses."""
-        mock_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=22,
-            stdout="",
-            stderr="404 Not Found",
+            headers={"Content-Length": "1048576"},
         )
         mocker.patch(
-            "protonfetcher.network.subprocess.run",
+            "protonfetcher.network.urllib.request.urlopen",
             return_value=mock_response,
         )
 
         client = NetworkClient(timeout=30)
-        result = client.get("https://api.github.com/repos/invalid/repo/releases")
+        result = client.head("https://github.com/owner/repo/releases/latest")
 
-        assert result.returncode != 0
-        assert "404" in result.stderr
+        assert result.status == 200
+        assert result.body == ""
+        assert result.final_url == (
+            "https://github.com/owner/repo/releases/download/v1.0/test.tar.gz"
+        )
+        assert result.headers["content-length"] == "1048576"
+
+    def test_get_http_error_returns_response(self, mocker: Any) -> None:
+        """Test GET returns 404 as HttpResponse, not an exception."""
+        url = "https://api.github.com/repos/invalid/repo/releases"
+        http_error = urllib.error.HTTPError(
+            url,
+            404,
+            "Not Found",
+            email.message.EmailMessage(),
+            io.BytesIO(b'{"message": "not found"}'),
+        )
+        mocker.patch(
+            "protonfetcher.network.urllib.request.urlopen",
+            side_effect=http_error,
+        )
+
+        client = NetworkClient(timeout=30)
+        result = client.get(url)
+
+        assert result.status == 404
+        assert "not found" in result.body
+
+    def test_connection_error_raises_network_error(self, mocker: Any) -> None:
+        """Test connection failures raise NetworkError."""
+        mocker.patch(
+            "protonfetcher.network.urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        )
+
+        client = NetworkClient(timeout=30)
+        with pytest.raises(NetworkError):
+            client.get("https://invalid.example.com/api")
 
     @pytest.mark.parametrize("timeout", [30, 60])
-    def test_timeout_applied_mocked(self, timeout: int, mocker: Any) -> None:
-        """Test timeout is applied to all request types."""
-        mock_response = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="{}", stderr=""
-        )
-        mock_run = mocker.patch(
-            "protonfetcher.network.subprocess.run",
-            return_value=mock_response,
-        )
-
+    def test_timeout_stored(self, timeout: int) -> None:
+        """Test timeout is stored for use in requests."""
         client = NetworkClient(timeout=timeout)
-        client.get("https://example.com/api")
-        client.head("https://example.com/api")
-
-        for call in mock_run.call_args_list:
-            call_args = call[0][0]
-            assert "--max-time" in call_args
-            assert str(timeout) in call_args
-
-    def test_network_client_in_github_fetcher_workflow_mocked(
-        self,
-        mocker: Any,
-        mock_filesystem_client: Any,
-    ) -> None:
-        """Test NetworkClient used in GitHubReleaseFetcher workflow."""
-        mock_api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(
-                {
-                    "tag_name": "GE-Proton10-20",
-                    "assets": [{"name": "GE-Proton10-20.tar.gz", "size": 1048576}],
-                }
-            ),
-            stderr="",
-        )
-        mocker.patch(
-            "protonfetcher.network.subprocess.run",
-            return_value=mock_api_response,
-        )
-
-        from protonfetcher.release_manager import ReleaseManager
-
-        network_client = NetworkClient(timeout=30)
-        ReleaseManager(network_client, mock_filesystem_client, 30)
-
-        result = network_client.get(
-            "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest"
-        )
-
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert data["tag_name"] == "GE-Proton10-20"
+        assert client.timeout == timeout
 
 
 # =============================================================================
@@ -259,32 +169,6 @@ class TestSpinnerDirect:
 
         captured = capsys.readouterr()
         assert "Test" in captured.out
-
-    def test_spinner_with_iterable(self, capsys: Any) -> None:
-        """Test Spinner wraps iterable correctly."""
-        items = [1, 2, 3, 4, 5]
-
-        with Spinner(iterable=iter(items), desc="Processing", disable=False) as spinner:
-            result = list(spinner)
-
-        assert result == items
-        captured = capsys.readouterr()
-        assert "Processing" in captured.out
-
-    @pytest.mark.parametrize(
-        "current,total,expected",
-        [(25, 100, 0.25), (0, 100, 0.0), (100, 100, 1.0), (150, 100, 1.0)],
-    )
-    def test_spinner_progress_percentage(
-        self, current: int, total: int, expected: float
-    ) -> None:
-        """Test Spinner calculates progress percentage correctly."""
-        spinner = Spinner(total=total, desc="Test", disable=True)
-        spinner.current = current
-
-        percentage = spinner._calculate_progress_percentage()
-
-        assert percentage == expected
 
     def test_spinner_update_increments_current(self) -> None:
         """Test Spinner.update() increments current counter."""
@@ -441,7 +325,6 @@ class TestSpinnerInExtractionWorkflow:
             archive_path=archive_path,
             target_dir=target_dir,
             show_progress=True,
-            show_file_details=True,
         )
 
         captured = capsys.readouterr()
@@ -470,41 +353,11 @@ class TestSpinnerInExtractionWorkflow:
             archive_path=archive_path,
             target_dir=target_dir,
             show_progress=False,
-            show_file_details=False,
         )
 
 
 class TestSpinnerEdgeCases:
     """Test Spinner edge cases."""
-
-    def test_spinner_zero_total(self) -> None:
-        """Test Spinner handles total=0 without division by zero."""
-        spinner = Spinner(total=0, desc="Test", disable=True)
-
-        spinner.update(0)
-        percentage = spinner._calculate_progress_percentage()
-
-        assert percentage == 0.0
-
-    def test_spinner_empty_iterable(self, capsys: Any) -> None:
-        """Test Spinner with empty iterable."""
-        items: list[int] = []
-
-        with Spinner(iterable=iter(items), desc="Empty", disable=False) as spinner:
-            result = list(spinner)
-
-        assert result == []
-        captured = capsys.readouterr()
-        assert "Empty" in captured.out
-
-    def test_spinner_large_total_value(self) -> None:
-        """Test Spinner handles large total values correctly."""
-        spinner = Spinner(total=10_000_000_000, desc="Large", disable=True)
-        spinner.current = 5_000_000_000
-
-        percentage = spinner._calculate_progress_percentage()
-
-        assert percentage == 0.5
 
     def test_spinner_configured_with_fps_limit_during_download(
         self,

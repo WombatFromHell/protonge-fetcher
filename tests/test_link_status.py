@@ -6,7 +6,6 @@ Tests the standalone link status query functions independently of LinkManager.
 from pathlib import Path
 
 from protonfetcher.common import ForkName
-from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.link_status import (
     build_expected_link_mapping,
     compare_link_targets,
@@ -31,7 +30,6 @@ class TestListLinks:
         links_info = list_links(
             extract_dir=extract_dir,
             fork=fork,
-            file_system=FileSystemClient(),
         )
 
         for link_name in link_names:
@@ -54,7 +52,6 @@ class TestListLinks:
         links_info = list_links(
             extract_dir=extract_dir,
             fork=ForkName.PROTON_EM,
-            file_system=FileSystemClient(),
         )
 
         assert "Proton-EM" in links_info
@@ -72,7 +69,6 @@ class TestListLinks:
         links_info = list_links(
             extract_dir=extract_dir,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         assert "GE-Proton" in links_info
@@ -86,7 +82,6 @@ class TestListLinks:
         links_info = list_links(
             extract_dir=extract_dir,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         assert "GE-Proton" in links_info
@@ -110,7 +105,6 @@ class TestHasManagedLinks:
         result = has_managed_links(
             extract_dir=extract_dir,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         assert result is True
@@ -126,7 +120,6 @@ class TestHasManagedLinks:
         result = has_managed_links(
             extract_dir=extract_dir,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         assert result is False
@@ -141,7 +134,6 @@ class TestHasManagedLinks:
         result = has_managed_links(
             extract_dir=extract_dir,
             fork=ForkName.GE_PROTON,
-            file_system=FileSystemClient(),
         )
 
         assert result is False

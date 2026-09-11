@@ -10,13 +10,13 @@ Tests the complete release discovery workflow:
 """
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from protonfetcher.common import ForkName
+from protonfetcher.common import HttpResponse
 from protonfetcher.exceptions import NetworkError
 from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.release_manager import ReleaseManager
@@ -32,11 +32,9 @@ class TestFetchLatestTag:
     ) -> None:
         """Test fetching latest GE-Proton tag via redirect."""
         # Arrange
-        mock_head_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: https://github.com/GloriousEggroll/proton-ge-custom/releases/tag/GE-Proton10-20",
-            stderr="",
+        mock_head_response = HttpResponse(
+            status=200,
+            final_url="https://github.com/GloriousEggroll/proton-ge-custom/releases/tag/GE-Proton10-20",
         )
         mock_network_client.head.return_value = mock_head_response
 
@@ -60,11 +58,9 @@ class TestFetchLatestTag:
     ) -> None:
         """Test fetching latest Proton-EM tag via redirect."""
         # Arrange
-        mock_head_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: https://github.com/Etaash-mathamsetty/Proton/releases/tag/EM-10.0-30",
-            stderr="",
+        mock_head_response = HttpResponse(
+            status=200,
+            final_url="https://github.com/Etaash-mathamsetty/Proton/releases/tag/EM-10.0-30",
         )
         mock_network_client.head.return_value = mock_head_response
 
@@ -83,12 +79,7 @@ class TestFetchLatestTag:
     ) -> None:
         """Test handling network error when fetching latest tag."""
         # Arrange
-        mock_head_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=22,
-            stdout="",
-            stderr="404 Not Found",
-        )
+        mock_head_response = HttpResponse(status=404)
         mock_network_client.head.return_value = mock_head_response
 
         release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
@@ -104,12 +95,7 @@ class TestFetchLatestTag:
     ) -> None:
         """Test handling when no redirect is found."""
         # Arrange
-        mock_head_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="",  # No Location header
-            stderr="",
-        )
+        mock_head_response = HttpResponse(status=200)  # No redirect
         mock_network_client.head.return_value = mock_head_response
 
         release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
@@ -129,10 +115,9 @@ class TestFindAssetByName:
     ) -> None:
         """Test finding GE-Proton asset via GitHub API."""
         # Arrange
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(
+        api_response = HttpResponse(
+            status=200,
+            body=json.dumps(
                 {
                     "assets": [
                         {"name": "GE-Proton10-20.tar.gz", "size": 1048576},
@@ -140,7 +125,6 @@ class TestFindAssetByName:
                     ]
                 }
             ),
-            stderr="",
         )
         mock_network_client.get.return_value = api_response
 
@@ -163,10 +147,9 @@ class TestFindAssetByName:
     ) -> None:
         """Test finding Proton-EM asset via GitHub API."""
         # Arrange
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(
+        api_response = HttpResponse(
+            status=200,
+            body=json.dumps(
                 {
                     "assets": [
                         {"name": "proton-EM-10.0-30.tar.xz", "size": 2097152},
@@ -174,7 +157,6 @@ class TestFindAssetByName:
                     ]
                 }
             ),
-            stderr="",
         )
         mock_network_client.get.return_value = api_response
 
@@ -201,10 +183,9 @@ class TestFindAssetByName:
         This test ensures the x86_64 variant is specifically selected.
         """
         # Arrange - Simulate CachyOS release with multiple architecture variants
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(
+        api_response = HttpResponse(
+            status=200,
+            body=json.dumps(
                 {
                     "assets": [
                         {
@@ -238,7 +219,6 @@ class TestFindAssetByName:
                     ]
                 }
             ),
-            stderr="",
         )
         mock_network_client.get.return_value = api_response
 
@@ -260,10 +240,9 @@ class TestFindAssetByName:
         mock_filesystem_client: Any,
     ) -> None:
         """Test GE-Proton selects the x86_64 asset when an aarch64 variant also exists."""
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(
+        api_response = HttpResponse(
+            status=200,
+            body=json.dumps(
                 {
                     "assets": [
                         {
@@ -277,7 +256,6 @@ class TestFindAssetByName:
                     ]
                 }
             ),
-            stderr="",
         )
         mock_network_client.get.return_value = api_response
 
@@ -298,20 +276,12 @@ class TestFindAssetByName:
     ) -> None:
         """Test finding asset via HTML parsing when API fails."""
         # Arrange: API fails
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=22,
-            stdout="",
-            stderr="403 Forbidden",
-        )
+        api_response = HttpResponse(status=404)
         mock_network_client.get.return_value = api_response
 
         # HTML response contains asset name
-        html_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="<html><body>GE-Proton10-20.tar.gz</body></html>",
-            stderr="",
+        html_response = HttpResponse(
+            status=200, body="<html><body>GE-Proton10-20.tar.gz</body></html>"
         )
         # Second call (HTML fallback) returns HTML
         mock_network_client.get.side_effect = [api_response, html_response]
@@ -335,17 +305,9 @@ class TestFindAssetByName:
     ) -> None:
         """Test handling when asset is not found."""
         # Arrange: Both API and HTML fail
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=22,
-            stdout="",
-            stderr="403 Forbidden",
-        )
-        html_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="<html><body>No assets</body></html>",
-            stderr="",
+        api_response = HttpResponse(status=404)
+        html_response = HttpResponse(
+            status=200, body="<html><body>No assets</body></html>"
         )
         mock_network_client.get.side_effect = [api_response, html_response]
 
@@ -368,17 +330,9 @@ class TestFindAssetByName:
     ) -> None:
         """Test handling when API returns empty assets list."""
         # Arrange: API returns empty, HTML fallback also fails
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps({"assets": []}),
-            stderr="",
-        )
-        html_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="<html><body>No assets found</body></html>",
-            stderr="",
+        api_response = HttpResponse(status=200, body=json.dumps({"assets": []}))
+        html_response = HttpResponse(
+            status=200, body="<html><body>No assets found</body></html>"
         )
         # First call is API, second is HTML fallback
         mock_network_client.get.side_effect = [api_response, html_response]
@@ -406,10 +360,9 @@ class TestListRecentReleases:
     ) -> None:
         """Test listing recent GE-Proton releases."""
         # Arrange
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(
+        api_response = HttpResponse(
+            status=200,
+            body=json.dumps(
                 [
                     {"tag_name": "GE-Proton10-20"},
                     {"tag_name": "GE-Proton10-19"},
@@ -418,7 +371,6 @@ class TestListRecentReleases:
                     {"tag_name": "GE-Proton10-16"},
                 ]
             ),
-            stderr="",
         )
         mock_network_client.get.return_value = api_response
 
@@ -441,17 +393,15 @@ class TestListRecentReleases:
     ) -> None:
         """Test listing recent Proton-EM releases."""
         # Arrange
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(
+        api_response = HttpResponse(
+            status=200,
+            body=json.dumps(
                 [
                     {"tag_name": "EM-10.0-30"},
                     {"tag_name": "EM-10.0-29"},
                     {"tag_name": "EM-10.0-28"},
                 ]
             ),
-            stderr="",
         )
         mock_network_client.get.return_value = api_response
 
@@ -474,12 +424,7 @@ class TestListRecentReleases:
         """Test that recent releases are limited to 20."""
         # Arrange: Return 25 releases
         releases_data = [{"tag_name": f"GE-Proton10-{i}"} for i in range(25)]
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps(releases_data),
-            stderr="",
-        )
+        api_response = HttpResponse(status=200, body=json.dumps(releases_data))
         mock_network_client.get.return_value = api_response
 
         release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
@@ -499,11 +444,8 @@ class TestListRecentReleases:
     ) -> None:
         """Test handling GitHub API rate limit error."""
         # Arrange
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout='{"message": "API rate limit exceeded"}',
-            stderr="403 Forbidden",
+        api_response = HttpResponse(
+            status=403, body='{"message": "API rate limit exceeded"}'
         )
         mock_network_client.get.return_value = api_response
 
@@ -522,12 +464,7 @@ class TestListRecentReleases:
     ) -> None:
         """Test handling network error when listing releases."""
         # Arrange
-        api_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=22,
-            stdout="",
-            stderr="Connection failed",
-        )
+        api_response = HttpResponse(status=404)
         mock_network_client.get.return_value = api_response
 
         release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
@@ -557,11 +494,8 @@ class TestAssetSizeCaching:
         os.environ["XDG_CACHE_HOME"] = str(tmp_path)
 
         try:
-            mock_head_response = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout="Content-Length: 1048576",
-                stderr="",
+            mock_head_response = HttpResponse(
+                status=200, headers={"content-length": "1048576"}
             )
             mock_network_client.head.return_value = mock_head_response
 
@@ -624,6 +558,7 @@ class TestAssetSizeCaching:
                 "size": 1048576,
                 "timestamp": time.time() - 7200,  # 2 hours ago (expired)
             }
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(expired_data))
 
             # Set file mtime to 2 hours ago to trigger cache expiration
@@ -631,11 +566,8 @@ class TestAssetSizeCaching:
             os.utime(cache_path, (old_time, old_time))
 
             # Mock fresh network response
-            mock_head_response = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout="Content-Length: 2097152",  # Different size
-                stderr="",
+            mock_head_response = HttpResponse(
+                status=200, headers={"content-length": "2097152"}
             )
             mock_network_client.head.return_value = mock_head_response
 
@@ -666,11 +598,8 @@ class TestAssetSizeCaching:
 
         # Arrange: curl -L follows redirects internally, so head() is called once
         # with the final response
-        mock_head_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Content-Length: 1048576",
-            stderr="",
+        mock_head_response = HttpResponse(
+            status=200, headers={"content-length": "1048576"}
         )
 
         mock_network_client.head.return_value = mock_head_response
@@ -699,12 +628,7 @@ class TestAssetSizeCaching:
         fs = FileSystemClient()
 
         # Arrange
-        mock_head_response = subprocess.CompletedProcess(
-            args=[],
-            returncode=22,
-            stdout="",
-            stderr="404 Not Found",
-        )
+        mock_head_response = HttpResponse(status=404)
         mock_network_client.head.return_value = mock_head_response
 
         # Disable caching to ensure network call is made
@@ -721,34 +645,6 @@ class TestAssetSizeCaching:
 
 class TestAssetNameExtension:
     """Test asset extension handling based on fork."""
-
-    def test_get_expected_extension_ge_proton(
-        self,
-        mock_network_client: Any,
-        mock_filesystem_client: Any,
-    ) -> None:
-        """Test getting expected extension for GE-Proton."""
-        release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
-
-        # Act
-        extension = release_manager._get_expected_extension(ForkName.GE_PROTON)
-
-        # Assert
-        assert extension == ".tar.gz"
-
-    def test_get_expected_extension_proton_em(
-        self,
-        mock_network_client: Any,
-        mock_filesystem_client: Any,
-    ) -> None:
-        """Test getting expected extension for Proton-EM."""
-        release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
-
-        # Act
-        extension = release_manager._get_expected_extension(ForkName.PROTON_EM)
-
-        # Assert
-        assert extension == ".tar.xz"
 
     def test_find_matching_assets(
         self,
@@ -828,11 +724,8 @@ class TestReleaseManagerForgejoAdapter:
         )
 
         # list_recent_releases uses build_api_url internally
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps([{"tag_name": "dwproton-10.0-26"}]),
-            stderr="",
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body=json.dumps([{"tag_name": "dwproton-10.0-26"}])
         )
 
         releases = release_manager.list_recent_releases("dawn-winery/dwproton")
@@ -857,11 +750,8 @@ class TestReleaseManagerForgejoAdapter:
         )
 
         # list_recent_releases uses build_api_url internally
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps([{"tag_name": "GE-Proton10-20"}]),
-            stderr="",
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body=json.dumps([{"tag_name": "GE-Proton10-20"}])
         )
 
         releases = release_manager.list_recent_releases(
@@ -980,14 +870,11 @@ class TestCheckForNewerRelease:
         expected: str | None,
     ) -> None:
         """Test detection of newer releases for all forks."""
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=f'{{"tag_name": "{latest_tag}"}}', stderr=""
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body=f'{{"tag_name": "{latest_tag}"}}'
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=f"Location: /releases/tag/{latest_tag}",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url=f"/releases/tag/{latest_tag}"
         )
 
         release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)

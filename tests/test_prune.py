@@ -164,6 +164,8 @@ class TestPruneArgumentParsing:
             args = parse_args(build_parser())
             args = set_default_fork(args)
             assert args.keep == 0
+            # keep=0 (prune all) must pass validation
+            validate_mutually_exclusive_args(args)
 
     def test_parse_prune_with_negative_keep(
         self, capsys: pytest.CaptureFixture[str]
@@ -179,7 +181,7 @@ class TestPruneArgumentParsing:
                 validate_mutually_exclusive_args(args)
             assert exc_info.value.code == 1
             captured = capsys.readouterr()
-            assert "--keep must be at least 1" in captured.out
+            assert "--keep must be at least 0" in captured.out
 
 
 # =============================================================================
@@ -445,244 +447,25 @@ class TestPruneOperationFlow:
 
 
 class TestLinkManagerPruneIntegration:
-    """Integration tests for LinkManager.prune_releases()."""
+    """Delegation test for LinkManager.prune_releases()."""
 
-    def test_prune_releases_prunes_linked_versions_beyond_keep(
-        self,
-        link_manager: Any,
-        mock_filesystem_client: Any,
-        tmp_path: Path,
+    def test_prune_releases_delegates_to_operations(
+        self, link_manager: Any, mocker: Any, tmp_path: Path
     ) -> None:
-        """Test symlink-aware pruning: keeps symlink targets, prunes extras."""
-        # Arrange
+        """Manager passes its args and filesystem client through unchanged."""
         extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Create 5 GE-Proton version directories (correct format: GE-Proton10-X)
-        # Higher number = newer version
-        versions = []
-        for i in range(5, 0, -1):
-            v = extract_dir / f"GE-Proton10-{i}"
-            v.mkdir()
-            versions.append(v)
-
-        # Use real filesystem client for symlink operations
-        from protonfetcher.filesystem import FileSystemClient
-        from protonfetcher.link_manager import LinkManager
-
-        fs = FileSystemClient()
-        real_link_manager = LinkManager(fs)
-
-        # Create 3 symlinks pointing to older versions (stale symlinks)
-        main_link = extract_dir / "GE-Proton"
-        fb1_link = extract_dir / "GE-Proton-Fallback"
-        fb2_link = extract_dir / "GE-Proton-Fallback2"
-        main_link.symlink_to(versions[2])  # GE-Proton10-3
-        fb1_link.symlink_to(versions[3])  # GE-Proton10-2
-        fb2_link.symlink_to(versions[4])  # GE-Proton10-1
-
-        # Act
-        kept, pruned = real_link_manager.prune_releases(
-            extract_dir, ForkName.GE_PROTON, keep=3, dry_run=True
+        mock_prune = mocker.patch(
+            "protonfetcher.link_manager._prune_releases", return_value=([], [])
         )
 
-        # Assert
-        # Keep targets of first 3 symlinks: 10-3, 10-2, 10-1
-        assert len(kept) == 3
-        assert "GE-Proton10-3" in kept
-        assert "GE-Proton10-2" in kept
-        assert "GE-Proton10-1" in kept
-
-        # Newer unlinked versions pruned
-        assert len(pruned) == 2
-        assert "GE-Proton10-5" in pruned
-        assert "GE-Proton10-4" in pruned
-
-    def test_prune_releases_dry_run_no_deletion(
-        self,
-        link_manager: Any,
-        mock_filesystem_client: Any,
-        tmp_path: Path,
-    ) -> None:
-        """Test that dry_run=True doesn't delete anything."""
-        # Arrange
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Create 5 GE-Proton version directories (correct format: GE-Proton10-X)
-        for i in range(5, 0, -1):
-            v = extract_dir / f"GE-Proton10-{i}"
-            v.mkdir()
-
-        # Use real filesystem client
-        from protonfetcher.filesystem import FileSystemClient
-        from protonfetcher.link_manager import LinkManager
-
-        fs = FileSystemClient()
-        real_link_manager = LinkManager(fs)
-
-        # Act
-        kept, pruned = real_link_manager.prune_releases(
-            extract_dir, ForkName.GE_PROTON, keep=3, dry_run=True
+        result = link_manager.prune_releases(
+            extract_dir, ForkName.GE_PROTON, keep=2, dry_run=True
         )
 
-        # Assert
-        assert len(pruned) == 2  # GE-Proton10-4, GE-Proton10-5 would be pruned
-        # All directories should still exist
-        for i in range(1, 6):
-            assert (extract_dir / f"GE-Proton10-{i}").exists()
-
-    def test_prune_releases_empty_directory(
-        self,
-        link_manager: Any,
-        mock_filesystem_client: Any,
-        tmp_path: Path,
-    ) -> None:
-        """Test pruning when no versions exist."""
-        # Arrange
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Use real filesystem client
-        from protonfetcher.filesystem import FileSystemClient
-        from protonfetcher.link_manager import LinkManager
-
-        fs = FileSystemClient()
-        real_link_manager = LinkManager(fs)
-
-        # Act
-        kept, pruned = real_link_manager.prune_releases(
-            extract_dir, ForkName.GE_PROTON, keep=3, dry_run=True
+        assert result == ([], [])
+        mock_prune.assert_called_once_with(
+            extract_dir, ForkName.GE_PROTON, 2, True, link_manager.file_system_client
         )
-
-        # Assert
-        assert kept == []
-        assert pruned == []
-
-    def test_prune_releases_keep_one(
-        self,
-        link_manager: Any,
-        mock_filesystem_client: Any,
-        tmp_path: Path,
-    ) -> None:
-        """Test pruning with keep=1."""
-        # Arrange
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Create 3 GE-Proton version directories (correct format: GE-Proton10-X)
-        for i in range(3, 0, -1):
-            v = extract_dir / f"GE-Proton10-{i}"
-            v.mkdir()
-
-        # Use real filesystem client
-        from protonfetcher.filesystem import FileSystemClient
-        from protonfetcher.link_manager import LinkManager
-
-        fs = FileSystemClient()
-        real_link_manager = LinkManager(fs)
-
-        # Act
-        kept, pruned = real_link_manager.prune_releases(
-            extract_dir, ForkName.GE_PROTON, keep=1, dry_run=True
-        )
-
-        # Assert
-        assert len(kept) == 1  # Only newest
-        assert len(pruned) == 2  # GE-Proton10-2, GE-Proton10-3 pruned
-
-    def test_prune_releases_invalid_keep(
-        self,
-        link_manager: Any,
-        mock_filesystem_client: Any,
-        tmp_path: Path,
-    ) -> None:
-        """Test pruning with invalid keep value."""
-        # Arrange
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Use real filesystem client
-        from protonfetcher.filesystem import FileSystemClient
-        from protonfetcher.link_manager import LinkManager
-
-        fs = FileSystemClient()
-        real_link_manager = LinkManager(fs)
-
-        # Act & Assert
-        with pytest.raises(ValueError, match="keep must be at least 0"):
-            real_link_manager.prune_releases(
-                extract_dir, ForkName.GE_PROTON, keep=-1, dry_run=True
-            )
-
-    def test_prune_releases_proton_em(
-        self,
-        link_manager: Any,
-        mock_filesystem_client: Any,
-        tmp_path: Path,
-    ) -> None:
-        """Test pruning Proton-EM versions."""
-        # Arrange
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Create Proton-EM version directories (correct format: proton-EM-10.0-X)
-        for i in range(5, 0, -1):
-            v = extract_dir / f"proton-EM-10.0-{i}"
-            v.mkdir()
-
-        # Use real filesystem client
-        from protonfetcher.filesystem import FileSystemClient
-        from protonfetcher.link_manager import LinkManager
-
-        fs = FileSystemClient()
-        real_link_manager = LinkManager(fs)
-
-        # Act
-        kept, pruned = real_link_manager.prune_releases(
-            extract_dir, ForkName.PROTON_EM, keep=3, dry_run=True
-        )
-
-        # Assert
-        assert len(kept) == 3
-        assert len(pruned) == 2
-
-    def test_prune_releases_cachyos(
-        self,
-        link_manager: Any,
-        mock_filesystem_client: Any,
-        tmp_path: Path,
-    ) -> None:
-        """Test pruning CachyOS versions."""
-        # Arrange
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        # Create CachyOS version directories (correct format: proton-cachyos-10.0-YYYYMMDD-slr-x86_64)
-        dates = ["20260321", "20260320", "20260228", "20260227", "20260207"]
-        for date in dates:
-            v = extract_dir / f"proton-cachyos-10.0-{date}-slr-x86_64"
-            v.mkdir()
-
-        # Use real filesystem client
-        from protonfetcher.filesystem import FileSystemClient
-        from protonfetcher.link_manager import LinkManager
-
-        fs = FileSystemClient()
-        real_link_manager = LinkManager(fs)
-
-        # Act
-        kept, pruned = real_link_manager.prune_releases(
-            extract_dir, ForkName.CACHYOS, keep=3, dry_run=True
-        )
-
-        # Assert
-        assert len(kept) == 3
-        assert len(pruned) == 2
-        # Newest 3 should be kept
-        assert any("20260321" in p for p in kept)
-        assert any("20260320" in p for p in kept)
-        assert any("20260228" in p for p in kept)
 
 
 # =============================================================================

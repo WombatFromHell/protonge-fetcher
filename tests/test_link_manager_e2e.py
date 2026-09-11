@@ -10,6 +10,7 @@ Unit-level tests for submodules live in their own test files:
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -232,82 +233,24 @@ class TestManageProtonLinks:
 
 
 class TestGetInstalledVersions:
-    """Tests for LinkManager.get_installed_versions() method."""
+    """Delegation test for LinkManager.get_installed_versions()."""
 
-    @pytest.mark.parametrize(
-        "fork,versions,expected_order",
-        [
-            (
-                ForkName.GE_PROTON,
-                ["GE-Proton10-18", "GE-Proton10-20", "GE-Proton10-19"],
-                ["GE-Proton10-20", "GE-Proton10-19", "GE-Proton10-18"],
-            ),
-            # Proton-EM with actual directory naming (proton- prefix)
-            (
-                ForkName.PROTON_EM,
-                [
-                    "proton-EM-10.0-28",
-                    "proton-EM-10.0-30",
-                    "proton-EM-10.0-29",
-                ],
-                [
-                    "proton-EM-10.0-30",
-                    "proton-EM-10.0-29",
-                    "proton-EM-10.0-28",
-                ],
-            ),
-            # CachyOS with actual directory naming (proton- prefix and -x86_64 suffix)
-            (
-                ForkName.CACHYOS,
-                [
-                    "proton-cachyos-10.0-20260207-slr-x86_64",
-                    "proton-cachyos-10.0-20260215-slr-x86_64",
-                    "proton-cachyos-10.0-20260210-slr-x86_64",
-                ],
-                [
-                    "proton-cachyos-10.0-20260215-slr-x86_64",
-                    "proton-cachyos-10.0-20260210-slr-x86_64",
-                    "proton-cachyos-10.0-20260207-slr-x86_64",
-                ],
-            ),
-        ],
-    )
-    def test_get_installed_versions_sorted(
-        self,
-        tmp_path: Path,
-        fork: ForkName,
-        versions: list[str],
-        expected_order: list[str],
+    def test_get_installed_versions_delegates(
+        self, link_manager: Any, mocker: Any, tmp_path: Path
     ) -> None:
-        """Test that versions are returned sorted newest first."""
-        from protonfetcher.filesystem import FileSystemClient
-
+        """Manager passes its args and filesystem client through unchanged."""
         extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
+        mock_get = mocker.patch(
+            "protonfetcher.link_manager._get_installed",
+            return_value=["GE-Proton10-5"],
+        )
 
-        for version in versions:
-            (extract_dir / version).mkdir()
+        result = link_manager.get_installed_versions(extract_dir, ForkName.GE_PROTON)
 
-        fs = FileSystemClient()
-        lm = LinkManager(fs)
-
-        result = lm.get_installed_versions(extract_dir, fork)
-
-        assert result == expected_order
-
-    def test_get_installed_versions_empty(self, tmp_path: Path, fork: ForkName) -> None:
-        """Test when no versions are installed."""
-        from protonfetcher.filesystem import FileSystemClient
-
-        extract_dir = tmp_path / "compatibilitytools.d"
-        extract_dir.mkdir()
-
-        fs = FileSystemClient()
-        lm = LinkManager(fs)
-
-        result = lm.get_installed_versions(extract_dir, fork)
-
-        assert result == []
+        assert result == ["GE-Proton10-5"]
+        mock_get.assert_called_once_with(
+            extract_dir, ForkName.GE_PROTON, link_manager.file_system_client
+        )
 
 
 class TestGeProtonArchDirectory:

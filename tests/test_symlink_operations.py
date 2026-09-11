@@ -35,7 +35,6 @@ class TestCreateSymlinkSpecs:
         assert len(specs) == 1
         assert specs[0].link_path.name == "GE-Proton"
         assert specs[0].target_path == v1
-        assert specs[0].priority == 0
 
     def test_two_candidates(self, tmp_path: Path) -> None:
         """Test creating specs with two versions."""
@@ -81,9 +80,11 @@ class TestCreateSymlinkSpecs:
         )
 
         assert len(specs) == 3
-        assert specs[0].priority == 0
-        assert specs[1].priority == 1
-        assert specs[2].priority == 2
+        assert [s.link_path.name for s in specs] == [
+            "GE-Proton",
+            "GE-Proton-Fallback",
+            "GE-Proton-Fallback2",
+        ]
 
 
 class TestCreateSymlinks:
@@ -104,7 +105,6 @@ class TestCreateSymlinks:
             fb1=extract_dir / "GE-Proton-Fallback",
             fb2=extract_dir / "GE-Proton-Fallback2",
             top_3=candidates,
-            file_system=FileSystemClient(),
         )
 
         assert result is True
@@ -136,7 +136,6 @@ class TestCreateSymlinks:
             fb1=extract_dir / "GE-Proton-Fallback",
             fb2=extract_dir / "GE-Proton-Fallback2",
             top_3=candidates,
-            file_system=FileSystemClient(),
         )
 
         assert result is True
@@ -169,7 +168,6 @@ class TestCreateSymlinks:
             fb1=extract_dir / "Proton-EM-Fallback",
             fb2=extract_dir / "Proton-EM-Fallback2",
             top_3=candidates,
-            file_system=FileSystemClient(),
         )
 
         assert result is True

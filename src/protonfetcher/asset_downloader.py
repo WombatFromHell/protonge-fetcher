@@ -3,7 +3,6 @@
 import logging
 import urllib.request
 from pathlib import Path
-from typing import Optional
 
 from .common import (
     DEFAULT_TIMEOUT,
@@ -33,7 +32,7 @@ class AssetDownloader:
         self.timeout = timeout
 
     def download_with_spinner(
-        self, url: str, output_path: Path, headers: Optional[Headers] = None
+        self, url: str, output_path: Path, headers: Headers | None = None
     ) -> None:
         """Download a file with progress spinner using urllib."""
 
@@ -79,7 +78,7 @@ class AssetDownloader:
         tag: str,
         asset_name: str,
         out_path: Path,
-        download_url: str | None = None,
+        download_url: str,
         remote_size: int | None = None,
     ) -> Path:
         """Download a specific asset from a release with progress bar.
@@ -90,7 +89,7 @@ class AssetDownloader:
             tag: Release tag
             asset_name: Asset filename to download
             out_path: Path where the asset will be saved
-            download_url: Optional custom download URL (defaults to GitHub URL)
+            download_url: Full download URL (built by the platform adapter)
             remote_size: Pre-fetched remote file size; if None, size check is skipped
 
         Returns:
@@ -99,10 +98,6 @@ class AssetDownloader:
         Raises:
             NetworkError: If download fails or asset not found
         """
-        if download_url is None:
-            download_url = (
-                f"https://github.com/{repo}/releases/download/{tag}/{asset_name}"
-            )
         logger.info(f"Checking if asset needs download from: {download_url}")
 
         # Check if local file already exists and has the same size as remote
@@ -128,22 +123,7 @@ class AssetDownloader:
             "User-Agent": DEFAULT_USER_AGENT,
         }
 
-        try:
-            # Use the new spinner-based download method
-            self.download_with_spinner(download_url, out_path, headers)
-        except Exception as e:
-            # Fallback to original curl method for compatibility
-            logger.warning(f"Spinner download failed: {e}, falling back to curl")
-            try:
-                result = self.network_client.download(download_url, out_path, headers)
-                if result.returncode != 0:
-                    if "404" in result.stderr or "not found" in result.stderr.lower():
-                        raise NetworkError(f"Asset not found: {asset_name}")
-                    raise NetworkError(
-                        f"Failed to download {asset_name}: {result.stderr}"
-                    )
-            except Exception as fallback_error:
-                raise NetworkError(f"Failed to download {asset_name}: {fallback_error}")
+        self.download_with_spinner(download_url, out_path, headers)
 
         logger.info(f"Downloaded asset to: {out_path}")
         return out_path

@@ -1,100 +1,63 @@
 """Network client implementation for ProtonFetcher."""
 
-import subprocess
-from pathlib import Path
-from typing import Optional
+import logging
+import urllib.error
+import urllib.request
 
-from .common import Headers, ProcessResult
+from .common import Headers, HttpResponse
+from .exceptions import NetworkError
+
+logger = logging.getLogger(__name__)
 
 
 class NetworkClient:
-    """Concrete implementation of NetworkClientProtocol.
+    """Concrete implementation of NetworkClientProtocol using urllib.
 
-    Provides network operations using subprocess and urllib with curl.
-    Implements all methods defined in NetworkClientProtocol v1.0.
+    Redirects are followed automatically. HTTP error statuses (4xx/5xx)
+    are returned as HttpResponse; connection-level failures raise
+    NetworkError.
     """
-
-    PROTOCOL_VERSION: str = "1.0"
 
     def __init__(self, timeout: int = 30) -> None:
         self.timeout = timeout
 
-    def _build_curl_cmd(self, base_cmd: list[str]) -> list[str]:
-        """Build a curl command with common performance options."""
-        cmd = ["curl"] + base_cmd
-        # Add common performance and reliability options
-        cmd.extend(
-            [
-                "--http2",  # Use HTTP/2 for better performance
-                "--compressed",  # Request compressed response
-                "--max-time",
-                str(self.timeout),
-            ]
-        )
-        return cmd
+    def _request(self, url: str, method: str, headers: Headers | None) -> HttpResponse:
+        req = urllib.request.Request(url, method=method, headers=headers or {})
+        try:
+            response = urllib.request.urlopen(req, timeout=self.timeout)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace") if method == "GET" else ""
+            return HttpResponse(
+                status=e.code,
+                headers=_lowercase_headers(e.headers),
+                body=body,
+                final_url=url,
+            )
+        except urllib.error.URLError as e:
+            raise NetworkError(f"Network request to {url} failed: {e.reason}") from e
+        except (TimeoutError, OSError) as e:
+            raise NetworkError(f"Network request to {url} failed: {e}") from e
 
-    def _add_headers(self, cmd: list[str], headers: Optional[Headers]) -> list[str]:
-        """Add headers to a curl command if headers are provided."""
-        if headers is not None:
-            for key, value in headers.items():
-                cmd.extend(["-H", f"{key}: {value}"])
-        return cmd
+        with response:
+            body = response.read().decode("utf-8", errors="replace")
+            return HttpResponse(
+                status=response.status,
+                headers=_lowercase_headers(response.headers),
+                body=body,
+                final_url=response.url,
+            )
 
-    def get(
-        self, url: str, headers: Optional[Headers] = None, stream: bool = False
-    ) -> ProcessResult:
-        base_cmd = [
-            "-L",  # Follow redirects
-            "-s",  # Silent mode
-            "-S",  # Show errors
-            "-f",  # Fail on HTTP error
-        ]
-        base_cmd = self._add_headers(base_cmd, headers)
+    def get(self, url: str, headers: Headers | None = None) -> HttpResponse:
+        """Perform an HTTP GET request (redirects are followed)."""
+        return self._request(url, "GET", headers)
 
-        base_cmd.append(url)
-        cmd = self._build_curl_cmd(base_cmd)
+    def head(self, url: str, headers: Headers | None = None) -> HttpResponse:
+        """Perform an HTTP HEAD request (redirects are followed)."""
+        return self._request(url, "HEAD", headers)
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result
 
-    def head(
-        self,
-        url: str,
-        headers: Optional[Headers] = None,
-        follow_redirects: bool = False,
-    ) -> ProcessResult:
-        base_cmd = [
-            "-I",  # Header only
-            "-s",  # Silent mode
-            "-S",  # Show errors
-            "-f",  # Fail on HTTP error
-        ]
-
-        if follow_redirects:
-            base_cmd.insert(0, "-L")  # Follow redirects
-
-        base_cmd = self._add_headers(base_cmd, headers)
-        base_cmd.append(url)
-        cmd = self._build_curl_cmd(base_cmd)
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result
-
-    def download(
-        self, url: str, output_path: Path, headers: Optional[Headers] = None
-    ) -> ProcessResult:
-        base_cmd = [
-            "-L",  # Follow redirects
-            "-s",  # Silent mode
-            "-S",  # Show errors
-            "-f",  # Fail on HTTP error
-            "-o",
-            str(output_path),  # Output file
-        ]
-
-        base_cmd = self._add_headers(base_cmd, headers)
-        base_cmd.append(url)
-        cmd = self._build_curl_cmd(base_cmd)
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result
+def _lowercase_headers(message) -> dict[str, str]:
+    """Convert an email.message.Message to a dict with lowercase keys."""
+    if message is None:
+        return {}
+    return {key.lower(): value for key, value in message.items()}

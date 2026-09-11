@@ -8,12 +8,13 @@ from pathlib import Path
 import pytest
 
 from protonfetcher.common import ForkName
-from protonfetcher.filesystem import FileSystemClient
+from protonfetcher.link_status import (
+    get_installed_versions,
+    get_linked_versions,
+)
 from protonfetcher.prune_operations import (
     compute_prune_plan,
     execute_prune_removals,
-    get_installed_versions,
-    get_linked_versions,
     prune_releases,
 )
 from tests.fixtures import SymlinkEnvironment
@@ -31,9 +32,7 @@ class TestGetInstalledVersions:
             v = extract_dir / f"GE-Proton10-{i}"
             v.mkdir()
 
-        versions = get_installed_versions(
-            extract_dir, ForkName.GE_PROTON, FileSystemClient()
-        )
+        versions = get_installed_versions(extract_dir, ForkName.GE_PROTON)
 
         assert len(versions) == 5
         assert versions[0] == "GE-Proton10-5"
@@ -48,9 +47,7 @@ class TestGetInstalledVersions:
             v = extract_dir / f"proton-EM-10.0-{i}"
             v.mkdir()
 
-        versions = get_installed_versions(
-            extract_dir, ForkName.PROTON_EM, FileSystemClient()
-        )
+        versions = get_installed_versions(extract_dir, ForkName.PROTON_EM)
 
         assert len(versions) == 3
         assert versions[0] == "proton-EM-10.0-3"
@@ -60,9 +57,7 @@ class TestGetInstalledVersions:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        versions = get_installed_versions(
-            extract_dir, ForkName.GE_PROTON, FileSystemClient()
-        )
+        versions = get_installed_versions(extract_dir, ForkName.GE_PROTON)
 
         assert versions == []
 
@@ -76,9 +71,7 @@ class TestGetInstalledVersions:
             v = extract_dir / f"proton-cachyos-10.0-{date}-slr-x86_64"
             v.mkdir()
 
-        versions = get_installed_versions(
-            extract_dir, ForkName.CACHYOS, FileSystemClient()
-        )
+        versions = get_installed_versions(extract_dir, ForkName.CACHYOS)
 
         assert len(versions) == 3
         assert versions[0] == "proton-cachyos-10.0-20260321-slr-x86_64"
@@ -104,9 +97,7 @@ class TestGetLinkedVersions:
         main_link.symlink_to(v1)
         fb_link.symlink_to(v2)
 
-        linked = get_linked_versions(
-            extract_dir, ForkName.GE_PROTON, FileSystemClient()
-        )
+        linked = get_linked_versions(extract_dir, ForkName.GE_PROTON)
 
         assert "GE-Proton10-5" in linked
         assert "GE-Proton10-4" in linked
@@ -116,9 +107,7 @@ class TestGetLinkedVersions:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        linked = get_linked_versions(
-            extract_dir, ForkName.GE_PROTON, FileSystemClient()
-        )
+        linked = get_linked_versions(extract_dir, ForkName.GE_PROTON)
 
         assert linked == set()
 
@@ -131,9 +120,7 @@ class TestGetLinkedVersions:
         main_link = extract_dir / "GE-Proton"
         main_link.symlink_to(extract_dir / "NonExistent")
 
-        linked = get_linked_versions(
-            extract_dir, ForkName.GE_PROTON, FileSystemClient()
-        )
+        linked = get_linked_versions(extract_dir, ForkName.GE_PROTON)
 
         assert linked == set()
 
@@ -150,9 +137,7 @@ class TestComputePrunePlan:
             v = extract_dir / f"GE-Proton10-{i}"
             v.mkdir()
 
-        kept, pruned = compute_prune_plan(
-            extract_dir, ForkName.GE_PROTON, keep=3, file_system=FileSystemClient()
-        )
+        kept, pruned = compute_prune_plan(extract_dir, ForkName.GE_PROTON, keep=3)
 
         assert len(kept) == 3
         assert "GE-Proton10-5" in kept
@@ -182,9 +167,7 @@ class TestComputePrunePlan:
         fb1_link.symlink_to(versions[3])  # GE-Proton10-2
         fb2_link.symlink_to(versions[4])  # GE-Proton10-1
 
-        kept, pruned = compute_prune_plan(
-            extract_dir, ForkName.GE_PROTON, keep=3, file_system=FileSystemClient()
-        )
+        kept, pruned = compute_prune_plan(extract_dir, ForkName.GE_PROTON, keep=3)
 
         # Keep targets of first 3 symlinks: 10-3, 10-2, 10-1
         assert "GE-Proton10-3" in kept
@@ -217,9 +200,7 @@ class TestComputePrunePlan:
         fb1_link.symlink_to(versions[1])  # proton-EM-10.0-36
         fb2_link.symlink_to(versions[2])  # proton-EM-10.0-34
 
-        kept, pruned = compute_prune_plan(
-            extract_dir, ForkName.PROTON_EM, keep=1, file_system=FileSystemClient()
-        )
+        kept, pruned = compute_prune_plan(extract_dir, ForkName.PROTON_EM, keep=1)
 
         # Only main symlink target kept
         assert len(kept) == 1
@@ -235,9 +216,7 @@ class TestComputePrunePlan:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        kept, pruned = compute_prune_plan(
-            extract_dir, ForkName.GE_PROTON, keep=3, file_system=FileSystemClient()
-        )
+        kept, pruned = compute_prune_plan(extract_dir, ForkName.GE_PROTON, keep=3)
 
         assert kept == []
         assert pruned == []
@@ -259,9 +238,7 @@ class TestComputePrunePlan:
         fb1_link.symlink_to(extract_dir / "GE-Proton10-2")
         fb2_link.symlink_to(extract_dir / "GE-Proton10-1")
 
-        kept, pruned = compute_prune_plan(
-            extract_dir, ForkName.GE_PROTON, keep=3, file_system=FileSystemClient()
-        )
+        kept, pruned = compute_prune_plan(extract_dir, ForkName.GE_PROTON, keep=3)
 
         assert len(kept) == 3
         assert pruned == []
@@ -283,7 +260,6 @@ class TestExecutePruneRemovals:
             extract_dir,
             ForkName.GE_PROTON,
             ["GE-Proton10-2", "GE-Proton10-1"],
-            FileSystemClient(),
         )
 
         assert (extract_dir / "GE-Proton10-5").exists()
@@ -297,7 +273,7 @@ class TestExecutePruneRemovals:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        execute_prune_removals(extract_dir, ForkName.GE_PROTON, [], FileSystemClient())
+        execute_prune_removals(extract_dir, ForkName.GE_PROTON, [])
 
         # No error, nothing to do
 
@@ -359,9 +335,7 @@ class TestPruneReleases:
         extract_dir: Path = symlink_environment["extract_dir"]
         fork: ForkName = symlink_environment["fork"]
 
-        kept, pruned = prune_releases(
-            extract_dir, fork, keep=3, dry_run=True, file_system=FileSystemClient()
-        )
+        kept, pruned = prune_releases(extract_dir, fork, keep=3, dry_run=True)
 
         assert len(kept) == 3
         assert pruned == []
@@ -380,7 +354,6 @@ class TestPruneReleases:
             ForkName.PROTON_EM,
             keep=3,
             dry_run=True,
-            file_system=FileSystemClient(),
         )
 
         assert len(kept) == 3
@@ -401,7 +374,6 @@ class TestPruneReleases:
             ForkName.CACHYOS,
             keep=3,
             dry_run=True,
-            file_system=FileSystemClient(),
         )
 
         assert len(kept) == 3
@@ -425,7 +397,6 @@ class TestPruneReleases:
             ForkName.GE_PROTON,
             keep=1,
             dry_run=True,
-            file_system=FileSystemClient(),
         )
 
         assert len(kept) == 1

@@ -2,11 +2,10 @@
 
 import time
 from typing import (
-    Any,
-    Iterator,
-    Optional,
     Self,
 )
+
+from .utils import format_rate as _format_bytes_rate
 
 # ---------------------------------------------------------------------------
 # Pure formatting functions — standalone, testable, no Spinner dependency
@@ -29,19 +28,12 @@ def format_progress_bar(percent: float, width: int) -> str:
     return f" |{'█' * filled}{'-' * (width - filled)}| {percent * 100:.1f}%"
 
 
-def format_bytes_rate(rate: float) -> str:
-    """Format a byte rate with binary units (backward-compat wrapper)."""
-    from .utils import format_rate as _format_rate_bytes
-
-    return f" ({_format_rate_bytes(rate)})"
-
-
 def format_rate(
     current: int,
     start_time: float,
-    unit: Optional[str],
+    unit: str | None,
     unit_scale: bool,
-    mode: str = "progress",
+    now: float,
 ) -> str:
     """Format a data-transfer rate string.
 
@@ -50,12 +42,12 @@ def format_rate(
         start_time: Spinner start timestamp.
         unit: Unit suffix (e.g. ``"B"``).
         unit_scale: Scale bytes to KB/MB/GB.
-        mode: ``"progress"`` for full bar display, ``"spinner"`` for compact.
+        now: Current timestamp (injected for testability).
 
     Returns:
         e.g. `` (1.23MB/s) `` or `` (0.0B/s) `` or ```` (empty).
     """
-    elapsed = time.time() - start_time
+    elapsed = now - start_time
     if elapsed <= 0:
         if unit == "B" and unit_scale:
             return " (0.00B/s)"
@@ -66,41 +58,10 @@ def format_rate(
     rate = current / elapsed
 
     if unit == "B" and unit_scale:
-        return format_bytes_rate(rate)
+        return f" ({_format_bytes_rate(rate)})"
     if unit:
         return f" ({rate:.1f}{unit}/s)"
     return ""
-
-
-def build_display_line(
-    desc: str,
-    spinner_char: str,
-    current: int,
-    total: Optional[int],
-    unit: Optional[str],
-    unit_scale: bool,
-    show_progress: bool,
-    width: int,
-    start_time: float,
-) -> str:
-    """Build the full display string for one spinner frame.
-
-    Returns the string to print after ``\\r``.
-    """
-    parts = [desc, ":"]
-
-    if show_progress and total and total > 0:
-        percent = min(current / total, 1.0)
-        parts.append(f" {spinner_char} {format_progress_bar(percent, width)}")
-        if unit:
-            parts.append(format_rate(current, start_time, unit, unit_scale, "progress"))
-    else:
-        parts.append(f" {spinner_char}")
-        if unit:
-            parts.append(f" {current}{unit}")
-            parts.append(format_rate(current, start_time, unit, unit_scale, "spinner"))
-
-    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -117,17 +78,15 @@ class Spinner:
 
     def __init__(
         self,
-        iterable: Optional[Iterator[Any]] = None,
-        total: Optional[int] = None,
+        total: int | None = None,
         desc: str = "",
-        unit: Optional[str] = None,
-        unit_scale: Optional[bool] = None,
+        unit: str | None = None,
+        unit_scale: bool | None = None,
         disable: bool = False,
-        fps_limit: Optional[float] = None,
+        fps_limit: float | None = None,
         width: int = 10,
         show_progress: bool = False,
     ):
-        self._iterable = iterable
         self.total = total
         self.desc = desc
         self.unit = unit
@@ -150,16 +109,12 @@ class Spinner:
         return self
 
     def __exit__(self, *args: object) -> None:
+        if self._completed:
+            return  # finish() already printed the final line
         if not self.disable:
             self._clear()
 
     # -- internal helpers ---------------------------------------------------
-
-    def _calculate_progress_percentage(self) -> float:
-        """Calculate current progress as percentage (kept for test compat)."""
-        if self.total is None or self.total <= 0:
-            return 0.0
-        return min(self.current / self.total, 1.0)
 
     def _should_update(self, now: float) -> bool:
         if self.fps_limit is None or self.fps_limit <= 0:
@@ -171,6 +126,33 @@ class Spinner:
         self._spinner_idx += 1
         return ch
 
+    def _build_line(
+        self, spinner_char: str, now: float, show_progress: bool | None = None
+    ) -> str:
+        """Build the full display string for one spinner frame."""
+        if show_progress is None:
+            show_progress = self.show_progress
+        parts = [self.desc, ":"]
+        if show_progress and self.total and self.total > 0:
+            percent = min(self.current / self.total, 1.0)
+            parts.append(f" {spinner_char} {format_progress_bar(percent, self.width)}")
+            if self.unit:
+                parts.append(
+                    format_rate(
+                        self.current, self.start_time, self.unit, self.unit_scale, now
+                    )
+                )
+        else:
+            parts.append(f" {spinner_char}")
+            if self.unit:
+                parts.append(f" {self.current}{self.unit}")
+                parts.append(
+                    format_rate(
+                        self.current, self.start_time, self.unit, self.unit_scale, now
+                    )
+                )
+        return "".join(parts)
+
     # -- public API --------------------------------------------------------
 
     def _update(self) -> None:
@@ -181,17 +163,7 @@ class Spinner:
         if not self._should_update(now):
             return
         self._last_update_time = now
-        line = build_display_line(
-            self.desc,
-            self._next_char(),
-            self.current,
-            self.total,
-            self.unit,
-            self.unit_scale,
-            self.show_progress,
-            self.width,
-            self.start_time,
-        )
+        line = self._build_line(self._next_char(), now)
         self._current_line = line
         print(f"\r{line}", end="", flush=True)
 
@@ -203,22 +175,6 @@ class Spinner:
         self.current += n
         self._update()
 
-    def update_progress(
-        self, current: int, total: int, prefix: str = "", suffix: str = ""
-    ) -> None:
-        """Set explicit progress values."""
-        self.current = current
-        self.total = total
-        if prefix and not self.desc.startswith("Extracting"):
-            self.desc = prefix
-        self._update()
-
-    def close(self) -> None:
-        """Clear the spinner and emit a trailing newline."""
-        self._clear()
-        if not self.disable:
-            print()
-
     def finish(self) -> None:
         """Show 100 % progress and clear."""
         if self._completed or not self.total:
@@ -227,27 +183,8 @@ class Spinner:
         self.current = self.total
         if self.disable:
             return
-        line = build_display_line(
-            self.desc,
-            self._next_char(),
-            self.current,
-            self.total,
-            self.unit,
-            self.unit_scale,
-            True,
-            self.width,
-            self.start_time,
-        )
+        now = time.time()
+        line = self._build_line(self._next_char(), now, True)
         print(f"\r{line}", end="", flush=True)
         self._current_line = line
         print()
-
-    def __iter__(self) -> Iterator[Any]:
-        if self._iterable is not None:
-            for item in self._iterable:
-                yield item
-                self.update(1)
-        elif self.total:
-            for i in range(self.total):
-                yield i
-                self.update(1)

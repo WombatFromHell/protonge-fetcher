@@ -5,31 +5,33 @@ Concrete subclasses implement platform-specific methods.
 """
 
 import logging
-import shutil
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .archive_extractor import ArchiveExtractor
 from .asset_downloader import AssetDownloader
 from .candidate_selection import select_top_3_candidates
 from .common import (
     DEFAULT_TIMEOUT,
-    DirectoryTuple,
-    ExistenceCheckResult,
+    FORKS,
     FileSystemClientProtocol,
     ForkName,
     NetworkClientProtocol,
     PlatformAdapter,
-    ProcessingResult,
     ReleaseTagsList,
 )
-from .exceptions import LinkManagementError, NetworkError, ProtonFetcherError
+from .dirs import (
+    get_link_names,
+    resolve_directory,
+    resolve_directory_candidates,
+)
+from .exceptions import LinkManagementError, ProtonFetcherError
 from .filesystem import FileSystemClient
-from .link_manager import LinkManager, resolve_directory, resolve_directory_candidates
+from .link_manager import LinkManager
 from .network import NetworkClient
 from .platform_adapters import forgejo_adapter, github_adapter
 from .release_manager import ReleaseManager
-from .utils import format_bytes, parse_version
+from .utils import format_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +53,8 @@ class BaseReleaseFetcher:
     def __init__(
         self,
         timeout: int = DEFAULT_TIMEOUT,
-        network_client: Optional[NetworkClientProtocol] = None,
-        file_system_client: Optional[FileSystemClientProtocol] = None,
+        network_client: NetworkClientProtocol | None = None,
+        file_system_client: FileSystemClientProtocol | None = None,
     ) -> None:
         self.timeout = timeout
         self.network_client = network_client or NetworkClient(timeout=timeout)
@@ -80,41 +82,26 @@ class BaseReleaseFetcher:
     # ------------------------------------------------------------------
 
     def _ensure_directory_is_writable(self, directory: Path) -> None:
-        """Ensure that the directory exists and is writable."""
+        """Ensure the directory exists and is writable, creating it if needed."""
         try:
-            if not self.file_system_client.exists(directory):
-                try:
-                    self.file_system_client.mkdir(
-                        directory, parents=True, exist_ok=True
-                    )
-                except OSError as e:
-                    raise ProtonFetcherError(
-                        f"Failed to create directory {directory}: {e}"
-                    )
+            self.file_system_client.mkdir(directory, parents=True, exist_ok=True)
+        except FileExistsError as e:
+            raise ProtonFetcherError(
+                f"{directory} exists but is not a directory"
+            ) from e
+        except OSError as e:
+            raise ProtonFetcherError(
+                f"Failed to create directory {directory}: {e}"
+            ) from e
 
-            if not self.file_system_client.exists(directory):
-                raise ProtonFetcherError(
-                    f"Directory does not exist and could not be created: {directory}"
-                )
-
-            if not self.file_system_client.is_dir(directory):
-                raise LinkManagementError(f"{directory} exists but is not a directory")
-
+        try:
             test_file = directory / ".write_test"
-            try:
-                self.file_system_client.write(test_file, b"")
-                self.file_system_client.unlink(test_file)
-            except (OSError, AttributeError) as e:
-                raise LinkManagementError(f"Directory {directory} is not writable: {e}")
-        except PermissionError as e:
-            raise ProtonFetcherError(f"Failed to create {directory}: {str(e)}")
-        except Exception as e:
-            raise ProtonFetcherError(f"Failed to create {directory}: {e}")
-
-    def _validate_environment(self) -> None:
-        """Validate that required tools and directories are available."""
-        if shutil.which("curl") is None:
-            raise NetworkError("curl is not available")
+            self.file_system_client.write(test_file, b"")
+            self.file_system_client.unlink(test_file)
+        except OSError as e:
+            raise ProtonFetcherError(
+                f"Directory {directory} is not writable: {e}"
+            ) from e
 
     def _ensure_directories_writable(self, output_dir: Path, extract_dir: Path) -> None:
         """Validate directories are writable."""
@@ -126,68 +113,17 @@ class BaseReleaseFetcher:
         extract_dir: Path,
         tag: str,
         fork: ForkName,
-        directory: Path,
         is_manual_release: bool,
-    ) -> ProcessingResult:
-        """Handle an already-extracted directory: check/update symlinks and return.
-
-        Args:
-            extract_dir: Base directory where Proton is extracted
-            tag: Release tag name
-            fork: The fork name
-            directory: The actual extracted directory path
-            is_manual_release: Whether this is a manual release
-
-        Returns:
-            (True, directory) after ensuring symlinks are current
-        """
+    ) -> None:
+        """Ensure symlinks are current for an already-extracted directory."""
         if self.link_manager.are_links_up_to_date(
             extract_dir, tag, fork, is_manual_release=is_manual_release
         ):
             logger.info("Symlinks are already up-to-date, skipping link management")
-            return True, directory
-
-        self.link_manager.manage_proton_links(
-            extract_dir, tag, fork, is_manual_release=is_manual_release
-        )
-        return True, directory
-
-    def _handle_existing_directory(
-        self,
-        extract_dir: Path,
-        release_tag: str,
-        fork: ForkName,
-        actual_directory: Path,
-        is_manual_release: bool,
-    ) -> ProcessingResult:
-        """Handle case where directory already exists and return whether to skip further processing."""
-        if not self.file_system_client.exists(actual_directory):
-            return False, None
-
-        logger.info(
-            f"Unpacked directory already exists: {actual_directory}, skipping download and extraction"
-        )
-        return self._handle_already_extracted(
-            extract_dir, release_tag, fork, actual_directory, is_manual_release
-        )
-
-    def _check_post_download_directory(
-        self,
-        extract_dir: Path,
-        release_tag: str,
-        fork: ForkName,
-        is_manual_release: bool,
-    ) -> ProcessingResult:
-        """Check if unpacked directory exists after download, and handle if it does."""
-        unpacked = extract_dir / release_tag
-        if unpacked.exists() and unpacked.is_dir():
-            logger.info(
-                f"Unpacked directory exists after download: {unpacked}, skipping extraction"
+        else:
+            self.link_manager.manage_proton_links(
+                extract_dir, tag, fork, is_manual_release=is_manual_release
             )
-            return self._handle_already_extracted(
-                extract_dir, release_tag, fork, unpacked, is_manual_release
-            )
-        return False, extract_dir
 
     def relink_fork(
         self,
@@ -198,7 +134,7 @@ class BaseReleaseFetcher:
         self._ensure_directory_is_writable(extract_dir)
 
         top_3 = select_top_3_candidates(
-            extract_dir, fork, False, None, self.file_system_client
+            extract_dir, fork, None, self.file_system_client
         )
 
         if not top_3:
@@ -206,7 +142,7 @@ class BaseReleaseFetcher:
                 f"No valid {fork} versions found in {extract_dir} to relink"
             )
 
-        main, fb1, fb2 = self.link_manager.get_link_names_for_fork(extract_dir, fork)
+        main, fb1, fb2 = get_link_names(extract_dir, fork)
         logger.info(f"Relinking {fork} symlinks...")
         self.link_manager.create_symlinks(main, fb1, fb2, top_3)
         logger.info(f"Successfully relinked {fork} symlinks")
@@ -243,10 +179,6 @@ class BaseReleaseFetcher:
         dry_run: bool = False,
     ) -> dict[ForkName, Path | None]:
         """Update all forks that have managed symbolic links."""
-        from .common import FORKS
-
-        self._validate_environment()
-
         if not dry_run:
             self._ensure_directories_writable(output_dir, extract_dir)
 
@@ -290,8 +222,6 @@ class BaseReleaseFetcher:
 
     def check_for_updates(self, extract_dir: Path, fork: ForkName) -> str | None:
         """Check if a newer release is available for the specified fork."""
-        from .common import FORKS
-
         installed_versions = self.link_manager.get_installed_versions(extract_dir, fork)
         repo = FORKS[fork].repo
 
@@ -306,65 +236,20 @@ class BaseReleaseFetcher:
     # Platform-agnostic directory helpers (identical across platforms)
     # ------------------------------------------------------------------
 
-    def _get_expected_directories(
-        self, extract_dir: Path, release_tag: str, fork: ForkName
-    ) -> DirectoryTuple:
-        """Get expected unpack directories based on fork templates.
-
-        Args:
-            extract_dir: Directory to extract to
-            release_tag: Release tag
-            fork: Proton fork name
-
-        Returns:
-            Tuple of (standard_path, alternative_path_or_None)
-        """
-        candidates = resolve_directory_candidates(extract_dir, release_tag, fork)
-        if len(candidates) >= 2:
-            return candidates[0], candidates[1]
-        return candidates[0], None
-
-    def _check_existing_directory(
-        self,
-        unpacked: Path,
-        alternative: Path | None,
-        fork: ForkName,
-    ) -> ExistenceCheckResult:
-        """Check if the unpacked directory already exists.
-
-        Args:
-            unpacked: Standard path (without platform-specific prefix/suffix)
-            alternative: Alternative path (with platform-specific prefix/suffix)
-            fork: Proton fork name
-
-        Returns:
-            Tuple of (exists, actual_path)
-        """
-        if alternative and alternative.exists() and alternative.is_dir():
-            return True, alternative
-        if unpacked.exists() and unpacked.is_dir():
-            return True, unpacked
-        return False, None
-
-    def _find_extracted_directory(
+    def _find_existing_release(
         self,
         extract_dir: Path,
         release_tag: str,
         fork: ForkName,
-    ) -> Path:
-        """Find the actual extracted directory after archive extraction.
+    ) -> Path | None:
+        """Return the extracted directory if it already exists, else None.
 
-        Args:
-            extract_dir: Directory to search
-            release_tag: Release tag
-            fork: Proton fork name
-
-        Returns:
-            Path to the extracted directory
+        Tries fork directory-name templates in priority order (preferred first).
         """
-        return resolve_directory(
-            extract_dir, release_tag, fork, self.file_system_client
-        )
+        for candidate in resolve_directory_candidates(extract_dir, release_tag, fork):
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+        return None
 
     # ------------------------------------------------------------------
     # Platform-agnostic methods (delegated to ReleaseManager)
@@ -448,21 +333,25 @@ class BaseReleaseFetcher:
             return self.fetch_latest_tag(repo)
         return manual_release_tag
 
-    def _download_asset(
-        self, repo: str, release_tag: str, fork: ForkName, output_dir: Path
-    ) -> Path:
-        """Download the asset and return the archive path."""
+    def _resolve_asset(self, repo: str, release_tag: str, fork: ForkName) -> str:
+        """Resolve the asset name for a release, raising if it cannot be found."""
         try:
             asset_name = self.find_asset_by_name(repo, release_tag, fork)
         except ProtonFetcherError as e:
             raise ProtonFetcherError(
                 f"Could not find asset for release {release_tag} in {repo}: {e}"
             )
-
         if asset_name is None:
             raise ProtonFetcherError(
                 f"Could not find asset for release {release_tag} in {repo}"
             )
+        return asset_name
+
+    def _download_asset(
+        self, repo: str, release_tag: str, fork: ForkName, output_dir: Path
+    ) -> Path:
+        """Download the asset and return the archive path."""
+        asset_name = self._resolve_asset(repo, release_tag, fork)
 
         archive_path = output_dir / asset_name
         download_url = self._build_download_url(repo, release_tag, asset_name)
@@ -486,20 +375,9 @@ class BaseReleaseFetcher:
         extract_dir: Path,
         release_tag: str,
         fork: ForkName,
-        is_manual_release: bool,
     ) -> None:
         """Execute dry-run workflow: show what would be done without making changes."""
-        try:
-            asset_name = self.find_asset_by_name(repo, release_tag, fork)
-        except ProtonFetcherError as e:
-            raise ProtonFetcherError(
-                f"Could not find asset for release {release_tag} in {repo}: {e}"
-            )
-
-        if asset_name is None:
-            raise ProtonFetcherError(
-                f"Could not find asset for release {release_tag} in {repo}"
-            )
+        asset_name = self._resolve_asset(repo, release_tag, fork)
 
         try:
             remote_size = self.get_remote_asset_size(repo, release_tag, asset_name)
@@ -513,20 +391,16 @@ class BaseReleaseFetcher:
         logger.info(f"  Destination: {output_dir / asset_name}")
 
         # Show what would be extracted
-        unpacked = self._get_expected_directories(extract_dir, release_tag, fork)[0]
+        unpacked = resolve_directory_candidates(extract_dir, release_tag, fork)[0]
         logger.info(f"Would extract to: {unpacked}")
 
         # Show what symlinks would be created
-        candidates = self.link_manager.find_version_candidates(extract_dir, fork)
-        candidates.append((parse_version(release_tag, fork), unpacked))
-        candidates = self.link_manager.deduplicate_candidates(candidates)
-        candidates.sort(key=lambda t: t[0], reverse=True)
-        top_3 = candidates[:3]
+        top_3 = select_top_3_candidates(
+            extract_dir, fork, unpacked, self.file_system_client
+        )
 
         if top_3:
-            main, fb1, fb2 = self.link_manager.get_link_names_for_fork(
-                extract_dir, fork
-            )
+            main, fb1, fb2 = get_link_names(extract_dir, fork)
             logger.info("Would create/update symlinks:")
             if len(top_3) >= 1:
                 logger.info(f"  {main.name} -> {top_3[0][1].name}")
@@ -546,15 +420,14 @@ class BaseReleaseFetcher:
         fork: ForkName,
         is_manual_release: bool,
         show_progress: bool,
-        show_file_details: bool,
     ) -> Path:
         """Extract the archive and manage symbolic links."""
-        self.archive_extractor.extract_archive(
-            archive_path, extract_dir, show_progress, show_file_details
-        )
+        self.archive_extractor.extract_archive(archive_path, extract_dir, show_progress)
 
         # Find where the archive extracted to
-        unpacked = self._find_extracted_directory(extract_dir, release_tag, fork)
+        unpacked = resolve_directory(
+            extract_dir, release_tag, fork, self.file_system_client
+        )
 
         # Manage symbolic links
         self.link_manager.manage_proton_links(
@@ -571,7 +444,6 @@ class BaseReleaseFetcher:
         release_tag: str | None = None,
         fork: ForkName = ForkName.GE_PROTON,
         show_progress: bool = True,
-        show_file_details: bool = True,
         dry_run: bool = False,
     ) -> Path | None:
         """Fetch and extract a Proton release.
@@ -583,13 +455,11 @@ class BaseReleaseFetcher:
             release_tag: Release tag to fetch (if None, fetches latest)
             fork: The ProtonGE fork name
             show_progress: Whether to show the progress bar
-            show_file_details: Whether to show file details during extraction
             dry_run: If True, only show what would be done without making changes
 
         Returns:
             Path to the extract directory, or None in dry-run mode
         """
-        self._validate_environment()
 
         if not dry_run:
             self._ensure_directories_writable(output_dir, extract_dir)
@@ -600,34 +470,23 @@ class BaseReleaseFetcher:
         # Dry-run
         if dry_run:
             return self._dry_run_workflow(
-                repo, output_dir, extract_dir, release_tag, fork, is_manual_release
+                repo, output_dir, extract_dir, release_tag, fork
             )
 
-        # Check if already extracted
-        unpacked, alternative = self._get_expected_directories(
-            extract_dir, release_tag, fork
-        )
-        directory_exists, actual_directory = self._check_existing_directory(
-            unpacked, alternative, fork
-        )
-
-        if directory_exists and actual_directory is not None:
-            skip_processing, result = self._handle_existing_directory(
-                extract_dir, release_tag, fork, actual_directory, is_manual_release
+        # Fast path: already extracted (templates in priority order)
+        existing = self._find_existing_release(extract_dir, release_tag, fork)
+        if existing is not None:
+            logger.info(
+                f"Unpacked directory already exists: {existing}, "
+                "skipping download and extraction"
             )
-            if skip_processing:
-                return result
+            self._handle_already_extracted(
+                extract_dir, release_tag, fork, is_manual_release
+            )
+            return existing
 
-        # Download
+        # Download + extract
         archive_path = self._download_asset(repo, release_tag, fork, output_dir)
-
-        # Check if extracted during download (race condition)
-        skip_processing, result = self._check_post_download_directory(
-            extract_dir, release_tag, fork, is_manual_release
-        )
-        if skip_processing:
-            return result
-
         return self._extract_and_manage_links(
             archive_path,
             extract_dir,
@@ -635,5 +494,4 @@ class BaseReleaseFetcher:
             fork,
             is_manual_release,
             show_progress,
-            show_file_details,
         )

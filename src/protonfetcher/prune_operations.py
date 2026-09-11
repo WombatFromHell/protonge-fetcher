@@ -11,73 +11,20 @@ from .common import (
     FileSystemClientProtocol,
     ForkName,
 )
+from .dirs import get_link_names
 from .exceptions import LinkManagementError
-from .link_status import _get_link_names
-from .version_finder import _deduplicate_candidates, find_version_candidates
+from .filesystem import FileSystemClient
+from .link_status import get_installed_versions
+from .release_operations import remove_release as _remove_release
 
 logger = logging.getLogger(__name__)
-
-
-def get_installed_versions(
-    extract_dir: Path, fork: ForkName, file_system: FileSystemClientProtocol
-) -> list[str]:
-    """Get list of currently installed version tags for a fork.
-
-    Finds all version directories for the specified fork and returns
-    their tag names, sorted by version (newest first).
-
-    Args:
-        extract_dir: Directory to search for installed versions
-        fork: The Proton fork name
-        file_system: File system client
-
-    Returns:
-        List of version tag strings, sorted newest first
-    """
-    candidates = find_version_candidates(extract_dir, fork, file_system)
-
-    if not candidates:
-        return []
-
-    candidates = _deduplicate_candidates(candidates)
-    candidates.sort(key=lambda t: t[0], reverse=True)
-
-    return [path.name for _, path in candidates]
-
-
-def get_linked_versions(
-    extract_dir: Path, fork: ForkName, file_system: FileSystemClientProtocol
-) -> set[str]:
-    """Get set of version directories currently referenced by symlinks.
-
-    Resolves all managed symlinks for the fork and returns the directory
-    names they point to.
-
-    Args:
-        extract_dir: Directory to search for symlinks
-        fork: The Proton fork name
-        file_system: File system client
-
-    Returns:
-        Set of directory names currently linked
-    """
-    from .link_status import list_links as _list_links
-
-    linked: set[str] = set()
-    links_info = _list_links(extract_dir, fork, file_system)
-
-    for target_path in links_info.values():
-        if target_path is not None:
-            linked.add(Path(target_path).name)
-
-    return linked
 
 
 def compute_prune_plan(
     extract_dir: Path,
     fork: ForkName,
     keep: int,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> tuple[list[str], list[str]]:
     """Compute which versions to keep and which to prune.
 
@@ -94,13 +41,14 @@ def compute_prune_plan(
     Returns:
         Tuple of (kept_versions, pruned_versions) lists
     """
+    file_system = file_system or FileSystemClient()
     all_versions = get_installed_versions(extract_dir, fork, file_system)
     if not all_versions:
         logger.info(f"No {fork.value} installations found to prune")
         return [], []
 
     # Get symlink paths for this fork
-    main, fb1, fb2 = _get_link_names(extract_dir, fork)
+    main, fb1, fb2 = get_link_names(extract_dir, fork)
     symlink_paths = [main, fb1, fb2]
 
     # Build mapping: symlink_path -> target_dir_name
@@ -135,7 +83,8 @@ def compute_prune_plan(
             if v not in kept and v not in pruned:
                 pruned.append(v)
 
-        return list(kept), pruned
+        # Return kept in all_versions (newest-first) order for determinism
+        return [v for v in all_versions if v in kept], pruned
     else:
         # No symlinks: fall back to version-based keeping
         kept_versions = all_versions[:keep]
@@ -147,7 +96,7 @@ def execute_prune_removals(
     extract_dir: Path,
     fork: ForkName,
     pruned_versions: list[str],
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> None:
     """Execute the actual removal of pruned versions.
 
@@ -157,8 +106,7 @@ def execute_prune_removals(
         pruned_versions: List of version tags to remove
         file_system: File system client
     """
-    from .release_operations import remove_release as _remove_release
-
+    file_system = file_system or FileSystemClient()
     logger.info(f"Pruning {len(pruned_versions)} old {fork.value} release(s)...")
     for version in pruned_versions:
         try:
@@ -171,7 +119,7 @@ def execute_prune_removals(
 def prune_releases(
     extract_dir: Path,
     fork: ForkName,
-    keep: int = 1,
+    keep: int = 3,
     dry_run: bool = False,
     file_system: FileSystemClientProtocol | None = None,
 ) -> tuple[list[str], list[str]]:
@@ -200,8 +148,6 @@ def prune_releases(
         raise ValueError("keep must be at least 0")
 
     if file_system is None:
-        from .filesystem import FileSystemClient
-
         file_system = FileSystemClient()
 
     kept, pruned = compute_prune_plan(extract_dir, fork, keep, file_system)

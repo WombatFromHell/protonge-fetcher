@@ -6,11 +6,16 @@ Extracted from cli.py to isolate routing logic.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
+from .fork_utils import (
+    convert_fork_to_enum,
+    get_fork_from_args,
+    is_flag_passed,
+)
 from .handlers import (
     handle_check_operation,
     handle_fetch_with_fork,
@@ -41,17 +46,6 @@ class CLIContext:
 logger = logging.getLogger(__name__)
 
 
-def is_flag_passed(argv_list: list[str], long_flag: str, short_flag: str) -> bool:
-    """Check if a flag was explicitly passed (standalone or with value)."""
-    return any(
-        arg == long_flag
-        or arg == short_flag
-        or arg.startswith(f"{long_flag}=")
-        or arg.startswith(f"{short_flag}=")
-        for arg in argv_list
-    )
-
-
 def get_explicit_flags(argv_list: list[str]) -> dict[str, bool]:
     """Check which flags were explicitly passed on the command line."""
     return {
@@ -69,9 +63,7 @@ def has_explicit_fork(argv_list: list[str]) -> bool:
     return is_flag_passed(argv_list, "--fork", "-f")
 
 
-def get_operation_from_args(
-    args: Any, argv_list: list[str] | None = None
-) -> str | None:
+def get_operation_from_args(args: Any) -> str | None:
     """Determine which operation was requested from parsed args."""
     if args.ls:
         return "ls"
@@ -88,11 +80,40 @@ def get_operation_from_args(
     return None
 
 
+def _default_operation(ctx: CLIContext, argv_list: list[str]) -> str:
+    """Default to an implicit update when a fork/release was given, else 'ls'."""
+    if has_explicit_fork(argv_list) or ctx.explicit_flags["release"]:
+        return "update"
+    return "ls"
+
+
+def _handle_update(ctx: CLIContext) -> None:
+    """Run the implicit update: all forks, or the one named by --fork."""
+    if hasattr(ctx.args, "fork") and ctx.args.fork is None:
+        handle_multi_fork_update(
+            ctx.fetcher,
+            ctx.forgejo_fetcher,
+            ctx.output_dir,
+            ctx.extract_dir,
+            ctx.args.dry_run,
+        )
+        return
+    fork = get_fork_from_args(ctx.args) or convert_fork_to_enum(None)
+    handle_fetch_with_fork(
+        ctx.fetcher,
+        ctx.forgejo_fetcher,
+        ctx.args,
+        ctx.output_dir,
+        ctx.extract_dir,
+        fork,
+    )
+
+
 def dispatch(ctx: CLIContext, argv_list: list[str]) -> int:
     """Dispatch to the appropriate handler based on operation flags."""
-    operation = get_operation_from_args(ctx.args, argv_list)
+    operation = get_operation_from_args(ctx.args) or _default_operation(ctx, argv_list)
 
-    handlers: dict[str, Any] = {
+    handlers: dict[str, Callable[[], None]] = {
         "ls": lambda: handle_ls_operation(
             ctx.fetcher,
             ctx.forgejo_fetcher,
@@ -115,45 +136,8 @@ def dispatch(ctx: CLIContext, argv_list: list[str]) -> int:
         "check": lambda: handle_check_operation(
             ctx.fetcher, ctx.forgejo_fetcher, ctx.args, ctx.extract_dir
         ),
+        "update": lambda: _handle_update(ctx),
     }
 
-    if operation in handlers:
-        handlers[operation]()
-        return 0
-
-    # No explicit operation: resolve default
-    resolve_default_operation(ctx, argv_list)
+    handlers[operation]()
     return 0
-
-
-def resolve_default_operation(ctx: CLIContext, argv_list: list[str]) -> None:
-    """Resolve the default operation when no explicit flag is given."""
-    from .fork_utils import convert_fork_to_enum, get_fork_from_args
-
-    if has_explicit_fork(argv_list) or ctx.explicit_flags["release"]:
-        if hasattr(ctx.args, "fork") and ctx.args.fork is None:
-            handle_multi_fork_update(
-                ctx.fetcher,
-                ctx.forgejo_fetcher,
-                ctx.output_dir,
-                ctx.extract_dir,
-                ctx.args.dry_run,
-            )
-        else:
-            fork = get_fork_from_args(ctx.args) or convert_fork_to_enum(None)
-            handle_fetch_with_fork(
-                ctx.fetcher,
-                ctx.forgejo_fetcher,
-                ctx.args,
-                ctx.output_dir,
-                ctx.extract_dir,
-                fork,
-            )
-    else:
-        handle_ls_operation(
-            ctx.fetcher,
-            ctx.forgejo_fetcher,
-            ctx.args,
-            ctx.extract_dir,
-            list_all_forks=True,
-        )

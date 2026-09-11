@@ -1,6 +1,6 @@
 """Tests for CLI dispatch logic.
 
-Tests for dispatch(), resolve_default_operation(), and related helpers
+Tests for dispatch(), _default_operation(), and related helpers
 in protonfetcher.cli.dispatch.
 """
 
@@ -10,11 +10,11 @@ from unittest.mock import MagicMock
 
 from protonfetcher.cli.dispatch import (
     CLIContext,
+    _default_operation,
     dispatch,
     get_explicit_flags,
     get_operation_from_args,
     has_explicit_fork,
-    resolve_default_operation,
 )
 
 # =============================================================================
@@ -262,11 +262,9 @@ class TestDispatch:
         assert result == 0
         mock_handler.assert_called_once()
 
-    def test_dispatch_no_operation_calls_resolve_default(self, mocker: Any) -> None:
-        """Test dispatch calls resolve_default_operation when no operation flag is set."""
-        mock_resolve = mocker.patch(
-            "protonfetcher.cli.dispatch.resolve_default_operation"
-        )
+    def test_dispatch_no_operation_defaults_to_ls(self, mocker: Any) -> None:
+        """Test dispatch defaults to the ls handler when no operation flag is set."""
+        mock_handler = mocker.patch("protonfetcher.cli.dispatch.handle_ls_operation")
         ctx = CLIContext(
             fetcher=MagicMock(),
             forgejo_fetcher=MagicMock(),
@@ -275,11 +273,63 @@ class TestDispatch:
             ),
             extract_dir=Path("/tmp"),
             output_dir=Path("/tmp"),
-            explicit_flags={},
+            explicit_flags={"release": False},
         )
         result = dispatch(ctx, [])
         assert result == 0
-        mock_resolve.assert_called_once()
+        mock_handler.assert_called_once()
+
+    def test_dispatch_fork_flag_without_value_triggers_multi_fork_update(
+        self, mocker: Any
+    ) -> None:
+        """Test -f without value triggers multi-fork update."""
+        mock_handler = mocker.patch(
+            "protonfetcher.cli.dispatch.handle_multi_fork_update"
+        )
+        args = MagicMock(
+            ls=False,
+            list=False,
+            relink=False,
+            rm=False,
+            prune=False,
+            check=False,
+            fork=None,
+            dry_run=False,
+        )
+        ctx = CLIContext(
+            fetcher=MagicMock(),
+            forgejo_fetcher=MagicMock(),
+            args=args,
+            extract_dir=Path("/tmp"),
+            output_dir=Path("/tmp"),
+            explicit_flags={"release": False},
+        )
+        dispatch(ctx, ["-f"])
+        mock_handler.assert_called_once()
+
+    def test_dispatch_fork_flag_with_value_triggers_fetch(self, mocker: Any) -> None:
+        """Test -f with value triggers fetch for that fork."""
+        mock_handler = mocker.patch("protonfetcher.cli.dispatch.handle_fetch_with_fork")
+        args = MagicMock(
+            ls=False,
+            list=False,
+            relink=False,
+            rm=False,
+            prune=False,
+            check=False,
+            fork="GE-Proton",
+            dry_run=False,
+        )
+        ctx = CLIContext(
+            fetcher=MagicMock(),
+            forgejo_fetcher=MagicMock(),
+            args=args,
+            extract_dir=Path("/tmp"),
+            output_dir=Path("/tmp"),
+            explicit_flags={"release": False},
+        )
+        dispatch(ctx, ["-f", "GE-Proton"])
+        mock_handler.assert_called_once()
 
 
 # =============================================================================
@@ -287,75 +337,30 @@ class TestDispatch:
 # =============================================================================
 
 
-class TestResolveDefaultOperation:
+class TestDefaultOperation:
     """Test default operation resolution."""
 
-    def test_fork_flag_without_value_triggers_multi_fork_update(
-        self, mocker: Any
-    ) -> None:
-        """Test -f without value triggers multi-fork update."""
-        mock_handler = mocker.patch(
-            "protonfetcher.cli.dispatch.handle_multi_fork_update"
-        )
-        args = MagicMock(fork=None, dry_run=False)
-        ctx = CLIContext(
+    def _ctx(self, explicit_flags: dict[str, bool]) -> CLIContext:
+        return CLIContext(
             fetcher=MagicMock(),
             forgejo_fetcher=MagicMock(),
-            args=args,
+            args=MagicMock(),
             extract_dir=Path("/tmp"),
             output_dir=Path("/tmp"),
-            explicit_flags={"fork": True},
+            explicit_flags=explicit_flags,
         )
-        resolve_default_operation(ctx, ["-f"])
-        mock_handler.assert_called_once()
 
-    def test_fork_flag_with_value_triggers_fetch(self, mocker: Any) -> None:
-        """Test -f with value triggers fetch for that fork."""
-        mock_handler = mocker.patch("protonfetcher.cli.dispatch.handle_fetch_with_fork")
-        args = MagicMock(fork="GE-Proton", dry_run=False)
-        ctx = CLIContext(
-            fetcher=MagicMock(),
-            forgejo_fetcher=MagicMock(),
-            args=args,
-            extract_dir=Path("/tmp"),
-            output_dir=Path("/tmp"),
-            explicit_flags={"fork": True},
-        )
-        resolve_default_operation(ctx, ["-f", "GE-Proton"])
-        mock_handler.assert_called_once()
+    def test_fork_flag_defaults_to_update(self) -> None:
+        """Test an explicit fork flag defaults to the update operation."""
+        assert _default_operation(self._ctx({"release": False}), ["-f"]) == "update"
 
-    def test_release_flag_triggers_fetch(self, mocker: Any) -> None:
-        """Test --release flag triggers fetch."""
-        mock_handler = mocker.patch("protonfetcher.cli.dispatch.handle_fetch_with_fork")
-        args = MagicMock(fork="GE-Proton", dry_run=False)
-        ctx = CLIContext(
-            fetcher=MagicMock(),
-            forgejo_fetcher=MagicMock(),
-            args=args,
-            extract_dir=Path("/tmp"),
-            output_dir=Path("/tmp"),
-            explicit_flags={"release": True},
+    def test_release_flag_defaults_to_update(self) -> None:
+        """Test a release flag defaults to the update operation."""
+        assert (
+            _default_operation(self._ctx({"release": True}), ["--release", "v1"])
+            == "update"
         )
-        resolve_default_operation(ctx, ["--release", "v1"])
-        mock_handler.assert_called_once()
 
-    def test_no_flags_triggers_ls(self, mocker: Any) -> None:
-        """Test no flags triggers ls operation."""
-        mock_handler = mocker.patch("protonfetcher.cli.dispatch.handle_ls_operation")
-        args = MagicMock(fork=None)
-        ctx = CLIContext(
-            fetcher=MagicMock(),
-            forgejo_fetcher=MagicMock(),
-            args=args,
-            extract_dir=Path("/tmp"),
-            output_dir=Path("/tmp"),
-            explicit_flags={
-                "ls": False,
-                "list": False,
-                "rm": False,
-                "fork": False,
-                "release": False,
-            },
-        )
-        resolve_default_operation(ctx, [])
-        mock_handler.assert_called_once()
+    def test_no_flags_defaults_to_ls(self) -> None:
+        """Test no flags defaults to ls."""
+        assert _default_operation(self._ctx({"release": False}), []) == "ls"

@@ -5,7 +5,6 @@ handler functions in protonfetcher.cli.handlers.
 """
 
 import argparse
-import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -21,6 +20,7 @@ from protonfetcher.cli.handlers import (
     handle_rm_operation,
 )
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
+from protonfetcher.common import HttpResponse
 
 # =============================================================================
 # handle_check_operation Tests
@@ -43,14 +43,11 @@ class TestHandleCheckOperation:
         extract_dir.mkdir()
         (extract_dir / "GE-Proton10-20").mkdir()
 
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body='{"tag_name": "GE-Proton10-21"}'
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url="/releases/tag/GE-Proton10-21"
         )
 
         fetcher = GitHubReleaseFetcher(
@@ -66,7 +63,7 @@ class TestHandleCheckOperation:
 
         with pytest.raises(SystemExit) as exc_info:
             handle_check_operation(fetcher, forgejo_fetcher, args, extract_dir)
-        assert exc_info.value.code == 0
+        assert exc_info.value.code == 1
 
         captured = capsys.readouterr()
         assert "New release available for GE-Proton: GE-Proton10-21!" in captured.out
@@ -85,14 +82,11 @@ class TestHandleCheckOperation:
         extract_dir.mkdir()
         (extract_dir / "GE-Proton10-21").mkdir()
 
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body='{"tag_name": "GE-Proton10-21"}'
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url="/releases/tag/GE-Proton10-21"
         )
 
         fs = FileSystemClient()
@@ -109,7 +103,7 @@ class TestHandleCheckOperation:
 
         with pytest.raises(SystemExit) as exc_info:
             handle_check_operation(fetcher, forgejo_fetcher, args, extract_dir)
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 0
 
         captured = capsys.readouterr()
         assert "GE-Proton: up-to-date" in captured.out
@@ -222,17 +216,12 @@ class TestHandleListOperation:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test --list shows recent releases."""
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout='{"assets": [{"name": "GE-Proton10-20.tar.gz", "size": 1048576}]}',
-            stderr="",
+        mock_network_client.get.return_value = HttpResponse(
+            status=200,
+            body='{"assets": [{"name": "GE-Proton10-20.tar.gz", "size": 1048576}]}',
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-20",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url="/releases/tag/GE-Proton10-20"
         )
 
         from protonfetcher.filesystem import FileSystemClient

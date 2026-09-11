@@ -4,8 +4,6 @@ Scans a directory for Proton build directories, parses their versions,
 filters by fork, and deduplicates candidates.
 """
 
-from __future__ import annotations
-
 import logging
 import re
 from pathlib import Path
@@ -19,33 +17,21 @@ from .common import (
     VersionTuple,
 )
 from .utils import parse_version
+from .filesystem import FileSystemClient
 
 logger = logging.getLogger(__name__)
 
 
 def _get_tag_name(entry: Path, fork: ForkName) -> str:
-    """Get the tag name from the directory entry, handling fork-specific prefixes.
-
-    Args:
-        entry: Directory path to parse
-        fork: The Proton fork name
-
-    Returns:
-        Cleaned tag name suitable for version parsing
-    """
-    if fork == ForkName.PROTON_EM and entry.name.startswith("proton-"):
-        return entry.name[7:]  # Remove "proton-" prefix
-    elif fork == ForkName.CACHYOS and entry.name.startswith("proton-"):
-        # Remove "proton-" prefix and "-x86_64" suffix if present
-        name = entry.name[7:]  # Remove "proton-" prefix
-        if name.endswith("-x86_64"):
-            name = name[:-7]  # Remove "-x86_64" suffix
-        return name
-    elif fork == ForkName.DW_PROTON and entry.name.endswith("-x86_64"):
-        # Remove "-x86_64" suffix for DW-Proton
-        return entry.name[:-7]
-    else:
-        return entry.name
+    """Strip the fork-specific prefix/suffix to get the parseable tag name."""
+    name = entry.name
+    if fork == ForkName.PROTON_EM:
+        return name.removeprefix("proton-")
+    if fork == ForkName.CACHYOS:
+        return name.removeprefix("proton-").removesuffix("-x86_64")
+    if fork == ForkName.DW_PROTON:
+        return name.removesuffix("-x86_64")
+    return name
 
 
 def _should_skip_directory(tag_name: str, fork: ForkName) -> bool:
@@ -65,41 +51,25 @@ def _should_skip_directory(tag_name: str, fork: ForkName) -> bool:
 
 
 def _is_valid_proton_directory(entry: Path, fork: ForkName) -> bool:
-    """Validate that the directory name matches expected pattern for the fork.
+    """Validate that the directory name matches a naming pattern for the fork.
 
     Args:
         entry: Directory path to validate
         fork: The Proton fork name
 
     Returns:
-        True if the directory matches the fork's naming pattern
+        True if the directory matches one of the fork's naming patterns
     """
-    match fork:
-        case ForkName.GE_PROTON:
-            ge_pattern = r"^GE-Proton\d+-\d+(?:-.*)?$"
-            return bool(re.match(ge_pattern, entry.name))
-        case ForkName.PROTON_EM:
-            em_pattern1 = r"^proton-EM-\d+\.\d+-\d+(?:-.*)?$"
-            em_pattern2 = r"^EM-\d+\.\d+-\d+(?:-.*)?$"
-            return bool(
-                re.match(em_pattern1, entry.name) or re.match(em_pattern2, entry.name)
-            )
-        case ForkName.CACHYOS:
-            cachyos_pattern1 = r"^proton-cachyos-\d+\.\d+-\d+-slr(?:-x86_64)?(?:-.*)?$"
-            cachyos_pattern2 = r"^cachyos-\d+\.\d+-\d+-slr(?:-.*)?$"
-            return bool(
-                re.match(cachyos_pattern1, entry.name)
-                or re.match(cachyos_pattern2, entry.name)
-            )
-        case ForkName.DW_PROTON:
-            dwproton_pattern = r"^dwproton-\d+\.\d+-\d+-x86_64(?:-.*)?$"
-            return bool(re.match(dwproton_pattern, entry.name))
+    return any(
+        re.match(pattern, entry.name) is not None
+        for pattern in FORKS[fork].dir_name_patterns
+    )
 
 
 def find_version_candidates(
     extract_dir: Path,
     fork: ForkName,
-    file_system: FileSystemClientProtocol,
+    file_system: FileSystemClientProtocol | None = None,
 ) -> VersionCandidateList:
     """Find all directories that look like Proton builds and parse their versions.
 
@@ -114,6 +84,7 @@ def find_version_candidates(
     Returns:
         List of (version_tuple, directory_path) tuples
     """
+    file_system = file_system or FileSystemClient()
     candidates: list[tuple[VersionTuple, Path]] = []
     for entry in file_system.iterdir(extract_dir):
         if file_system.is_dir(entry) and not file_system.is_symlink(entry):

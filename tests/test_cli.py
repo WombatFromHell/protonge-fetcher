@@ -12,7 +12,6 @@ Consolidated tests for the command-line interface including:
 - Multi-fork update mode (-f without value)
 """
 
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,6 +28,8 @@ from protonfetcher.cli.validators import (
     validate_mutually_exclusive_args,
 )
 from protonfetcher.common import ForkName
+from protonfetcher.dirs import get_link_names
+from protonfetcher.common import HttpResponse
 from protonfetcher.exceptions import NetworkError, ProtonFetcherError
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
 from protonfetcher.link_manager import LinkManager
@@ -219,14 +220,11 @@ class TestCheckOperationFlow:
         extract_dir.mkdir()
         (extract_dir / "GE-Proton10-20").mkdir()
 
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body='{"tag_name": "GE-Proton10-21"}'
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url="/releases/tag/GE-Proton10-21"
         )
 
         fetcher = GitHubReleaseFetcher(
@@ -242,7 +240,7 @@ class TestCheckOperationFlow:
 
         with pytest.raises(SystemExit) as exc_info:
             handle_check_operation(fetcher, forgejo_fetcher, args, extract_dir)
-        assert exc_info.value.code == 0
+        assert exc_info.value.code == 1
 
         captured = capsys.readouterr()
         assert "New release available for GE-Proton: GE-Proton10-21!" in captured.out
@@ -261,14 +259,11 @@ class TestCheckOperationFlow:
         extract_dir.mkdir()
         (extract_dir / "GE-Proton10-21").mkdir()
 
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body='{"tag_name": "GE-Proton10-21"}'
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url="/releases/tag/GE-Proton10-21"
         )
 
         fs = FileSystemClient()
@@ -285,7 +280,7 @@ class TestCheckOperationFlow:
 
         with pytest.raises(SystemExit) as exc_info:
             handle_check_operation(fetcher, forgejo_fetcher, args, extract_dir)
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 0
 
         captured = capsys.readouterr()
         assert "GE-Proton: up-to-date" in captured.out
@@ -310,9 +305,7 @@ class TestCheckCLI:
 
         fs = FileSystemClient()
         lm = LinkManager(fs)
-        main_link, fb1, fb2 = lm.get_link_names_for_fork(
-            extract_dir, ForkName.GE_PROTON
-        )
+        main_link, fb1, fb2 = get_link_names(extract_dir, ForkName.GE_PROTON)
         lm.create_symlinks(
             main_link,
             fb1,
@@ -324,14 +317,11 @@ class TestCheckCLI:
             ],
         )
 
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body='{"tag_name": "GE-Proton10-21"}'
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url="/releases/tag/GE-Proton10-21"
         )
 
         mocker.patch(
@@ -361,7 +351,7 @@ class TestCheckCLI:
         with pytest.raises(SystemExit) as exc_info:
             main()
 
-        assert exc_info.value.code == 0
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "New release available for GE-Proton: GE-Proton10-21!" in captured.out
 
@@ -379,14 +369,11 @@ class TestCheckCLI:
         extract_dir.mkdir()
         (extract_dir / "GE-Proton10-20").mkdir()
 
-        mock_network_client.get.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"tag_name": "GE-Proton10-21"}', stderr=""
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body='{"tag_name": "GE-Proton10-21"}'
         )
-        mock_network_client.head.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout="Location: /releases/tag/GE-Proton10-21",
-            stderr="",
+        mock_network_client.head.return_value = HttpResponse(
+            status=200, final_url="/releases/tag/GE-Proton10-21"
         )
 
         mocker.patch(
@@ -417,7 +404,7 @@ class TestCheckCLI:
         with pytest.raises(SystemExit) as exc_info:
             main()
 
-        assert exc_info.value.code == 0
+        assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "New release available for GE-Proton: GE-Proton10-21!" in captured.out
 

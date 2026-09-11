@@ -71,7 +71,6 @@ class TestArchiveExtraction:
             archive_path=archive_path,
             target_dir=target_dir,
             show_progress=False,
-            show_file_details=False,
         )
 
         assert result_path == target_dir
@@ -99,7 +98,6 @@ class TestArchiveExtraction:
                 archive_path=Path(archive_path),
                 target_dir=target_dir,
                 show_progress=False,
-                show_file_details=False,
             )
 
 
@@ -148,7 +146,6 @@ class TestSystemTarFallback:
                 archive_path=archive_path,
                 target_dir=target_dir,
                 show_progress=False,
-                show_file_details=False,
             )
             assert mock_run.called
             call_args = mock_run.call_args[0][0]
@@ -159,7 +156,6 @@ class TestSystemTarFallback:
                     archive_path=archive_path,
                     target_dir=target_dir,
                     show_progress=False,
-                    show_file_details=False,
                 )
 
 
@@ -296,17 +292,15 @@ class TestExtractionEdgeCases:
             archive_path=archive_path,
             target_dir=target_dir,
             show_progress=False,
-            show_file_details=False,
         )
 
         assert result_path == target_dir
 
     @pytest.mark.parametrize(
-        "show_progress,show_file_details,members",
+        "show_progress,members",
         [
-            (False, False, [{"name": "test_dir", "is_dir": True, "size": 0}]),
+            (False, [{"name": "test_dir", "is_dir": True, "size": 0}]),
             (
-                True,
                 True,
                 [
                     {"name": "test_dir", "is_dir": True, "size": 0},
@@ -318,7 +312,6 @@ class TestExtractionEdgeCases:
     def test_extraction_progress_options(
         self,
         show_progress: bool,
-        show_file_details: bool,
         members: list[dict],
         mocker: Any,
         mock_filesystem_client: Any,
@@ -339,7 +332,6 @@ class TestExtractionEdgeCases:
             archive_path=archive_path,
             target_dir=target_dir,
             show_progress=show_progress,
-            show_file_details=show_file_details,
         )
 
         assert result_path == target_dir
@@ -366,7 +358,6 @@ class TestExtractionEdgeCases:
                 archive_path=corrupted,
                 target_dir=target_dir,
                 show_progress=False,
-                show_file_details=False,
             )
 
     def test_extract_unknown_format(
@@ -388,5 +379,4 @@ class TestExtractionEdgeCases:
                 archive_path=unknown,
                 target_dir=target_dir,
                 show_progress=False,
-                show_file_details=False,
             )

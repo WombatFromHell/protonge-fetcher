@@ -8,15 +8,7 @@ import sys
 
 from protonfetcher.common import DEFAULT_FORK
 
-
-def was_flag_passed_explicitly(flag_short: str, flag_long: str) -> bool:
-    """Check if a flag was explicitly passed on the command line."""
-    return any(
-        arg in [flag_short, flag_long]
-        or arg.startswith(f"{flag_long}=")
-        or arg.startswith(f"{flag_short}=")
-        for arg in sys.argv[1:]
-    )
+from .fork_utils import is_flag_passed
 
 
 def validate_relink_requires_fork(args: argparse.Namespace) -> bool:
@@ -24,7 +16,7 @@ def validate_relink_requires_fork(args: argparse.Namespace) -> bool:
     if not args.relink:
         return True
 
-    has_explicit_fork = was_flag_passed_explicitly("-f", "--fork")
+    has_explicit_fork = is_flag_passed(sys.argv[1:], "--fork", "-f")
     if not has_explicit_fork:
         print(
             "Error: --relink requires --fork to specify which fork's links to recreate"
@@ -55,9 +47,9 @@ def validate_prune_vs_check(args: argparse.Namespace) -> None:
 
 
 def validate_keep_value(args: argparse.Namespace) -> None:
-    """Validate --keep value is at least 1."""
-    if hasattr(args, "keep") and args.keep is not None and args.keep < 1:
-        print("Error: --keep must be at least 1")
+    """Validate --keep value is non-negative (0 prunes all)."""
+    if hasattr(args, "keep") and args.keep is not None and args.keep < 0:
+        print("Error: --keep must be at least 0")
         raise SystemExit(1)
 
 
