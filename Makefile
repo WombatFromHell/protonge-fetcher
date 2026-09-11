@@ -135,7 +135,8 @@ prettier:
 lint:
 	uv run ty check ./src ./tests; \
 	uv run pyright ./src ./tests; \
-	uv run ruff check ./src ./tests
+	uv run ruff check ./src ./tests; \
+	uv run python -m compileall -q -d $(BUILD_DIR)/pyc ./src ./tests
 
 format: prettier
 	uv run ruff check ./src ./tests --fix; \

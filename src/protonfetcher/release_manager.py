@@ -132,7 +132,7 @@ class ReleaseManager:
                 # Validate that size is an integer
                 if isinstance(size, int):
                     return size
-            except json.JSONDecodeError, IOError:
+            except (json.JSONDecodeError, IOError):
                 # If cache file is invalid, return None to force a fresh fetch
                 pass
         return None
