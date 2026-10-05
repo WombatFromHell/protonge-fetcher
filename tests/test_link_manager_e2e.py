@@ -56,7 +56,7 @@ class TestLinkStatusChecking:
         wrong_dir = extract_dir / "GE-Proton10-19"
         wrong_dir.mkdir()
 
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         main_link.symlink_to(wrong_dir)
 
         fs = FileSystemClient()
@@ -82,7 +82,7 @@ class TestLinkStatusChecking:
         version_dir = extract_dir / "GE-Proton10-20"
         version_dir.mkdir()
 
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         non_existent = extract_dir / "NonExistent"
         main_link.symlink_to(non_existent)
 
@@ -191,9 +191,9 @@ class TestManageProtonLinks:
             is_manual_release=True,
         )
 
-        main = extract_dir / "GE-Proton"
-        fb1 = extract_dir / "GE-Proton-Fallback"
-        fb2 = extract_dir / "GE-Proton-Fallback2"
+        main = extract_dir / "Proton-GE"
+        fb1 = extract_dir / "Proton-GE-Fallback"
+        fb2 = extract_dir / "Proton-GE-Fallback2"
 
         assert main.is_symlink()
         assert fb1.is_symlink()
@@ -254,10 +254,10 @@ class TestGetInstalledVersions:
 
 
 class TestGeProtonArchDirectory:
-    """Regression: recent GE-Proton archives extract to a *-x86_64 directory."""
+    """Regression: recent Proton-GE archives extract to a *-x86_64 directory."""
 
     def test_resolves_x86_64_directory(self, tmp_path: Path) -> None:
-        """find_tag_directory resolves GE-Proton<ver>-x86_64 for manual releases."""
+        """find_tag_directory resolves Proton-GE<ver>-x86_64 for manual releases."""
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
         (extract_dir / "GE-Proton11-6-x86_64").mkdir()

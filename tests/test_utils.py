@@ -3,14 +3,14 @@
 import pytest
 
 from protonfetcher.common import ForkName
-from protonfetcher.utils import parse_version
+from protonfetcher.utils import get_proton_asset_name, parse_version
 
 
 class TestParseVersion:
     """Tests for parse_version() function."""
 
     class TestGEProton:
-        """Tests for GE-Proton version parsing."""
+        """Tests for Proton-GE version parsing."""
 
         @pytest.mark.parametrize(
             "tag,expected",
@@ -21,11 +21,11 @@ class TestParseVersion:
             ],
         )
         def test_parse_ge_proton_tag(self, tag: str, expected: tuple) -> None:
-            """Test parsing GE-Proton tag format."""
+            """Test parsing Proton-GE tag format."""
             assert parse_version(tag, ForkName.GE_PROTON) == expected
 
         def test_parse_ge_proton_invalid_returns_fallback(self) -> None:
-            """Test that invalid GE-Proton tags return fallback tuple."""
+            """Test that invalid Proton-GE tags return fallback tuple."""
             result = parse_version("invalid-tag", ForkName.GE_PROTON)
             assert result == ("invalid-tag", 0, 0, 0)
 
@@ -86,11 +86,55 @@ class TestParseVersion:
             result = parse_version("invalid-tag", ForkName.CACHYOS)
             assert result == ("invalid-tag", 0, 0, 0)
 
+    class TestWineland:
+        """Tests for Proton-Wineland version parsing."""
+
+        @pytest.mark.parametrize(
+            "tag,expected",
+            [
+                ("wineland-11.0-20261005", ("wineland", 11, 0, 20261005)),
+                ("wineland-11.0-20260917", ("wineland", 11, 0, 20260917)),
+                # ponytail: the ".N" rebuild suffix is intentionally ignored
+                # (same-date rebuilds compare equal)
+                ("wineland-11.0-20260928.1", ("wineland", 11, 0, 20260928)),
+            ],
+        )
+        def test_parse_wineland_tag(self, tag: str, expected: tuple) -> None:
+            """Test parsing Proton-Wineland tag format."""
+            assert parse_version(tag, ForkName.WINELAND) == expected
+
+        def test_parse_wineland_invalid_returns_fallback(self) -> None:
+            """Test that invalid Proton-Wineland tags return fallback tuple."""
+            result = parse_version("invalid-tag", ForkName.WINELAND)
+            assert result == ("invalid-tag", 0, 0, 0)
+
+        def test_wineland_version_comparison(self) -> None:
+            """Test that Proton-Wineland versions compare correctly (by date)."""
+            v1 = parse_version("wineland-11.0-20260917", ForkName.WINELAND)
+            v2 = parse_version("wineland-11.0-20261005", ForkName.WINELAND)
+            assert v2 > v1
+
+        def test_parse_wineland_raw_directory_name(self) -> None:
+            """Installed dirs keep the proton- prefix and _v3 suffix; parsing must handle them.
+
+            check_for_newer_release parses raw installed directory names, not tags.
+            """
+            assert parse_version(
+                "proton-wineland-11.0-20261005-x86_64_v3", ForkName.WINELAND
+            ) == ("wineland", 11, 0, 20261005)
+
+        def test_wineland_asset_name(self) -> None:
+            """Test that the Wineland asset name uses the _v3 variant."""
+            assert (
+                get_proton_asset_name("wineland-11.0-20261005", ForkName.WINELAND)
+                == "proton-wineland-11.0-20261005-x86_64_v3.tar.xz"
+            )
+
     class TestVersionComparison:
         """Tests for version comparison using parse_version results."""
 
         def test_ge_proton_version_comparison(self) -> None:
-            """Test that GE-Proton versions compare correctly."""
+            """Test that Proton-GE versions compare correctly."""
             v1 = parse_version("GE-Proton10-20", ForkName.GE_PROTON)
             v2 = parse_version("GE-Proton10-21", ForkName.GE_PROTON)
             assert v2 > v1

@@ -31,7 +31,7 @@ def parse_version(
     if match_result:
         groups = list(map(int, match_result.groups()))
         if is_ge_proton:
-            # GE-Proton: (major, minor) → (prefix, major, 0, minor)
+            # Proton-GE: (major, minor) → (prefix, major, 0, minor)
             major, minor = groups
             return (prefix, major, 0, minor)
         else:
@@ -47,8 +47,8 @@ def get_proton_asset_name(tag: str, fork: ForkName = ForkName.GE_PROTON) -> str:
     Generate the expected Proton asset name from a tag and fork.
 
     Args:
-        tag: The release tag (e.g., 'GE-Proton10-20' for GE-Proton, 'EM-10.0-30' for Proton-EM)
-        fork: The fork name (default: 'GE-Proton')
+        tag: The release tag (e.g., 'GE-Proton10-20' for Proton-GE, 'EM-10.0-30' for Proton-EM)
+        fork: The fork name (default: 'Proton-GE')
 
     Returns:
         The expected asset name (e.g., 'GE-Proton10-20.tar.gz' or 'proton-EM-10.0-30.tar.xz')

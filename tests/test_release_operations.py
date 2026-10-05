@@ -25,7 +25,7 @@ class TestDetermineReleasePath:
     """Tests for _determine_release_path function."""
 
     def test_ge_proton_path(self, tmp_path: Path) -> None:
-        """Test GE-Proton path resolution."""
+        """Test Proton-GE path resolution."""
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
@@ -129,7 +129,7 @@ class TestIdentifyLinksToRemove:
         release_path.mkdir()
 
         # Create a broken symlink (pointing to non-existent target)
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         non_existent = extract_dir / "NonExistent"
         main_link.symlink_to(non_existent)
 
@@ -170,7 +170,7 @@ class TestIdentifyLinksToRemove:
         other_dir.mkdir()
 
         # Create link pointing to other directory
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         main_link.symlink_to(other_dir)
 
         links_to_remove = _identify_links_to_remove(
@@ -222,10 +222,10 @@ class TestRemoveSymbolicLinks:
         version_dir = tmp_path / "GE-Proton10-20"
         version_dir.mkdir()
 
-        main_link = tmp_path / "GE-Proton"
+        main_link = tmp_path / "Proton-GE"
         main_link.symlink_to(version_dir)
 
-        fb1_link = tmp_path / "GE-Proton-Fallback"
+        fb1_link = tmp_path / "Proton-GE-Fallback"
         fb1_link.symlink_to(version_dir)
 
         _remove_symbolic_links([main_link, fb1_link])
@@ -303,7 +303,7 @@ class TestCleanupStaleSymlinks:
         # Create a version directory and a symlink to it
         v1 = extract_dir / "GE-Proton10-5"
         v1.mkdir()
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         main_link.symlink_to(v1)
 
         # Remove the target directory
@@ -328,7 +328,7 @@ class TestCleanupStaleSymlinks:
         v2.mkdir()
 
         # Symlink points to older version
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         main_link.symlink_to(v2)
 
         cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON)
@@ -344,7 +344,7 @@ class TestCleanupStaleSymlinks:
         v1 = extract_dir / "GE-Proton10-5"
         v1.mkdir()
 
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         main_link.symlink_to(v1)
 
         cleanup_stale_symlinks(extract_dir, ForkName.GE_PROTON)

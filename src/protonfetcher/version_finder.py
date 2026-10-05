@@ -31,6 +31,8 @@ def _get_tag_name(entry: Path, fork: ForkName) -> str:
         return name.removeprefix("proton-").removesuffix("-x86_64")
     if fork == ForkName.DW_PROTON:
         return name.removesuffix("-x86_64")
+    if fork == ForkName.WINELAND:
+        return name.removeprefix("proton-").removesuffix("-x86_64_v3")
     return name
 
 

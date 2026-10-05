@@ -323,7 +323,7 @@ class TestCheckForUpdates:
     @pytest.mark.parametrize(
         "fork,installed_dir,latest_tag,expected",
         [
-            # GE-Proton
+            # Proton-GE
             (
                 ForkName.GE_PROTON,
                 "GE-Proton10-20",

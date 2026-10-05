@@ -63,9 +63,9 @@ class TestSetDefaultFork:
 
     def test_string_fork_preserved(self) -> None:
         """Test string fork value is preserved."""
-        args = _make_args(fork="GE-Proton")
+        args = _make_args(fork="Proton-GE")
         result = set_default_fork(args)
-        assert result.fork == "GE-Proton"
+        assert result.fork == "Proton-GE"
 
     def test_read_only_op_no_default_fork(self) -> None:
         """Test read-only operations don't get a default fork."""
@@ -110,13 +110,13 @@ class TestValidateMutuallyExclusiveArgs:
     @pytest.mark.parametrize(
         "argv",
         [
-            ["protonfetcher", "--relink", "--fork", "GE-Proton", "--list"],
-            ["protonfetcher", "--relink", "--fork", "GE-Proton", "--ls"],
-            ["protonfetcher", "--fork", "GE-Proton", "--check", "--dry-run"],
-            ["protonfetcher", "--fork", "GE-Proton", "--check", "--list"],
+            ["protonfetcher", "--relink", "--fork", "Proton-GE", "--list"],
+            ["protonfetcher", "--relink", "--fork", "Proton-GE", "--ls"],
+            ["protonfetcher", "--fork", "Proton-GE", "--check", "--dry-run"],
+            ["protonfetcher", "--fork", "Proton-GE", "--check", "--list"],
             ["protonfetcher", "--dry-run", "--list"],
             ["protonfetcher", "--dry-run", "--ls"],
-            ["protonfetcher", "--dry-run", "--relink", "--fork", "GE-Proton"],
+            ["protonfetcher", "--dry-run", "--relink", "--fork", "Proton-GE"],
         ],
     )
     def test_check_and_dry_run_conflicts(self, argv: list[str]) -> None:

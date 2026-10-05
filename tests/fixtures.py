@@ -92,7 +92,7 @@ def installed_proton_versions(tmp_path: Path, fork: ForkName) -> list[Path]:
         # Use actual directory naming convention (with proton- prefix)
         version_names = ["proton-EM-10.0-30", "proton-EM-10.0-29", "proton-EM-10.0-28"]
     elif fork == ForkName.DW_PROTON:
-        # DW-Proton uses {tag}-x86_64 directory naming
+        # Proton-DW uses {tag}-x86_64 directory naming
         version_names = [
             "dwproton-10.0-26-x86_64",
             "dwproton-10.0-25-x86_64",
@@ -126,19 +126,19 @@ def symlink_environment(tmp_path: Path, fork: ForkName) -> SymlinkEnvironment:
 
     if fork == ForkName.GE_PROTON:
         version_names = ["GE-Proton10-20", "GE-Proton10-19", "GE-Proton10-18"]
-        link_names = ["GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"]
+        link_names = ["Proton-GE", "Proton-GE-Fallback", "Proton-GE-Fallback2"]
     elif fork == ForkName.PROTON_EM:
         # Use actual directory naming convention (with proton- prefix)
         version_names = ["proton-EM-10.0-30", "proton-EM-10.0-29", "proton-EM-10.0-28"]
         link_names = ["Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"]
     elif fork == ForkName.DW_PROTON:
-        # DW-Proton uses {tag}-x86_64 directory naming
+        # Proton-DW uses {tag}-x86_64 directory naming
         version_names = [
             "dwproton-10.0-26-x86_64",
             "dwproton-10.0-25-x86_64",
             "dwproton-10.0-24-x86_64",
         ]
-        link_names = ["DW-Proton", "DW-Proton-Fallback", "DW-Proton-Fallback2"]
+        link_names = ["Proton-DW", "Proton-DW-Fallback", "Proton-DW-Fallback2"]
     else:
         # Use actual directory naming convention (with proton- prefix and -x86_64 suffix)
         version_names = [
@@ -146,7 +146,11 @@ def symlink_environment(tmp_path: Path, fork: ForkName) -> SymlinkEnvironment:
             "proton-cachyos-10.0-20260206-slr-x86_64",
             "proton-cachyos-10.0-20260205-slr-x86_64",
         ]
-        link_names = ["CachyOS", "CachyOS-Fallback", "CachyOS-Fallback2"]
+        link_names = [
+            "Proton-CachyOS",
+            "Proton-CachyOS-Fallback",
+            "Proton-CachyOS-Fallback2",
+        ]
 
     fs = FileSystemClient()
     version_dirs = []

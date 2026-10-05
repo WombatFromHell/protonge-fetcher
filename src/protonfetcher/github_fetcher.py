@@ -1,6 +1,6 @@
 """GitHub release fetcher for ProtonFetcher.
 
-Handles GE-Proton, Proton-EM, and CachyOS forks hosted on GitHub.
+Handles Proton-GE, Proton-EM, Proton-CachyOS, and Proton-Wineland forks hosted on GitHub.
 All platform-specific behavior is delegated to GitHubPlatformAdapter.
 """
 

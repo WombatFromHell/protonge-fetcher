@@ -1,11 +1,11 @@
-"""Tests for ForgejoReleaseFetcher and DW-Proton-specific functionality.
+"""Tests for ForgejoReleaseFetcher and Proton-DW-specific functionality.
 
 ForgejoReleaseFetcher is a marker class (~10 lines, zero method overrides)
 that delegates all behavior to BaseReleaseFetcher + ForgejoPlatformAdapter.
 
 Tests in this file verify:
-- DW-Proton-specific utility functions (parse_version, compare_versions, etc.)
-- LinkManager behavior for DW-Proton fork
+- Proton-DW-specific utility functions (parse_version, compare_versions, etc.)
+- LinkManager behavior for Proton-DW fork
 - Forgejo URL construction via forgejo_adapter (Pattern 8)
 - Shared BaseReleaseFetcher workflow via ForgejoReleaseFetcher instance
 
@@ -29,12 +29,12 @@ from protonfetcher.version_finder import (
 )
 
 # =============================================================================
-# parse_version — DW-Proton
+# parse_version — Proton-DW
 # =============================================================================
 
 
 class TestParseVersionDWProton:
-    """Tests for parse_version() with DW-Proton tags."""
+    """Tests for parse_version() with Proton-DW tags."""
 
     @pytest.mark.parametrize(
         "tag,expected",
@@ -46,37 +46,37 @@ class TestParseVersionDWProton:
         ],
     )
     def test_parse_dwproton_tag(self, tag: str, expected: tuple) -> None:
-        """Test parsing DW-Proton tag format."""
+        """Test parsing Proton-DW tag format."""
         assert parse_version(tag, ForkName.DW_PROTON) == expected
 
     def test_parse_dwproton_invalid_returns_fallback(self) -> None:
-        """Test that invalid DW-Proton tags return fallback tuple."""
+        """Test that invalid Proton-DW tags return fallback tuple."""
         result = parse_version("invalid-tag", ForkName.DW_PROTON)
         assert result == ("invalid-tag", 0, 0, 0)
 
 
 # =============================================================================
-# version ordering — DW-Proton (via parse_version tuple comparison)
+# version ordering — Proton-DW (via parse_version tuple comparison)
 # =============================================================================
 
 
 class TestVersionOrderingDWProton:
-    """Tests for DW-Proton version ordering via parse_version tuples."""
+    """Tests for Proton-DW version ordering via parse_version tuples."""
 
     def test_dwproton_newer_version(self) -> None:
-        """Test that newer DW-Proton version sorts after older."""
+        """Test that newer Proton-DW version sorts after older."""
         newer = parse_version("dwproton-10.0-27", ForkName.DW_PROTON)
         older = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
         assert newer > older
 
     def test_dwproton_older_version(self) -> None:
-        """Test that older DW-Proton version sorts before newer."""
+        """Test that older Proton-DW version sorts before newer."""
         older = parse_version("dwproton-10.0-25", ForkName.DW_PROTON)
         newer = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
         assert older < newer
 
     def test_dwproton_equal_version(self) -> None:
-        """Test that equal DW-Proton versions parse identically."""
+        """Test that equal Proton-DW versions parse identically."""
         v1 = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
         v2 = parse_version("dwproton-10.0-26", ForkName.DW_PROTON)
         assert v1 == v2
@@ -101,12 +101,12 @@ class TestVersionOrderingDWProton:
 
 
 # =============================================================================
-# get_proton_asset_name — DW-Proton
+# get_proton_asset_name — Proton-DW
 # =============================================================================
 
 
 class TestGetProtonAssetNameDWProton:
-    """Tests for get_proton_asset_name() with DW-Proton."""
+    """Tests for get_proton_asset_name() with Proton-DW."""
 
     @pytest.mark.parametrize(
         "tag,expected",
@@ -117,28 +117,28 @@ class TestGetProtonAssetNameDWProton:
         ],
     )
     def test_dwproton_asset_name(self, tag: str, expected: str) -> None:
-        """Test asset name generation for DW-Proton."""
+        """Test asset name generation for Proton-DW."""
         assert get_proton_asset_name(tag, ForkName.DW_PROTON) == expected
 
 
 # =============================================================================
-# LinkManager — DW-Proton
+# LinkManager — Proton-DW
 # =============================================================================
 
 
 class TestLinkManagerDWProton:
-    """Tests for LinkManager with DW-Proton fork."""
+    """Tests for LinkManager with Proton-DW fork."""
 
     def test_get_link_names_for_fork_dwproton(self, tmp_path: Path) -> None:
-        """Test get_link_names returns correct DW-Proton symlink names."""
+        """Test get_link_names returns correct Proton-DW symlink names."""
         main, fb1, fb2 = get_link_names(tmp_path, ForkName.DW_PROTON)
-        assert main == tmp_path / "DW-Proton"
-        assert fb1 == tmp_path / "DW-Proton-Fallback"
-        assert fb2 == tmp_path / "DW-Proton-Fallback2"
+        assert main == tmp_path / "Proton-DW"
+        assert fb1 == tmp_path / "Proton-DW-Fallback"
+        assert fb2 == tmp_path / "Proton-DW-Fallback2"
 
     def test_is_valid_proton_directory_dwproton(self, tmp_path: Path) -> None:
-        """Test _is_valid_proton_directory with DW-Proton patterns."""
-        # Valid DW-Proton directories
+        """Test _is_valid_proton_directory with Proton-DW patterns."""
+        # Valid Proton-DW directories
         valid_names = [
             "dwproton-10.0-26-x86_64",
             "dwproton-9.0-25-x86_64",
@@ -151,7 +151,7 @@ class TestLinkManagerDWProton:
             assert _is_valid_proton_directory(dir_path, ForkName.DW_PROTON) is True
             dir_path.rmdir()
 
-        # Invalid DW-Proton directories (missing -x86_64 suffix)
+        # Invalid Proton-DW directories (missing -x86_64 suffix)
         invalid_names = [
             "dwproton-10.0-26",
             "GE-Proton10-20",
@@ -166,8 +166,8 @@ class TestLinkManagerDWProton:
             dir_path.rmdir()
 
     def test_should_skip_directory_dwproton(self, tmp_path: Path) -> None:
-        """Test _should_skip_directory with DW-Proton fork."""
-        # DW-Proton should skip non-DW-Proton directories
+        """Test _should_skip_directory with Proton-DW fork."""
+        # Proton-DW should skip non-Proton-DW directories
         skip_names = [
             "GE-Proton10-20",
             "EM-10.0-30",
@@ -178,7 +178,7 @@ class TestLinkManagerDWProton:
         for name in skip_names:
             assert _should_skip_directory(name, ForkName.DW_PROTON) is True
 
-        # DW-Proton should not skip its own directories
+        # Proton-DW should not skip its own directories
         assert (
             _should_skip_directory("dwproton-10.0-26-x86_64", ForkName.DW_PROTON)
             is False
@@ -187,12 +187,12 @@ class TestLinkManagerDWProton:
     def test_should_skip_directory_other_forks_skip_dwproton(
         self, tmp_path: Path
     ) -> None:
-        """Test that non-DW-Proton forks skip dwproton- directories."""
+        """Test that non-Proton-DW forks skip dwproton- directories."""
         for fork in [ForkName.GE_PROTON, ForkName.PROTON_EM, ForkName.CACHYOS]:
             assert _should_skip_directory("dwproton-10.0-26-x86_64", fork) is True
 
     def test_get_tag_name_dwproton(self, tmp_path: Path) -> None:
-        """Test _get_tag_name strips -x86_64 suffix for DW-Proton."""
+        """Test _get_tag_name strips -x86_64 suffix for Proton-DW."""
         entry = tmp_path / "dwproton-10.0-26-x86_64"
         entry.mkdir()
         assert _get_tag_name(entry, ForkName.DW_PROTON) == "dwproton-10.0-26"

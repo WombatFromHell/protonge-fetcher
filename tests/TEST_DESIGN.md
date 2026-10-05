@@ -580,7 +580,7 @@ graph LR
 ```mermaid
 graph TD
     subgraph E2E_COV["One E2E Test Covers 10+ Modules"]
-        USER["User: 'fetch latest GE-Proton'"]
+        USER["User: 'fetch latest Proton-GE'"]
         CLI_MOD["cli/core.py — entry + parsing"]
         DISPATCH_MOD["cli/dispatch.py — routing"]
         HANDLER_MOD["cli/handlers.py — operation handlers"]

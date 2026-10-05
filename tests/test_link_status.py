@@ -62,7 +62,7 @@ class TestListLinks:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         non_existent = extract_dir / "NonExistent"
         main_link.symlink_to(non_existent)
 
@@ -71,8 +71,8 @@ class TestListLinks:
             fork=ForkName.GE_PROTON,
         )
 
-        assert "GE-Proton" in links_info
-        assert links_info["GE-Proton"] is None  # Broken symlink
+        assert "Proton-GE" in links_info
+        assert links_info["Proton-GE"] is None  # Broken symlink
 
     def test_list_links_when_missing(self, tmp_path: Path) -> None:
         """Test listing links that don't exist."""
@@ -84,8 +84,8 @@ class TestListLinks:
             fork=ForkName.GE_PROTON,
         )
 
-        assert "GE-Proton" in links_info
-        assert links_info["GE-Proton"] is None
+        assert "Proton-GE" in links_info
+        assert links_info["Proton-GE"] is None
 
 
 class TestHasManagedLinks:
@@ -99,7 +99,7 @@ class TestHasManagedLinks:
         version_dir = extract_dir / "GE-Proton10-20"
         version_dir.mkdir()
 
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         main_link.symlink_to(version_dir)
 
         result = has_managed_links(
@@ -152,22 +152,22 @@ class TestBuildExpectedLinkMapping:
         v3.mkdir()
 
         link_names = (
-            tmp_path / "GE-Proton",
-            tmp_path / "GE-Proton-Fallback",
-            tmp_path / "GE-Proton-Fallback2",
+            tmp_path / "Proton-GE",
+            tmp_path / "Proton-GE-Fallback",
+            tmp_path / "Proton-GE-Fallback2",
         )
         top_3 = [
-            (("GE-Proton", 10, 20, 0), v1),
-            (("GE-Proton", 10, 19, 0), v2),
-            (("GE-Proton", 10, 18, 0), v3),
+            (("Proton-GE", 10, 20, 0), v1),
+            (("Proton-GE", 10, 19, 0), v2),
+            (("Proton-GE", 10, 18, 0), v3),
         ]
 
         mapping = build_expected_link_mapping(link_names, top_3)
 
         assert len(mapping) == 3
-        assert mapping["GE-Proton"] == str(v1)
-        assert mapping["GE-Proton-Fallback"] == str(v2)
-        assert mapping["GE-Proton-Fallback2"] == str(v3)
+        assert mapping["Proton-GE"] == str(v1)
+        assert mapping["Proton-GE-Fallback"] == str(v2)
+        assert mapping["Proton-GE-Fallback2"] == str(v3)
 
     def test_two_candidates(self, tmp_path: Path) -> None:
         """Test building mapping with only two versions."""
@@ -177,21 +177,21 @@ class TestBuildExpectedLinkMapping:
         v2.mkdir()
 
         link_names = (
-            tmp_path / "GE-Proton",
-            tmp_path / "GE-Proton-Fallback",
-            tmp_path / "GE-Proton-Fallback2",
+            tmp_path / "Proton-GE",
+            tmp_path / "Proton-GE-Fallback",
+            tmp_path / "Proton-GE-Fallback2",
         )
         top_3 = [
-            (("GE-Proton", 10, 20, 0), v1),
-            (("GE-Proton", 10, 19, 0), v2),
+            (("Proton-GE", 10, 20, 0), v1),
+            (("Proton-GE", 10, 19, 0), v2),
         ]
 
         mapping = build_expected_link_mapping(link_names, top_3)
 
         assert len(mapping) == 2
-        assert "GE-Proton" in mapping
-        assert "GE-Proton-Fallback" in mapping
-        assert "GE-Proton-Fallback2" not in mapping
+        assert "Proton-GE" in mapping
+        assert "Proton-GE-Fallback" in mapping
+        assert "Proton-GE-Fallback2" not in mapping
 
 
 class TestCompareLinkTargets:
@@ -202,8 +202,8 @@ class TestCompareLinkTargets:
         v1 = tmp_path / "GE-Proton10-20"
         v1.mkdir()
 
-        current = {"GE-Proton": str(v1)}
-        expected = {"GE-Proton": str(v1)}
+        current = {"Proton-GE": str(v1)}
+        expected = {"Proton-GE": str(v1)}
 
         assert compare_link_targets(current, expected) is True
 
@@ -214,29 +214,29 @@ class TestCompareLinkTargets:
         v1.mkdir()
         v2.mkdir()
 
-        current = {"GE-Proton": str(v1)}
-        expected = {"GE-Proton": str(v2)}
+        current = {"Proton-GE": str(v1)}
+        expected = {"Proton-GE": str(v2)}
 
         assert compare_link_targets(current, expected) is False
 
     def test_missing_link_returns_false(self, tmp_path: Path) -> None:
         """Test that missing link returns False."""
-        expected = {"GE-Proton": "/some/path"}
+        expected = {"Proton-GE": "/some/path"}
         current: dict[str, str | None] = {}
 
         assert compare_link_targets(current, expected) is False
 
     def test_broken_link_returns_false(self, tmp_path: Path) -> None:
         """Test that broken symlink (None target) returns False."""
-        current = {"GE-Proton": None}
-        expected = {"GE-Proton": "/some/path"}
+        current = {"Proton-GE": None}
+        expected = {"Proton-GE": "/some/path"}
 
         assert compare_link_targets(current, expected) is False
 
     def test_nonexistent_target_returns_false(self, tmp_path: Path) -> None:
         """Test that nonexistent target path returns False."""
-        current = {"GE-Proton": "/nonexistent/path"}
-        expected = {"GE-Proton": "/another/nonexistent/path"}
+        current = {"Proton-GE": "/nonexistent/path"}
+        expected = {"Proton-GE": "/another/nonexistent/path"}
 
         assert compare_link_targets(current, expected) is False
 
@@ -248,12 +248,12 @@ class TestCompareLinkTargets:
         v2.mkdir()
 
         current = {
-            "GE-Proton": str(v1),
-            "GE-Proton-Fallback": str(v2),
+            "Proton-GE": str(v1),
+            "Proton-GE-Fallback": str(v2),
         }
         expected = {
-            "GE-Proton": str(v1),
-            "GE-Proton-Fallback": str(v2),
+            "Proton-GE": str(v1),
+            "Proton-GE-Fallback": str(v2),
         }
 
         assert compare_link_targets(current, expected) is True
@@ -268,12 +268,12 @@ class TestCompareLinkTargets:
         v3.mkdir()
 
         current = {
-            "GE-Proton": str(v1),
-            "GE-Proton-Fallback": str(v2),
+            "Proton-GE": str(v1),
+            "Proton-GE-Fallback": str(v2),
         }
         expected = {
-            "GE-Proton": str(v1),
-            "GE-Proton-Fallback": str(v3),
+            "Proton-GE": str(v1),
+            "Proton-GE-Fallback": str(v3),
         }
 
         assert compare_link_targets(current, expected) is False

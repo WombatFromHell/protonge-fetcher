@@ -24,7 +24,7 @@ class TestGetInstalledVersions:
     """Tests for get_installed_versions function."""
 
     def test_ge_proton_versions(self, tmp_path: Path) -> None:
-        """Test getting GE-Proton installed versions."""
+        """Test getting Proton-GE installed versions."""
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
@@ -81,7 +81,7 @@ class TestGetLinkedVersions:
     """Tests for get_linked_versions function."""
 
     def test_linked_versions_ge_proton(self, tmp_path: Path) -> None:
-        """Test getting linked versions for GE-Proton."""
+        """Test getting linked versions for Proton-GE."""
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
@@ -92,8 +92,8 @@ class TestGetLinkedVersions:
         v2.mkdir()
 
         # Create symlinks
-        main_link = extract_dir / "GE-Proton"
-        fb_link = extract_dir / "GE-Proton-Fallback"
+        main_link = extract_dir / "Proton-GE"
+        fb_link = extract_dir / "Proton-GE-Fallback"
         main_link.symlink_to(v1)
         fb_link.symlink_to(v2)
 
@@ -117,7 +117,7 @@ class TestGetLinkedVersions:
         extract_dir.mkdir()
 
         # Create a broken symlink
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         main_link.symlink_to(extract_dir / "NonExistent")
 
         linked = get_linked_versions(extract_dir, ForkName.GE_PROTON)
@@ -152,7 +152,7 @@ class TestComputePrunePlan:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        # Create 5 GE-Proton version directories (higher number = newer)
+        # Create 5 Proton-GE version directories (higher number = newer)
         versions = []
         for i in range(5, 0, -1):
             v = extract_dir / f"GE-Proton10-{i}"
@@ -160,9 +160,9 @@ class TestComputePrunePlan:
             versions.append(v)
 
         # Create 3 symlinks pointing to older versions (simulating stale symlinks)
-        main_link = extract_dir / "GE-Proton"
-        fb1_link = extract_dir / "GE-Proton-Fallback"
-        fb2_link = extract_dir / "GE-Proton-Fallback2"
+        main_link = extract_dir / "Proton-GE"
+        fb1_link = extract_dir / "Proton-GE-Fallback"
+        fb2_link = extract_dir / "Proton-GE-Fallback2"
         main_link.symlink_to(versions[2])  # GE-Proton10-3
         fb1_link.symlink_to(versions[3])  # GE-Proton10-2
         fb2_link.symlink_to(versions[4])  # GE-Proton10-1
@@ -231,9 +231,9 @@ class TestComputePrunePlan:
             v.mkdir()
 
         # Link all 3 versions
-        main_link = extract_dir / "GE-Proton"
-        fb1_link = extract_dir / "GE-Proton-Fallback"
-        fb2_link = extract_dir / "GE-Proton-Fallback2"
+        main_link = extract_dir / "Proton-GE"
+        fb1_link = extract_dir / "Proton-GE-Fallback"
+        fb2_link = extract_dir / "Proton-GE-Fallback2"
         main_link.symlink_to(extract_dir / "GE-Proton10-3")
         fb1_link.symlink_to(extract_dir / "GE-Proton10-2")
         fb2_link.symlink_to(extract_dir / "GE-Proton10-1")

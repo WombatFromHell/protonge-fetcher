@@ -45,8 +45,8 @@ class TestGetExplicitFlags:
 
     def test_fork_flag_detected(self) -> None:
         """Test --fork flag is detected."""
-        assert get_explicit_flags(["--fork", "GE-Proton"])["fork"] is True
-        assert get_explicit_flags(["-f", "GE-Proton"])["fork"] is True
+        assert get_explicit_flags(["--fork", "Proton-GE"])["fork"] is True
+        assert get_explicit_flags(["-f", "Proton-GE"])["fork"] is True
 
     def test_release_flag_detected(self) -> None:
         """Test --release flag is detected."""
@@ -60,7 +60,7 @@ class TestGetExplicitFlags:
 
     def test_flag_with_equals(self) -> None:
         """Test flag with = syntax is detected."""
-        assert get_explicit_flags(["--fork=GE-Proton"])["fork"] is True
+        assert get_explicit_flags(["--fork=Proton-GE"])["fork"] is True
         assert get_explicit_flags(["--release=v1"])["release"] is True
 
 
@@ -74,15 +74,15 @@ class TestHasExplicitFork:
 
     def test_fork_flag_present(self) -> None:
         """Test --fork flag is detected."""
-        assert has_explicit_fork(["--fork", "GE-Proton"]) is True
+        assert has_explicit_fork(["--fork", "Proton-GE"]) is True
 
     def test_short_fork_flag_present(self) -> None:
         """Test -f flag is detected."""
-        assert has_explicit_fork(["-f", "GE-Proton"]) is True
+        assert has_explicit_fork(["-f", "Proton-GE"]) is True
 
     def test_fork_flag_with_equals(self) -> None:
         """Test --fork= value syntax."""
-        assert has_explicit_fork(["--fork=GE-Proton"]) is True
+        assert has_explicit_fork(["--fork=Proton-GE"]) is True
 
     def test_no_fork_flag(self) -> None:
         """Test absence of fork flag."""
@@ -317,7 +317,7 @@ class TestDispatch:
             rm=False,
             prune=False,
             check=False,
-            fork="GE-Proton",
+            fork="Proton-GE",
             dry_run=False,
         )
         ctx = CLIContext(
@@ -328,7 +328,7 @@ class TestDispatch:
             output_dir=Path("/tmp"),
             explicit_flags={"release": False},
         )
-        dispatch(ctx, ["-f", "GE-Proton"])
+        dispatch(ctx, ["-f", "Proton-GE"])
         mock_handler.assert_called_once()
 
 

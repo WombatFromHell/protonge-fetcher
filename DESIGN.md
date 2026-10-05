@@ -320,14 +320,14 @@ sequenceDiagram
     CLI->>GH: update_all_managed_forks()
     CLI->>FJ: update_all_managed_forks()
 
-    loop each fork on platform (GH: GE-Proton, Proton-EM, CachyOS)
+    loop each fork on platform (GH: Proton-GE, Proton-EM, Proton-CachyOS)
         GH->>LM: has_managed_links(fork)
         alt managed links exist
             GH->>GH: fetch_and_extract(fork)
         end
     end
 
-    loop each fork on platform (FJ: DW-Proton)
+    loop each fork on platform (FJ: Proton-DW)
         FJ->>LM: has_managed_links(fork)
         alt managed links exist
             FJ->>FJ: fetch_and_extract(fork)
@@ -394,10 +394,10 @@ graph TD
 graph LR
     FC["ForkConfig (common.py)\nSingle source of truth"]
 
-    GEP["GE-Proton"]
+    GEP["Proton-GE"]
     PEM["Proton-EM"]
-    CCH["CachyOS"]
-    DWP["DW-Proton"]
+    CCH["Proton-CachyOS"]
+    DWP["Proton-DW"]
 
     FC --> GEP
     FC --> PEM

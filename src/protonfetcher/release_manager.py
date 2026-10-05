@@ -176,12 +176,19 @@ class ReleaseManager:
     ) -> str:
         """Handle the API response to find the appropriate asset.
 
-        When multiple architecture variants exist, the x86_64 build is
-        preferred (our supported architecture).
+        The fork's expected asset name (from asset_template) takes precedence
+        when present. Otherwise, when multiple architecture variants exist,
+        the x86_64 build is preferred (our supported architecture).
         """
         matching_assets = self._find_matching_assets(assets, expected_extension)
 
         if matching_assets:
+            # Prefer the exact asset name expected for this fork
+            if tag is not None and fork is not None:
+                expected_name = get_proton_asset_name(tag, fork)
+                if any(asset["name"] == expected_name for asset in matching_assets):
+                    logger.debug(f"Found exact asset via API: {expected_name}")
+                    return expected_name
             # When multiple architecture variants exist, prefer x86_64
             for asset in matching_assets:
                 if "x86_64" in asset["name"]:

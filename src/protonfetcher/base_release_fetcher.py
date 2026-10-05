@@ -44,8 +44,8 @@ class BaseReleaseFetcher:
     behavior to `PlatformAdapter` instances.
 
     Subclasses are marker classes that only set the `platform` attribute:
-        - GitHubReleaseFetcher: GitHub-hosted forks (GE-Proton, Proton-EM, CachyOS)
-        - ForgejoReleaseFetcher: Forgejo-hosted forks (DW-Proton)
+        - GitHubReleaseFetcher: GitHub-hosted forks (Proton-GE, Proton-EM, Proton-CachyOS)
+        - ForgejoReleaseFetcher: Forgejo-hosted forks (Proton-DW)
     """
 
     platform: str = "github"

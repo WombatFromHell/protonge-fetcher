@@ -1,6 +1,6 @@
 """Forgejo release fetcher for ProtonFetcher.
 
-Handles DW-Proton and other forks hosted on Forgejo instances.
+Handles Proton-DW and other forks hosted on Forgejo instances.
 All platform-specific behavior is delegated to ForgejoPlatformAdapter.
 """
 

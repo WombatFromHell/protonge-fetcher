@@ -74,9 +74,9 @@ class TestBaseReleaseFetcherSharedWorkflow:
         result = fetcher.relink_fork(extract_dir, ForkName.DW_PROTON)
 
         assert result is True
-        assert (extract_dir / "DW-Proton").is_symlink()
-        assert (extract_dir / "DW-Proton-Fallback").is_symlink()
-        assert (extract_dir / "DW-Proton-Fallback2").is_symlink()
+        assert (extract_dir / "Proton-DW").is_symlink()
+        assert (extract_dir / "Proton-DW-Fallback").is_symlink()
+        assert (extract_dir / "Proton-DW-Fallback2").is_symlink()
 
     def test_relink_fork_no_versions_raises(
         self,
@@ -87,7 +87,7 @@ class TestBaseReleaseFetcherSharedWorkflow:
         extract_dir.mkdir()
 
         fetcher = ForgejoReleaseFetcher()
-        with pytest.raises(LinkManagementError, match="No valid DW-Proton versions"):
+        with pytest.raises(LinkManagementError, match="No valid Proton-DW versions"):
             fetcher.relink_fork(extract_dir, ForkName.DW_PROTON)
 
     def test_prune_releases_delegates_to_link_manager(
@@ -122,7 +122,7 @@ class TestBaseReleaseFetcherSharedWorkflow:
         mock_list = mocker.patch.object(
             fetcher.link_manager,
             "list_links",
-            return_value={"DW-Proton": "dwproton-10.0-26-x86_64"},
+            return_value={"Proton-DW": "dwproton-10.0-26-x86_64"},
         )
 
         extract_dir = tmp_path / "compatibilitytools.d"
@@ -131,7 +131,7 @@ class TestBaseReleaseFetcherSharedWorkflow:
         result = fetcher.list_links(extract_dir, ForkName.DW_PROTON)
 
         mock_list.assert_called_once_with(extract_dir, ForkName.DW_PROTON)
-        assert result == {"DW-Proton": "dwproton-10.0-26-x86_64"}
+        assert result == {"Proton-DW": "dwproton-10.0-26-x86_64"}
 
     def test_remove_release_delegates_to_link_manager(
         self,
@@ -488,8 +488,8 @@ class TestUpdateAllManagedForksPlatformFiltering:
         output_dir = tmp_path / "downloads"
         output_dir.mkdir()
 
-        # Create GE-Proton managed links so it's not skipped
-        (extract_dir / "GE-Proton").symlink_to(extract_dir / "GE-Proton10-20")
+        # Create Proton-GE managed links so it's not skipped
+        (extract_dir / "Proton-GE").symlink_to(extract_dir / "GE-Proton10-20")
         ge_dir = extract_dir / "GE-Proton10-20"
         ge_dir.mkdir()
 
@@ -505,9 +505,9 @@ class TestUpdateAllManagedForksPlatformFiltering:
 
         result = fetcher.update_all_managed_forks(output_dir, extract_dir)
 
-        # Only GE-Proton should be in results (GitHub platform)
+        # Only Proton-GE should be in results (GitHub platform)
         assert ForkName.GE_PROTON in result
-        # DW-Proton should NOT be in results (Forgejo platform)
+        # Proton-DW should NOT be in results (Forgejo platform)
         assert ForkName.DW_PROTON not in result
 
     def test_forgejo_fetcher_skips_github_forks(
@@ -526,8 +526,8 @@ class TestUpdateAllManagedForksPlatformFiltering:
         output_dir = tmp_path / "downloads"
         output_dir.mkdir()
 
-        # Create DW-Proton managed links so it's not skipped
-        (extract_dir / "DW-Proton").symlink_to(extract_dir / "dwproton-10.0-26-x86_64")
+        # Create Proton-DW managed links so it's not skipped
+        (extract_dir / "Proton-DW").symlink_to(extract_dir / "dwproton-10.0-26-x86_64")
         dw_dir = extract_dir / "dwproton-10.0-26-x86_64"
         dw_dir.mkdir()
 
@@ -543,9 +543,9 @@ class TestUpdateAllManagedForksPlatformFiltering:
 
         result = fetcher.update_all_managed_forks(output_dir, extract_dir)
 
-        # Only DW-Proton should be in results (Forgejo platform)
+        # Only Proton-DW should be in results (Forgejo platform)
         assert ForkName.DW_PROTON in result
-        # GE-Proton should NOT be in results (GitHub platform)
+        # Proton-GE should NOT be in results (GitHub platform)
         assert ForkName.GE_PROTON not in result
 
 
@@ -590,9 +590,9 @@ class TestDryRunWorkflow:
         mocker.patch(
             "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
-                Path("/tmp/GE-Proton"),
-                Path("/tmp/GE-Proton-Fallback"),
-                Path("/tmp/GE-Proton-Fallback2"),
+                Path("/tmp/Proton-GE"),
+                Path("/tmp/Proton-GE-Fallback"),
+                Path("/tmp/Proton-GE-Fallback2"),
             ),
         )
 
@@ -626,9 +626,9 @@ class TestDryRunWorkflow:
         mocker.patch(
             "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
-                Path("/tmp/GE-Proton"),
-                Path("/tmp/GE-Proton-Fallback"),
-                Path("/tmp/GE-Proton-Fallback2"),
+                Path("/tmp/Proton-GE"),
+                Path("/tmp/Proton-GE-Fallback"),
+                Path("/tmp/Proton-GE-Fallback2"),
             ),
         )
 
@@ -738,9 +738,9 @@ class TestDryRunOutput:
         mocker.patch(
             "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
-                Path("/tmp/GE-Proton"),
-                Path("/tmp/GE-Proton-Fallback"),
-                Path("/tmp/GE-Proton-Fallback2"),
+                Path("/tmp/Proton-GE"),
+                Path("/tmp/Proton-GE-Fallback"),
+                Path("/tmp/Proton-GE-Fallback2"),
             ),
         )
 
@@ -782,9 +782,9 @@ class TestDryRunOutput:
         mocker.patch(
             "protonfetcher.base_release_fetcher.get_link_names",
             return_value=(
-                Path("/tmp/extract/GE-Proton"),
-                Path("/tmp/extract/GE-Proton-Fallback"),
-                Path("/tmp/extract/GE-Proton-Fallback2"),
+                Path("/tmp/extract/Proton-GE"),
+                Path("/tmp/extract/Proton-GE-Fallback"),
+                Path("/tmp/extract/Proton-GE-Fallback2"),
             ),
         )
 
@@ -796,5 +796,5 @@ class TestDryRunOutput:
         )
 
         assert "Would create/update symlinks:" in caplog.text
-        assert "GE-Proton ->" in caplog.text
+        assert "Proton-GE ->" in caplog.text
         assert "Dry run complete - no changes made" in caplog.text

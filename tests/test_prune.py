@@ -225,9 +225,10 @@ class TestPruneOperationFlow:
         mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
         # Simulate 2 versions to prune for CachyOS
         mock_fetcher.prune_releases.side_effect = [
-            (["v3", "v2", "v1"], ["v0", "v-1"]),  # GE-Proton
+            (["v3", "v2", "v1"], ["v0", "v-1"]),  # Proton-GE
             (["v3", "v2", "v1"], []),  # Proton-EM
             (["v3", "v2", "v1"], ["v0", "v-1"]),  # CachyOS
+            (["v3", "v2", "v1"], []),  # Proton-Wineland
         ]
         mock_forgejo_fetcher.prune_releases.return_value = (["v3", "v2", "v1"], [])
 
@@ -294,12 +295,13 @@ class TestPruneOperationFlow:
 
         handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
-        # Should call prune_releases for all 4 forks
-        assert mock_fetcher.prune_releases.call_count == 3
+        # Should call prune_releases for all 5 forks
+        assert mock_fetcher.prune_releases.call_count == 4
         calls = mock_fetcher.prune_releases.call_args_list
         assert calls[0][0][1] == ForkName.GE_PROTON
         assert calls[1][0][1] == ForkName.PROTON_EM
         assert calls[2][0][1] == ForkName.CACHYOS
+        assert calls[3][0][1] == ForkName.WINELAND
         assert mock_forgejo_fetcher.prune_releases.call_count == 1
         assert mock_forgejo_fetcher.prune_releases.call_args[0][1] == ForkName.DW_PROTON
 
@@ -311,16 +313,17 @@ class TestPruneOperationFlow:
         """Test pruning with user confirmation (yes)."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
         mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
-        # Only GE-Proton has versions to prune
+        # Only Proton-GE has versions to prune
         mock_fetcher.prune_releases.side_effect = [
-            (["v3", "v2", "v1"], ["v0"]),  # GE-Proton dry run
+            (["v3", "v2", "v1"], ["v0"]),  # Proton-GE dry run
             (["v3", "v2", "v1"], []),  # Proton-EM dry run
             (["v3", "v2", "v1"], []),  # CachyOS dry run
-            (["v3", "v2", "v1"], ["v0"]),  # GE-Proton actual prune
+            (["v3", "v2", "v1"], []),  # Proton-Wineland dry run
+            (["v3", "v2", "v1"], ["v0"]),  # Proton-GE actual prune
         ]
         mock_forgejo_fetcher.prune_releases.side_effect = [
-            (["v3", "v2", "v1"], []),  # DW-Proton dry run
-            (["v3", "v2", "v1"], []),  # DW-Proton actual prune
+            (["v3", "v2", "v1"], []),  # Proton-DW dry run
+            (["v3", "v2", "v1"], []),  # Proton-DW actual prune
         ]
 
         args = mocker.MagicMock()
@@ -349,11 +352,12 @@ class TestPruneOperationFlow:
         """Test pruning with user declining (no)."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
         mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
-        # Only GE-Proton has versions to prune
+        # Only Proton-GE has versions to prune
         mock_fetcher.prune_releases.side_effect = [
-            (["v3", "v2", "v1"], ["v0"]),  # GE-Proton dry run
+            (["v3", "v2", "v1"], ["v0"]),  # Proton-GE dry run
             (["v3", "v2", "v1"], []),  # Proton-EM dry run
             (["v3", "v2", "v1"], []),  # CachyOS dry run
+            (["v3", "v2", "v1"], []),  # Proton-Wineland dry run
         ]
         mock_forgejo_fetcher.prune_releases.return_value = (["v3", "v2", "v1"], [])
 
@@ -384,16 +388,17 @@ class TestPruneOperationFlow:
         """Test that pruning shows warning about prefix breakage."""
         mock_fetcher = mocker.MagicMock(spec=GitHubReleaseFetcher)
         mock_forgejo_fetcher = mocker.MagicMock(spec=ForgejoReleaseFetcher)
-        # Only GE-Proton has versions to prune
+        # Only Proton-GE has versions to prune
         mock_fetcher.prune_releases.side_effect = [
-            (["v3", "v2", "v1"], ["v0"]),  # GE-Proton dry run
+            (["v3", "v2", "v1"], ["v0"]),  # Proton-GE dry run
             (["v3", "v2", "v1"], []),  # Proton-EM dry run
             (["v3", "v2", "v1"], []),  # CachyOS dry run
-            (["v3", "v2", "v1"], ["v0"]),  # GE-Proton actual prune
+            (["v3", "v2", "v1"], []),  # Proton-Wineland dry run
+            (["v3", "v2", "v1"], ["v0"]),  # Proton-GE actual prune
         ]
         mock_forgejo_fetcher.prune_releases.side_effect = [
-            (["v3", "v2", "v1"], []),  # DW-Proton dry run
-            (["v3", "v2", "v1"], []),  # DW-Proton actual prune
+            (["v3", "v2", "v1"], []),  # Proton-DW dry run
+            (["v3", "v2", "v1"], []),  # Proton-DW actual prune
         ]
 
         args = mocker.MagicMock()
@@ -490,7 +495,7 @@ class TestPruneE2E:
         extract_dir.mkdir()
 
         # Create exactly 3 versions for each fork (nothing to prune)
-        # GE-Proton format: GE-Proton10-X
+        # Proton-GE format: GE-Proton10-X
         for i in range(3, 0, -1):
             (extract_dir / f"GE-Proton10-{i}").mkdir()
         # Proton-EM format: proton-EM-10.0-X
@@ -531,7 +536,7 @@ class TestPruneE2E:
         extract_dir = tmp_path / "compatibilitytools.d"
         extract_dir.mkdir()
 
-        # Create 5 GE-Proton versions (2 should be pruned: oldest ones)
+        # Create 5 Proton-GE versions (2 should be pruned: oldest ones)
         for i in range(5, 0, -1):
             (extract_dir / f"GE-Proton10-{i}").mkdir()
 
@@ -543,7 +548,7 @@ class TestPruneE2E:
         mock_forgejo_fetcher.prune_releases = link_manager.prune_releases
 
         args = mocker.MagicMock()
-        args.fork = "GE-Proton"
+        args.fork = "Proton-GE"
         args.keep = 3
         args.dry_run = True
 

@@ -7,10 +7,11 @@ from typing import Iterator, Protocol
 
 
 class ForkName(StrEnum):
-    GE_PROTON = "GE-Proton"
+    GE_PROTON = "Proton-GE"
     PROTON_EM = "Proton-EM"
-    CACHYOS = "CachyOS"
-    DW_PROTON = "DW-Proton"
+    CACHYOS = "Proton-CachyOS"
+    DW_PROTON = "Proton-DW"
+    WINELAND = "Proton-Wineland"
 
 
 # Type aliases for better readability
@@ -161,9 +162,17 @@ FORKS: dict[ForkName, ForkConfig] = {
         version_pattern=r"GE-Proton(\d+)-(\d+)",
         version_prefix="GE-Proton",
         is_ge_proton=True,
-        link_names=("GE-Proton", "GE-Proton-Fallback", "GE-Proton-Fallback2"),
+        link_names=("Proton-GE", "Proton-GE-Fallback", "Proton-GE-Fallback2"),
         skip_prefixes=frozenset(
-            ["EM-", "proton-EM-", "cachyos-", "proton-cachyos-", "dwproton-"]
+            [
+                "EM-",
+                "proton-EM-",
+                "cachyos-",
+                "proton-cachyos-",
+                "dwproton-",
+                "wineland-",
+                "proton-wineland-",
+            ]
         ),
         asset_template="{tag}.tar.gz",
         dir_name_templates=("{tag}-x86_64", "{tag}"),
@@ -178,7 +187,14 @@ FORKS: dict[ForkName, ForkConfig] = {
         is_ge_proton=False,
         link_names=("Proton-EM", "Proton-EM-Fallback", "Proton-EM-Fallback2"),
         skip_prefixes=frozenset(
-            ["GE-Proton", "cachyos-", "proton-cachyos-", "dwproton-"]
+            [
+                "GE-Proton",
+                "cachyos-",
+                "proton-cachyos-",
+                "dwproton-",
+                "wineland-",
+                "proton-wineland-",
+            ]
         ),
         asset_template="proton-{tag}.tar.xz",
         dir_name_templates=("proton-{tag}", "{tag}"),
@@ -194,8 +210,21 @@ FORKS: dict[ForkName, ForkConfig] = {
         version_pattern=r"(?:proton-)?cachyos-(\d+)\.(\d+)-(\d+)-slr(?:-x86_64)?",
         version_prefix="cachyos",
         is_ge_proton=False,
-        link_names=("CachyOS", "CachyOS-Fallback", "CachyOS-Fallback2"),
-        skip_prefixes=frozenset(["GE-Proton", "EM-", "proton-EM-", "dwproton-"]),
+        link_names=(
+            "Proton-CachyOS",
+            "Proton-CachyOS-Fallback",
+            "Proton-CachyOS-Fallback2",
+        ),
+        skip_prefixes=frozenset(
+            [
+                "GE-Proton",
+                "EM-",
+                "proton-EM-",
+                "dwproton-",
+                "wineland-",
+                "proton-wineland-",
+            ]
+        ),
         asset_template="proton-{tag}-x86_64.tar.xz",
         dir_name_templates=("proton-{tag}-x86_64", "proton-{tag}", "{tag}"),
         dir_name_patterns=(
@@ -210,14 +239,39 @@ FORKS: dict[ForkName, ForkConfig] = {
         version_pattern=r"dwproton-(\d+)\.(\d+)-(\d+)",
         version_prefix="dwproton",
         is_ge_proton=False,
-        link_names=("DW-Proton", "DW-Proton-Fallback", "DW-Proton-Fallback2"),
+        link_names=("Proton-DW", "Proton-DW-Fallback", "Proton-DW-Fallback2"),
         skip_prefixes=frozenset(
-            ["GE-Proton", "EM-", "cachyos-", "proton-cachyos-", "proton-EM-"]
+            [
+                "GE-Proton",
+                "EM-",
+                "cachyos-",
+                "proton-cachyos-",
+                "proton-EM-",
+                "wineland-",
+                "proton-wineland-",
+            ]
         ),
         asset_template="{tag}-x86_64.tar.xz",
         dir_name_templates=("{tag}-x86_64", "{tag}"),
         dir_name_patterns=(r"^dwproton-\d+\.\d+-\d+-x86_64(?:-.*)?$",),
         platform="forgejo",
+    ),
+    ForkName.WINELAND: ForkConfig(
+        repo="nanomatters/proton-cachyos",
+        archive_format=".tar.xz",
+        version_pattern=r"(?:proton-)?wineland-(\d+)\.(\d+)-(\d+)",
+        version_prefix="wineland",
+        is_ge_proton=False,
+        link_names=(
+            "Proton-Wineland",
+            "Proton-Wineland-Fallback",
+            "Proton-Wineland-Fallback2",
+        ),
+        skip_prefixes=frozenset(["GE-Proton", "EM-", "cachyos-", "dwproton-"]),
+        asset_template="proton-{tag}-x86_64_v3.tar.xz",
+        dir_name_templates=("proton-{tag}-x86_64_v3",),
+        dir_name_patterns=(r"^proton-wineland-\d+\.\d+-\d+(?:\.\d+)?(?:-.*)?$",),
+        platform="github",
     ),
 }
 DEFAULT_FORK: ForkName = ForkName.GE_PROTON

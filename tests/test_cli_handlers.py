@@ -56,7 +56,7 @@ class TestHandleCheckOperation:
         )
 
         args = MagicMock()
-        args.fork = "GE-Proton"
+        args.fork = "Proton-GE"
         args.check = True
 
         forgejo_fetcher = MagicMock()
@@ -66,7 +66,7 @@ class TestHandleCheckOperation:
         assert exc_info.value.code == 1
 
         captured = capsys.readouterr()
-        assert "New release available for GE-Proton: GE-Proton10-21!" in captured.out
+        assert "New release available for Proton-GE: GE-Proton10-21!" in captured.out
 
     def test_check_single_fork_up_to_date(
         self,
@@ -96,7 +96,7 @@ class TestHandleCheckOperation:
         )
 
         args = MagicMock()
-        args.fork = "GE-Proton"
+        args.fork = "Proton-GE"
         args.check = True
 
         forgejo_fetcher = MagicMock()
@@ -106,7 +106,7 @@ class TestHandleCheckOperation:
         assert exc_info.value.code == 0
 
         captured = capsys.readouterr()
-        assert "GE-Proton: up-to-date" in captured.out
+        assert "Proton-GE: up-to-date" in captured.out
 
 
 # =============================================================================
@@ -135,15 +135,15 @@ class TestHandleLsOperation:
         (version_dir / "version").write_text("GE-Proton10-20")
 
         fs = FileSystemClient()
-        link_path = extract_dir / "GE-Proton"
+        link_path = extract_dir / "Proton-GE"
         fs.symlink_to(link_path, version_dir, target_is_directory=True)
 
         mock_fetcher = MagicMock()
         mock_forgejo_fetcher = MagicMock()
         mock_fetcher.link_manager.list_links.return_value = {
-            "GE-Proton": str(version_dir),
-            "GE-Proton-Fallback": None,
-            "GE-Proton-Fallback2": None,
+            "Proton-GE": str(version_dir),
+            "Proton-GE-Fallback": None,
+            "Proton-GE-Fallback2": None,
         }
         mock_forgejo_fetcher.link_manager.list_links.return_value = {
             "Proton-EM": None,
@@ -160,7 +160,7 @@ class TestHandleLsOperation:
         handle_ls_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
-        assert "Links for GE-Proton" in captured.out
+        assert "Links for Proton-GE" in captured.out
 
     def test_ls_with_fork_filter(
         self,
@@ -179,25 +179,25 @@ class TestHandleLsOperation:
         (version_dir / "version").write_text("GE-Proton10-20")
 
         fs = FileSystemClient()
-        link_path = extract_dir / "GE-Proton"
+        link_path = extract_dir / "Proton-GE"
         fs.symlink_to(link_path, version_dir, target_is_directory=True)
 
         mock_fetcher = MagicMock()
         mock_forgejo_fetcher = MagicMock()
         mock_fetcher.link_manager.list_links.return_value = {
-            "GE-Proton": str(version_dir),
-            "GE-Proton-Fallback": None,
-            "GE-Proton-Fallback2": None,
+            "Proton-GE": str(version_dir),
+            "Proton-GE-Fallback": None,
+            "Proton-GE-Fallback2": None,
         }
         mock_fetcher.link_manager.get_installed_versions.return_value = []
         mock_fetcher.link_manager.get_linked_versions.return_value = []
 
-        args = argparse.Namespace(ls=True, fork="GE-Proton")
+        args = argparse.Namespace(ls=True, fork="Proton-GE")
 
         handle_ls_operation(mock_fetcher, mock_forgejo_fetcher, args, extract_dir)
 
         captured = capsys.readouterr()
-        assert "Links for GE-Proton" in captured.out
+        assert "Links for Proton-GE" in captured.out
 
 
 # =============================================================================
@@ -233,7 +233,7 @@ class TestHandleListOperation:
         forgejo_fetcher = MagicMock()
 
         args = MagicMock()
-        args.fork = "GE-Proton"
+        args.fork = "Proton-GE"
 
         handle_list_operation(fetcher, forgejo_fetcher, args, tmp_path)
 
@@ -260,7 +260,7 @@ class TestHandleRelinkOperation:
         mock_forgejo_fetcher = MagicMock()
 
         args = MagicMock()
-        args.fork = "GE-Proton"
+        args.fork = "Proton-GE"
 
         handle_relink_operation(mock_fetcher, mock_forgejo_fetcher, args, tmp_path)
 
@@ -286,7 +286,7 @@ class TestHandleRmOperation:
         mock_forgejo_fetcher = MagicMock()
 
         args = MagicMock()
-        args.fork = "GE-Proton"
+        args.fork = "Proton-GE"
         args.rm = True
         args.release = "GE-Proton10-20"
 
@@ -305,13 +305,13 @@ class TestHandleRmOperation:
         mock_forgejo_fetcher = MagicMock()
 
         # Create actual symlinks so _remove_all_fork_symlinks has something to remove
-        main_link = tmp_path / "CachyOS"
-        fb1_link = tmp_path / "CachyOS-Fallback"
+        main_link = tmp_path / "Proton-CachyOS"
+        fb1_link = tmp_path / "Proton-CachyOS-Fallback"
         main_link.symlink_to(tmp_path / "proton-cachyos-11.0")
         fb1_link.symlink_to(tmp_path / "proton-cachyos-10.0")
 
         args = MagicMock()
-        args.fork = "CachyOS"
+        args.fork = "Proton-CachyOS"
         args.rm = True
         args.release = None  # No tag — removes all symlinks
 
@@ -322,7 +322,7 @@ class TestHandleRmOperation:
         mock_fetcher.link_manager.remove_release.assert_not_called()
         captured = capsys.readouterr()
         assert "Will remove 2 item(s)" in captured.out
-        assert "Removed all symlinks for CachyOS" in captured.out
+        assert "Removed all symlinks for Proton-CachyOS" in captured.out
 
     def test_rm_with_fork_no_symlinks_found(
         self,
@@ -355,11 +355,11 @@ class TestHandleRmOperation:
         mock_forgejo_fetcher = MagicMock()
 
         # Create only one symlink
-        main_link = tmp_path / "CachyOS"
+        main_link = tmp_path / "Proton-CachyOS"
         main_link.symlink_to(tmp_path / "proton-cachyos-11.0")
 
         args = MagicMock()
-        args.fork = "CachyOS"
+        args.fork = "Proton-CachyOS"
         args.rm = True
         args.release = None
 
@@ -367,7 +367,7 @@ class TestHandleRmOperation:
 
         captured = capsys.readouterr()
         assert "Will remove" not in captured.out  # no confirmation prompt
-        assert "Removed all symlinks for CachyOS" in captured.out
+        assert "Removed all symlinks for Proton-CachyOS" in captured.out
 
     def test_rm_with_fork_cancelled(
         self,
@@ -384,13 +384,13 @@ class TestHandleRmOperation:
         (tmp_path / "proton-cachyos-10.0").mkdir()
 
         # Create actual symlinks
-        main_link = tmp_path / "CachyOS"
-        fb1_link = tmp_path / "CachyOS-Fallback"
+        main_link = tmp_path / "Proton-CachyOS"
+        fb1_link = tmp_path / "Proton-CachyOS-Fallback"
         main_link.symlink_to(tmp_path / "proton-cachyos-11.0")
         fb1_link.symlink_to(tmp_path / "proton-cachyos-10.0")
 
         args = MagicMock()
-        args.fork = "CachyOS"
+        args.fork = "Proton-CachyOS"
         args.rm = True
         args.release = None
 
@@ -416,7 +416,7 @@ class TestHandleRmOperation:
         mock_forgejo_fetcher = MagicMock()
 
         args = MagicMock()
-        args.fork = "GE-Proton"
+        args.fork = "Proton-GE"
         args.rm = True
         args.release = "GE-Proton10-15"
 
@@ -449,7 +449,7 @@ class TestHandlePruneOperation:
         mock_fetcher.prune_releases.return_value = ([], [])
         mock_forgejo_fetcher.prune_releases.return_value = ([], [])
 
-        args = argparse.Namespace(fork="GE-Proton", keep=3)
+        args = argparse.Namespace(fork="Proton-GE", keep=3)
 
         handle_prune_operation(mock_fetcher, mock_forgejo_fetcher, args, tmp_path)
 

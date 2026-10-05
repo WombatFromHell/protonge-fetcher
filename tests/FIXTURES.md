@@ -222,7 +222,7 @@ def test_extraction(extract_dir: Path):
 | GE-Proton | `GE-Proton10-20`, `GE-Proton10-19`, `GE-Proton10-18` |
 | Proton-EM | `proton-EM-10.0-30`, `proton-EM-10.0-29`, `proton-EM-10.0-28` |
 | CachyOS | `proton-cachyos-10.0-20260207-slr-x86_64`, `...-20260206-...`, `...-20260205-...` |
-| DW-Proton | `dwproton-10.0-26-x86_64`, `dwproton-10.0-25-x86_64`, `dwproton-10.0-24-x86_64` |
+| Proton-DW | `dwproton-10.0-26-x86_64`, `dwproton-10.0-25-x86_64`, `dwproton-10.0-24-x86_64` |
 
 **Usage:**
 ```python
@@ -280,13 +280,13 @@ def test_symlink_creation(link_manager: LinkManager, mock_filesystem_factory, tm
     version_dir.mkdir()
 
     link_manager.create_symlinks(
-        main=extract_dir / "GE-Proton",
-        fb1=extract_dir / "GE-Proton-Fallback",
-        fb2=extract_dir / "GE-Proton-Fallback2",
+        main=extract_dir / "Proton-GE",
+        fb1=extract_dir / "Proton-GE-Fallback",
+        fb2=extract_dir / "Proton-GE-Fallback2",
         top_3=[(("GE-Proton", 10, 20, 0), version_dir)],
     )
 
-    assert (extract_dir / "GE-Proton").is_symlink()
+    assert (extract_dir / "Proton-GE").is_symlink()
 ```
 
 ## Helper Fixtures

@@ -23,17 +23,17 @@ class TestCreateSymlinkSpecs:
         """Test creating specs with only one version."""
         v1 = tmp_path / "GE-Proton10-20"
         v1.mkdir()
-        candidates = [(("GE-Proton", 10, 20, 0), v1)]
+        candidates = [(("Proton-GE", 10, 20, 0), v1)]
 
         specs = create_symlink_specs(
-            main=tmp_path / "GE-Proton",
-            fb1=tmp_path / "GE-Proton-Fallback",
-            fb2=tmp_path / "GE-Proton-Fallback2",
+            main=tmp_path / "Proton-GE",
+            fb1=tmp_path / "Proton-GE-Fallback",
+            fb2=tmp_path / "Proton-GE-Fallback2",
             top_3=candidates,
         )
 
         assert len(specs) == 1
-        assert specs[0].link_path.name == "GE-Proton"
+        assert specs[0].link_path.name == "Proton-GE"
         assert specs[0].target_path == v1
 
     def test_two_candidates(self, tmp_path: Path) -> None:
@@ -43,20 +43,20 @@ class TestCreateSymlinkSpecs:
         v1.mkdir()
         v2.mkdir()
         candidates = [
-            (("GE-Proton", 10, 20, 0), v1),
-            (("GE-Proton", 10, 19, 0), v2),
+            (("Proton-GE", 10, 20, 0), v1),
+            (("Proton-GE", 10, 19, 0), v2),
         ]
 
         specs = create_symlink_specs(
-            main=tmp_path / "GE-Proton",
-            fb1=tmp_path / "GE-Proton-Fallback",
-            fb2=tmp_path / "GE-Proton-Fallback2",
+            main=tmp_path / "Proton-GE",
+            fb1=tmp_path / "Proton-GE-Fallback",
+            fb2=tmp_path / "Proton-GE-Fallback2",
             top_3=candidates,
         )
 
         assert len(specs) == 2
-        assert specs[0].link_path.name == "GE-Proton"
-        assert specs[1].link_path.name == "GE-Proton-Fallback"
+        assert specs[0].link_path.name == "Proton-GE"
+        assert specs[1].link_path.name == "Proton-GE-Fallback"
 
     def test_three_candidates(self, tmp_path: Path) -> None:
         """Test creating specs with three versions."""
@@ -67,23 +67,23 @@ class TestCreateSymlinkSpecs:
         v2.mkdir()
         v3.mkdir()
         candidates = [
-            (("GE-Proton", 10, 20, 0), v1),
-            (("GE-Proton", 10, 19, 0), v2),
-            (("GE-Proton", 10, 18, 0), v3),
+            (("Proton-GE", 10, 20, 0), v1),
+            (("Proton-GE", 10, 19, 0), v2),
+            (("Proton-GE", 10, 18, 0), v3),
         ]
 
         specs = create_symlink_specs(
-            main=tmp_path / "GE-Proton",
-            fb1=tmp_path / "GE-Proton-Fallback",
-            fb2=tmp_path / "GE-Proton-Fallback2",
+            main=tmp_path / "Proton-GE",
+            fb1=tmp_path / "Proton-GE-Fallback",
+            fb2=tmp_path / "Proton-GE-Fallback2",
             top_3=candidates,
         )
 
         assert len(specs) == 3
         assert [s.link_path.name for s in specs] == [
-            "GE-Proton",
-            "GE-Proton-Fallback",
-            "GE-Proton-Fallback2",
+            "Proton-GE",
+            "Proton-GE-Fallback",
+            "Proton-GE-Fallback2",
         ]
 
 
@@ -98,17 +98,17 @@ class TestCreateSymlinks:
         version_dir = extract_dir / "GE-Proton10-20"
         version_dir.mkdir()
 
-        candidates = [(("GE-Proton", 10, 20, 0), version_dir)]
+        candidates = [(("Proton-GE", 10, 20, 0), version_dir)]
 
         result = create_symlinks(
-            main=extract_dir / "GE-Proton",
-            fb1=extract_dir / "GE-Proton-Fallback",
-            fb2=extract_dir / "GE-Proton-Fallback2",
+            main=extract_dir / "Proton-GE",
+            fb1=extract_dir / "Proton-GE-Fallback",
+            fb2=extract_dir / "Proton-GE-Fallback2",
             top_3=candidates,
         )
 
         assert result is True
-        main_link = extract_dir / "GE-Proton"
+        main_link = extract_dir / "Proton-GE"
         assert main_link.exists()
         assert main_link.is_symlink()
         assert main_link.resolve() == version_dir
@@ -126,23 +126,23 @@ class TestCreateSymlinks:
         v3.mkdir()
 
         candidates = [
-            (("GE-Proton", 10, 20, 0), v1),
-            (("GE-Proton", 10, 19, 0), v2),
-            (("GE-Proton", 10, 18, 0), v3),
+            (("Proton-GE", 10, 20, 0), v1),
+            (("Proton-GE", 10, 19, 0), v2),
+            (("Proton-GE", 10, 18, 0), v3),
         ]
 
         result = create_symlinks(
-            main=extract_dir / "GE-Proton",
-            fb1=extract_dir / "GE-Proton-Fallback",
-            fb2=extract_dir / "GE-Proton-Fallback2",
+            main=extract_dir / "Proton-GE",
+            fb1=extract_dir / "Proton-GE-Fallback",
+            fb2=extract_dir / "Proton-GE-Fallback2",
             top_3=candidates,
         )
 
         assert result is True
 
-        main = extract_dir / "GE-Proton"
-        fb1 = extract_dir / "GE-Proton-Fallback"
-        fb2 = extract_dir / "GE-Proton-Fallback2"
+        main = extract_dir / "Proton-GE"
+        fb1 = extract_dir / "Proton-GE-Fallback"
+        fb2 = extract_dir / "Proton-GE-Fallback2"
 
         assert main.is_symlink() and main.resolve() == v1
         assert fb1.is_symlink() and fb1.resolve() == v2
@@ -185,9 +185,9 @@ class TestCleanupUnwantedLinks:
     def test_removes_unwanted_symlink(self, tmp_path: Path) -> None:
         """Test that symlinks not in wants are removed."""
         fs = FileSystemClient()
-        main = tmp_path / "GE-Proton"
-        fb1 = tmp_path / "GE-Proton-Fallback"
-        fb2 = tmp_path / "GE-Proton-Fallback2"
+        main = tmp_path / "Proton-GE"
+        fb1 = tmp_path / "Proton-GE-Fallback"
+        fb2 = tmp_path / "Proton-GE-Fallback2"
 
         # Create all three symlinks
         v1 = tmp_path / "GE-Proton10-20"
@@ -207,9 +207,9 @@ class TestCleanupUnwantedLinks:
     def test_removes_conflicting_directory(self, tmp_path: Path) -> None:
         """Test that real directories conflicting with wanted symlinks are removed."""
         fs = FileSystemClient()
-        main = tmp_path / "GE-Proton"
-        fb1 = tmp_path / "GE-Proton-Fallback"
-        fb2 = tmp_path / "GE-Proton-Fallback2"
+        main = tmp_path / "Proton-GE"
+        fb1 = tmp_path / "Proton-GE-Fallback"
+        fb2 = tmp_path / "Proton-GE-Fallback2"
 
         # Create a real directory at fb1
         fb1.mkdir()
@@ -254,7 +254,7 @@ class TestHandleExistingSymlink:
     def test_correct_symlink_unchanged(self, tmp_path: Path) -> None:
         """Test that correct symlink is not modified."""
         fs = FileSystemClient()
-        link = tmp_path / "GE-Proton"
+        link = tmp_path / "Proton-GE"
         v1 = tmp_path / "GE-Proton10-20"
         v1.mkdir()
         fs.symlink_to(link, v1, target_is_directory=True)
@@ -267,7 +267,7 @@ class TestHandleExistingSymlink:
     def test_wrong_symlink_removed(self, tmp_path: Path) -> None:
         """Test that wrong symlink is removed."""
         fs = FileSystemClient()
-        link = tmp_path / "GE-Proton"
+        link = tmp_path / "Proton-GE"
         v1 = tmp_path / "GE-Proton10-20"
         v2 = tmp_path / "GE-Proton10-19"
         v1.mkdir()
@@ -281,7 +281,7 @@ class TestHandleExistingSymlink:
     def test_broken_symlink_removed(self, tmp_path: Path) -> None:
         """Test that broken symlink is removed."""
         fs = FileSystemClient()
-        link = tmp_path / "GE-Proton"
+        link = tmp_path / "Proton-GE"
         v1 = tmp_path / "GE-Proton10-20"
         v1.mkdir()
         fs.symlink_to(link, v1, target_is_directory=True)

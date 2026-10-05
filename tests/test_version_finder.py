@@ -34,6 +34,11 @@ class TestGetTagName:
                 "cachyos-10.0-20260207-slr",
             ),
             ("dwproton-10.0-26-x86_64", ForkName.DW_PROTON, "dwproton-10.0-26"),
+            (
+                "proton-wineland-11.0-20261005-x86_64_v3",
+                ForkName.WINELAND,
+                "wineland-11.0-20261005",
+            ),
         ],
     )
     def test_tag_extraction(
@@ -57,6 +62,9 @@ class TestShouldSkipDirectory:
             ("EM-10.0-30", ForkName.PROTON_EM, False),
             ("GE-Proton10-20", ForkName.CACHYOS, True),
             ("cachyos-10.0-20260207-slr", ForkName.CACHYOS, False),
+            ("wineland-11.0-20261005", ForkName.GE_PROTON, True),
+            ("proton-wineland-11.0-20261005-x86_64_v3", ForkName.DW_PROTON, True),
+            ("wineland-11.0-20261005", ForkName.WINELAND, False),
         ],
     )
     def test_skip_logic(
@@ -94,6 +102,14 @@ class TestIsValidProtonDirectory:
                 ForkName.DW_PROTON,
                 ["dwproton-10.0-26-x86_64", "dwproton-10.0-25-x86_64"],
                 ["GE-Proton10-20", "EM-10.0-30"],
+            ),
+            (
+                ForkName.WINELAND,
+                [
+                    "proton-wineland-11.0-20261005-x86_64_v3",
+                    "proton-wineland-11.0-20260928.1-x86_64_v3",
+                ],
+                ["GE-Proton10-20", "proton-cachyos-10.0-20260207-slr-x86_64"],
             ),
         ],
     )
@@ -183,6 +199,33 @@ class TestFindVersionCandidates:
 
         assert len(ge_candidates) == 2
         assert len(em_candidates) == 1
+
+    def test_skip_other_fork_directories_wineland(self, tmp_path: Path) -> None:
+        """Test that Wineland and other-fork directories are skipped correctly."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        (extract_dir / "proton-wineland-11.0-20261005-x86_64_v3").mkdir()
+        (extract_dir / "proton-wineland-11.0-20260928-x86_64_v3").mkdir()
+        (extract_dir / "GE-Proton10-20").mkdir()
+
+        fs = FileSystemClient()
+
+        ge_candidates = find_version_candidates(
+            extract_dir=extract_dir,
+            fork=ForkName.GE_PROTON,
+            file_system=fs,
+        )
+
+        wineland_candidates = find_version_candidates(
+            extract_dir=extract_dir,
+            fork=ForkName.WINELAND,
+            file_system=fs,
+        )
+
+        assert len(ge_candidates) == 1
+        assert ge_candidates[0][1].name == "GE-Proton10-20"
+        assert len(wineland_candidates) == 2
 
     def test_skip_non_proton_directories(
         self,

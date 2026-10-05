@@ -30,7 +30,7 @@ class TestFetchLatestTag:
         mock_network_client: Any,
         mock_filesystem_client: Any,
     ) -> None:
-        """Test fetching latest GE-Proton tag via redirect."""
+        """Test fetching latest Proton-GE tag via redirect."""
         # Arrange
         mock_head_response = HttpResponse(
             status=200,
@@ -113,7 +113,7 @@ class TestFindAssetByName:
         mock_network_client: Any,
         mock_filesystem_client: Any,
     ) -> None:
-        """Test finding GE-Proton asset via GitHub API."""
+        """Test finding Proton-GE asset via GitHub API."""
         # Arrange
         api_response = HttpResponse(
             status=200,
@@ -234,12 +234,75 @@ class TestFindAssetByName:
         # Assert - Should specifically select x86_64, not arm64 or other variants
         assert asset_name == "proton-cachyos-10.0-20260207-slr-x86_64.tar.xz"
 
+    def test_find_asset_via_api_wineland_selects_v3(
+        self,
+        mock_network_client: Any,
+        mock_filesystem_client: Any,
+    ) -> None:
+        """Test finding Proton-Wineland _v3 asset via GitHub API.
+
+        Wineland releases ship -x86_64, -x86_64_v3 and -x86_64_wow64 variants,
+        all of which contain "x86_64" in the name. The fork's asset template
+        (the _v3 variant) must take precedence over the arch heuristic.
+        """
+        # Arrange - Simulate Wineland release with multiple variants
+        api_response = HttpResponse(
+            status=200,
+            body=json.dumps(
+                {
+                    "assets": [
+                        {
+                            "name": ("proton-wineland-11.0-20261005-x86_64.sha512sum"),
+                            "size": 128,
+                        },
+                        {
+                            "name": "proton-wineland-11.0-20261005-x86_64.tar.xz",
+                            "size": 2097152,
+                        },
+                        {
+                            "name": (
+                                "proton-wineland-11.0-20261005-x86_64_v3.sha512sum"
+                            ),
+                            "size": 128,
+                        },
+                        {
+                            "name": "proton-wineland-11.0-20261005-x86_64_v3.tar.xz",
+                            "size": 2097152,
+                        },
+                        {
+                            "name": (
+                                "proton-wineland-11.0-20261005-x86_64_wow64.sha512sum"
+                            ),
+                            "size": 128,
+                        },
+                        {
+                            "name": "proton-wineland-11.0-20261005-x86_64_wow64.tar.xz",
+                            "size": 2097152,
+                        },
+                    ]
+                }
+            ),
+        )
+        mock_network_client.get.return_value = api_response
+
+        release_manager = ReleaseManager(mock_network_client, mock_filesystem_client)
+
+        # Act
+        asset_name = release_manager.find_asset_by_name(
+            repo="nanomatters/proton-cachyos",
+            tag="wineland-11.0-20261005",
+            fork=ForkName.WINELAND,
+        )
+
+        # Assert - Should select the _v3 asset from the fork's asset template
+        assert asset_name == "proton-wineland-11.0-20261005-x86_64_v3.tar.xz"
+
     def test_find_asset_via_api_ge_proton_selects_x86_64(
         self,
         mock_network_client: Any,
         mock_filesystem_client: Any,
     ) -> None:
-        """Test GE-Proton selects the x86_64 asset when an aarch64 variant also exists."""
+        """Test Proton-GE selects the x86_64 asset when an aarch64 variant also exists."""
         api_response = HttpResponse(
             status=200,
             body=json.dumps(
@@ -358,7 +421,7 @@ class TestListRecentReleases:
         mock_network_client: Any,
         mock_filesystem_client: Any,
     ) -> None:
-        """Test listing recent GE-Proton releases."""
+        """Test listing recent Proton-GE releases."""
         # Arrange
         api_response = HttpResponse(
             status=200,
@@ -797,7 +860,7 @@ class TestCheckForNewerRelease:
     @pytest.mark.parametrize(
         "fork,repo,current_versions,latest_tag,expected",
         [
-            # GE-Proton tests
+            # Proton-GE tests
             (
                 ForkName.GE_PROTON,
                 "GloriousEggroll/proton-ge-custom",
