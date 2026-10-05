@@ -82,7 +82,7 @@ REPORT_BUILT = echo "Built: $(OUT)"; echo "SHA256: $$(cat $(OUT).sha256sum | cut
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \
-	rm -rf $(BUILD_DIR) .pytest_cache .ruff_cache .direnv .pi result* .coverage
+	rm -rf $(BUILD_DIR) .pytest_cache .ruff_cache .direnv result* .coverage
 
 configure:
 	uv venv --clear
@@ -113,13 +113,12 @@ build: clean check-host-tools
 	rm -rf $(BUILD_DIR)/staging $(BUILD_DIR)/archive.zip
 	$(REPORT_BUILT)
 
-install: $(OUT)
+# Install: build if no artifact exists, verify checksum, then ALWAYS copy
+# and refresh the symlink. The copy is idempotent, so re-running install
+# after any build (build, build-nix, build-container) is always safe.
+install:
+	@if [ ! -f $(OUT) ]; then $(MAKE) build; fi
 	@cd $(BUILD_DIR) && sha256sum -c $(ARTIFACT).sha256sum
-
-# Real file target: up-to-date when present (from build, build-nix, or
-# build-container); the recipe only runs when it's missing.
-$(OUT):
-	$(MAKE) build
 	@if [ -d "$$HOME/.local/bin/scripts/" ]; then INSTALL_DIR="$$HOME/.local/bin/scripts"; else mkdir -p "$$HOME/.local/bin"; INSTALL_DIR="$$HOME/.local/bin"; fi; \
 	cp -f $(OUT) $(OUT).sha256sum "$$INSTALL_DIR/"; \
 	chmod +x "$$INSTALL_DIR/$(ARTIFACT)"; \
