@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from protonfetcher.common import ForkName
+from protonfetcher.common import ForkName, fork_for_link_name
+from protonfetcher.exceptions import LinkManagementError
 from protonfetcher.release_operations import (
     _check_release_exists,
     _determine_release_path,
@@ -16,6 +17,7 @@ from protonfetcher.release_operations import (
     _remove_release_directory,
     _remove_symbolic_links,
     cleanup_stale_symlinks,
+    remove_link,
     remove_release,
 )
 from tests.fixtures import SymlinkEnvironment
@@ -290,6 +292,81 @@ class TestRemoveRelease:
                 tag="NonExistent-10-20",
                 fork=ForkName.GE_PROTON,
             )
+
+
+class TestRemoveLink:
+    """Tests for remove_link — --rm <link alias> removes the link and its target."""
+
+    def test_removes_link_and_target(
+        self, symlink_environment: SymlinkEnvironment
+    ) -> None:
+        """Test that the named link and the release directory it points to are gone."""
+        extract_dir = symlink_environment["extract_dir"]
+        link_name = symlink_environment["link_names"][0]
+        target = symlink_environment["version_dirs"][0]
+
+        result = remove_link(extract_dir, link_name)
+
+        assert result == target
+        assert not (extract_dir / link_name).is_symlink()
+        assert not target.exists()
+        # other releases keep their links
+        assert (extract_dir / symlink_environment["link_names"][1]).is_symlink()
+
+    def test_removes_sibling_links_sharing_the_target(self, tmp_path: Path) -> None:
+        """Test that fallback links pointing at the same directory go too."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+        version_dir = extract_dir / "GE-Proton10-20"
+        version_dir.mkdir()
+        for name in ("Proton-GE", "Proton-GE-Fallback"):
+            (extract_dir / name).symlink_to(version_dir)
+
+        remove_link(extract_dir, "Proton-GE")
+
+        assert not version_dir.exists()
+        assert not (extract_dir / "Proton-GE").is_symlink()
+        assert not (extract_dir / "Proton-GE-Fallback").is_symlink()
+
+    def test_unmanaged_link_name_raises(self, tmp_path: Path) -> None:
+        """Test that a name that is not a managed link alias is rejected."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+
+        with pytest.raises(LinkManagementError, match="No managed link"):
+            remove_link(extract_dir, "Proton-Nope")
+
+    def test_broken_link_removes_link_only(self, tmp_path: Path) -> None:
+        """Test that a dangling link is unlinked without touching any directory."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+        link = extract_dir / "Proton-GE"
+        link.symlink_to(extract_dir / "GE-Proton10-20")
+
+        result = remove_link(extract_dir, "Proton-GE")
+
+        assert result is None
+        assert not link.is_symlink()
+
+    def test_target_outside_extract_dir_is_refused(self, tmp_path: Path) -> None:
+        """Test that a link escaping the extract directory is never removed."""
+        extract_dir = tmp_path / "compatibilitytools.d"
+        extract_dir.mkdir()
+        outside = tmp_path / "important"
+        outside.mkdir()
+        (extract_dir / "Proton-GE").symlink_to(outside)
+
+        with pytest.raises(LinkManagementError, match="outside"):
+            remove_link(extract_dir, "Proton-GE")
+
+        assert outside.exists()
+        assert (extract_dir / "Proton-GE").is_symlink()
+
+    def test_fork_for_link_name(self) -> None:
+        """Test link alias → owning fork lookup."""
+        assert fork_for_link_name("Proton-GE") == ForkName.GE_PROTON
+        assert fork_for_link_name("Proton-EM-Fallback2") == ForkName.PROTON_EM
+        assert fork_for_link_name("Proton-Nope") is None
 
 
 class TestCleanupStaleSymlinks:

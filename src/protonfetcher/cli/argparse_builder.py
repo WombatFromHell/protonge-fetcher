@@ -55,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--skip-checksum",
+        action="store_true",
+        help=(
+            "Download without verifying the asset against its published checksum "
+            "(partial downloads are not resumed)"
+        ),
+    )
 
     # Mutually exclusive operation group
     group = parser.add_mutually_exclusive_group()
@@ -90,8 +98,15 @@ def build_parser() -> argparse.ArgumentParser:
     # --rm is not mutually exclusive; can be used with --fork or --release
     parser.add_argument(
         "--rm",
-        action="store_true",
-        help="Remove a release directory and its symlinks. Use with --fork to remove all symlinks for that fork, or with --release to remove a specific tag.",
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="LINK",
+        help=(
+            "Remove Proton installs: bare --rm removes every symlink for --fork; "
+            "--rm LINK removes that managed symlink and the release directory it points to "
+            "(e.g. --rm Proton-GE); --rm --release TAG removes that release and its symlinks."
+        ),
     )
 
     parser.add_argument(

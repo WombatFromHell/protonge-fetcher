@@ -16,6 +16,10 @@ from .spinner import Spinner
 
 logger = logging.getLogger(__name__)
 
+# Extraction lands here inside target_dir and is renamed into place only once the
+# whole archive is unpacked, so an interrupt never leaves a half release behind.
+STAGING_DIR_NAME = ".protonfetcher.staging"
+
 
 class _CountingReader:
     """Wraps a file object; reports compressed bytes consumed to a callback.
@@ -124,17 +128,51 @@ class ArchiveExtractor:
     ) -> Path:
         """Extract archive to the target directory with progress bar.
 
+        Both extraction paths write into a staging directory inside target_dir and
+        are renamed into place only on success. A half-extracted directory must
+        never sit in extract_dir: _find_existing_release treats any directory with
+        a release tag name as done and would skip the re-extraction.
+
         Raises:
             ExtractionError: If extraction fails
         """
         tar_args = self._TAR_ARGS.get(self._get_archive_format(archive_path), ())
         fallback = partial(self._extract_with_system_tar, tar_args=tar_args)
-        return self._extract_with_fallback(
-            archive_path,
-            target_dir,
-            show_progress,
-            fallback,
-        )
+
+        staged = target_dir / STAGING_DIR_NAME
+        self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
+        self._discard_staging(staged)
+        self.file_system_client.mkdir(staged, parents=True, exist_ok=True)
+
+        try:
+            self._extract_with_fallback(archive_path, staged, show_progress, fallback)
+        except BaseException:
+            # KeyboardInterrupt is a BaseException: Ctrl+C must clean up too.
+            self._discard_staging(staged)
+            raise
+
+        self._promote(staged, target_dir)
+        return target_dir
+
+    def _discard_staging(self, staged: Path) -> None:
+        """Delete the staging directory, which may already be gone."""
+        if self.file_system_client.exists(staged):
+            self.file_system_client.rmtree(staged)
+
+    def _promote(self, staged: Path, target_dir: Path) -> None:
+        """Move every top-level entry of the completed staging dir into target_dir."""
+        for entry in self.file_system_client.iterdir(staged):
+            dest = target_dir / entry.name
+            if dest.exists():
+                # Only junk from an older interrupted run can be here — a real
+                # release directory would have skipped extraction altogether.
+                if dest.is_dir():
+                    self.file_system_client.rmtree(dest)
+                else:
+                    self.file_system_client.unlink(dest)
+            os.replace(entry, dest)
+
+        self._discard_staging(staged)
 
     def _extract_with_system_tar(
         self, archive_path: Path, target_dir: Path, tar_args: tuple[str, ...] = ()

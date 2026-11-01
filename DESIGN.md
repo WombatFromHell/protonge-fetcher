@@ -355,7 +355,7 @@ graph TD
     ROOT --> MULTI["-f (no value)\nupdate_all_managed_forks()"]
     ROOT --> LIST["--list / -l\nlist_recent_releases()"]
     ROOT --> LS["--ls\nlist_links()"]
-    ROOT --> RM["--rm TAG\nremove release + symlinks\n--rm --fork\nremove all fork symlinks"]
+    ROOT --> RM["--rm LINK\nremove link + its target dir\n--rm --release TAG\nremove release + symlinks\n--rm --fork\nremove all fork symlinks"]
     ROOT --> RELINK["--relink\nrelink_fork() (requires --fork)"]
     ROOT --> PRUNE["--prune\nprune_releases()\n--keep N (default: 3)"]
     ROOT --> CHECK["--check / -c\ncheck_for_updates()"]

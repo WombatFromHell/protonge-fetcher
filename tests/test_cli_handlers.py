@@ -19,8 +19,10 @@ from protonfetcher.cli.handlers import (
     handle_relink_operation,
     handle_rm_operation,
 )
+from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
 from protonfetcher.common import HttpResponse
+from protonfetcher.exceptions import LinkManagementError
 
 # =============================================================================
 # handle_check_operation Tests
@@ -427,6 +429,79 @@ class TestHandleRmOperation:
         )
         captured = capsys.readouterr()
         assert "Removed GE-Proton10-15" in captured.out
+
+    def test_rm_with_link_name_removes_link_and_target(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test --rm <link alias> removes the symlink and the release directory it targets."""
+        mock_fetcher = MagicMock()
+        mock_fetcher.file_system_client = FileSystemClient()
+        mock_forgejo_fetcher = MagicMock()
+
+        target = tmp_path / "GE-Proton11-11-x86_64"
+        target.mkdir()
+        (tmp_path / "Proton-GE").symlink_to(target)
+
+        args = MagicMock()
+        args.fork = "Proton-GE"
+        args.rm = "Proton-GE"
+        args.release = None
+
+        handle_rm_operation(mock_fetcher, mock_forgejo_fetcher, args, tmp_path)
+
+        assert not (tmp_path / "Proton-GE").is_symlink()
+        assert not target.exists()
+        mock_fetcher.link_manager.remove_release.assert_not_called()
+
+        captured = capsys.readouterr()
+        assert "Removed Proton-GE -> GE-Proton11-11-x86_64" in captured.out
+        assert "Will remove" not in captured.out
+
+    def test_rm_link_name_wins_over_fork(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test --rm <link> on another fork's link leaves that fork's links alone."""
+        mock_fetcher = MagicMock()
+        mock_fetcher.file_system_client = FileSystemClient()
+
+        ge_target = tmp_path / "GE-Proton11-11-x86_64"
+        ge_target.mkdir()
+        (tmp_path / "Proton-GE").symlink_to(ge_target)
+        em_target = tmp_path / "proton-EM-10.0-30"
+        em_target.mkdir()
+        (tmp_path / "Proton-EM-Fallback").symlink_to(em_target)
+
+        args = MagicMock()
+        args.fork = "Proton-EM"
+        args.rm = "Proton-GE"
+        args.release = None
+
+        handle_rm_operation(mock_fetcher, MagicMock(), args, tmp_path)
+
+        assert not (tmp_path / "Proton-GE").is_symlink()
+        assert not ge_target.exists()
+        assert (tmp_path / "Proton-EM-Fallback").is_symlink()
+        assert em_target.exists()
+
+    def test_rm_with_unmanaged_link_name_raises(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test --rm with a name that is not a managed link alias fails with a clear error."""
+        mock_fetcher = MagicMock()
+        mock_fetcher.file_system_client = FileSystemClient()
+
+        args = MagicMock()
+        args.fork = "Proton-GE"
+        args.rm = "Proton-Nope"
+        args.release = None
+
+        with pytest.raises(LinkManagementError, match="No managed link"):
+            handle_rm_operation(mock_fetcher, MagicMock(), args, tmp_path)
 
 
 # =============================================================================

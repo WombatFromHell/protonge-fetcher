@@ -7,11 +7,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from protonfetcher.common import DEFAULT_FORK, FORKS, ForkName
+from protonfetcher.common import DEFAULT_FORK, FORKS, ForkName, fork_for_link_name
 from protonfetcher.dirs import get_link_names
 from protonfetcher.exceptions import ProtonFetcherError
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
+from protonfetcher.release_operations import remove_link
 
 from .fork_utils import (
     get_fork_fetcher,
@@ -126,14 +127,29 @@ def handle_rm_operation(
 ) -> None:
     """Handle the --rm operation flow.
 
-    Two modes:
+    Three modes:
+    - --rm <link alias>: remove that symlink and the release directory it points to
     - --rm --release <tag>: remove that specific release directory + its symlinks
     - --rm --fork <fork>: remove ALL symlinks for that fork
     """
-    rm_fork = get_fork_from_args(args) or DEFAULT_FORK
+    link_name = args.rm if isinstance(args.rm, str) else None
+    # A named link is the more specific request than --fork: cleanup must run on the
+    # fork whose links we just touched.
+    rm_fork = (
+        (fork_for_link_name(link_name) if link_name else None)
+        or get_fork_from_args(args)
+        or DEFAULT_FORK
+    )
     fork_fetcher = get_fork_fetcher(fetcher, forgejo_fetcher, rm_fork)
 
-    if getattr(args, "release", None):
+    if link_name:
+        # Remove one managed link and the release directory it resolves to
+        target = remove_link(extract_dir, link_name, fork_fetcher.file_system_client)
+        print(
+            f"Removed {link_name}"
+            + (f" -> {target.name}" if target else " (broken link)")
+        )
+    elif getattr(args, "release", None):
         # Remove a specific release by tag (single item, no confirmation)
         tag = args.release
         fork_fetcher.link_manager.remove_release(extract_dir, tag, rm_fork)

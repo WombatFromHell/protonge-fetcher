@@ -51,6 +51,7 @@ class TestArgumentParsing:
             args = set_default_fork(args)
             assert not args.ls
             assert not args.list
+            assert not args.skip_checksum
             assert args.fork == ForkName.GE_PROTON
 
     @pytest.mark.parametrize(
@@ -60,6 +61,7 @@ class TestArgumentParsing:
             (["protonfetcher", "-l"], "list", True),
             (["protonfetcher", "--ls"], "ls", True),
             (["protonfetcher", "--debug"], "debug", True),
+            (["protonfetcher", "--skip-checksum"], "skip_checksum", True),
         ],
     )
     def test_parse_boolean_flags(
@@ -100,6 +102,19 @@ class TestArgumentParsing:
             args = parse_args(build_parser())
             args = set_default_fork(args)
             assert getattr(args, expected_flag) == expected_value
+
+    def test_parse_rm_with_link_name(self) -> None:
+        """Test --rm with an optional link alias value, and bare --rm."""
+        with patch.object(
+            sys, "argv", ["protonfetcher", "-f", "Proton-GE", "--rm", "Proton-GE"]
+        ):
+            args = parse_args(build_parser())
+            assert args.rm == "Proton-GE"
+            assert args.fork == "Proton-GE"
+
+        with patch.object(sys, "argv", ["protonfetcher", "--rm"]):
+            args = parse_args(build_parser())
+            assert args.rm is True
 
     def test_parse_relink_flag(self) -> None:
         """Test parsing --relink flag."""
@@ -1145,3 +1160,70 @@ class TestInstanceLock:
             assert capsys.readouterr().out == (
                 f"Error: another protonfetcher (PID {os.getpid()}) is running\n"
             )
+
+
+# =============================================================================
+# Ctrl+C Handling
+# =============================================================================
+
+
+class TestInterruptHandling:
+    """Ctrl+C must end with a message and a SIGINT exit code, not a traceback."""
+
+    def test_main_exits_130_on_interrupt(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(sys, "argv", ["protonfetcher", "--check"])
+
+        with (
+            patch("protonfetcher.cli.core.GitHubReleaseFetcher"),
+            patch("protonfetcher.cli.core.ForgejoReleaseFetcher"),
+            patch("protonfetcher.cli.core._dispatch", side_effect=KeyboardInterrupt),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+        assert exc_info.value.code == 130
+        assert capsys.readouterr().out == (
+            "\nInterrupted. Partial downloads are kept — run again to resume.\n"
+        )
+
+
+# =============================================================================
+# --skip-checksum Wiring
+# =============================================================================
+
+
+class TestSkipChecksumWiring:
+    """The flag reaches the downloaders that actually verify."""
+
+    @pytest.mark.parametrize(
+        "argv,expected_verify",
+        [
+            (["protonfetcher", "--check"], True),
+            (["protonfetcher", "--check", "--skip-checksum"], False),
+        ],
+    )
+    def test_fetchers_get_the_verdict(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        argv: list[str],
+        expected_verify: bool,
+    ) -> None:
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(sys, "argv", argv)
+
+        with (
+            patch("protonfetcher.cli.core.GitHubReleaseFetcher") as github,
+            patch("protonfetcher.cli.core.ForgejoReleaseFetcher") as forgejo,
+            patch("protonfetcher.cli.core._dispatch"),
+        ):
+            main()
+
+        github.assert_called_once_with(verify_checksum=expected_verify)
+        forgejo.assert_called_once_with(verify_checksum=expected_verify)

@@ -80,8 +80,9 @@ def main() -> None:
     setup_logging(args.debug)
 
     try:
-        fetcher = GitHubReleaseFetcher()
-        forgejo_fetcher = ForgejoReleaseFetcher()
+        verify_checksum = not args.skip_checksum
+        fetcher = GitHubReleaseFetcher(verify_checksum=verify_checksum)
+        forgejo_fetcher = ForgejoReleaseFetcher(verify_checksum=verify_checksum)
 
         ctx = CLIContext(
             fetcher=fetcher,
@@ -94,6 +95,12 @@ def main() -> None:
 
         with _instance_lock():
             _dispatch(ctx, argv_list)
+
+    except KeyboardInterrupt:
+        # Ctrl+C is a user decision, not a fault: no traceback, and SIGINT's code.
+        # 1 is already 'updates available' for --check, so this gets 130.
+        print("\nInterrupted. Partial downloads are kept — run again to resume.")
+        raise SystemExit(130) from None
 
     except (ProtonFetcherError, OSError) as e:
         print(f"Error: {e}")

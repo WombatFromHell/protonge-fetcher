@@ -9,6 +9,7 @@ Consolidated tests for archive extraction and asset download workflows:
 """
 
 import errno
+import logging
 import subprocess
 import tarfile
 from io import BytesIO
@@ -17,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from protonfetcher.archive_extractor import ArchiveExtractor
+from protonfetcher.archive_extractor import ArchiveExtractor, STAGING_DIR_NAME
 from protonfetcher.asset_downloader import AssetDownloader
 from protonfetcher.exceptions import ExtractionError, NetworkError
 from protonfetcher.filesystem import FileSystemClient
@@ -234,6 +235,57 @@ class TestRealFilesystemExtraction:
         assert (target / "files/version").read_text() == "11.0"
         assert not (tmp_path / "escape.conf").exists()
 
+    def test_interrupted_extraction_leaves_no_half_release(
+        self, tmp_path: Path, mocker: Any
+    ) -> None:
+        """Ctrl+C mid-extraction must not leave a tag dir the next run would trust."""
+        archive = tmp_path / "GE-Proton11-11.tar.xz"
+        src = tmp_path / "GE-Proton11-11"
+        src.mkdir()
+        (src / "version").write_text("11-11")
+        (src / "proton").write_bytes(b"x" * 4096)
+        with tarfile.open(archive, "w:xz") as tar:
+            tar.add(src, arcname="GE-Proton11-11")
+
+        target = tmp_path / "compatibilitytools.d"
+        target.mkdir()
+
+        extract = mocker.patch.object(
+            tarfile.TarFile, "extract", side_effect=KeyboardInterrupt
+        )
+        with pytest.raises(KeyboardInterrupt):
+            ArchiveExtractor(FileSystemClient()).extract_archive(
+                archive, target, show_progress=False
+            )
+
+        assert extract.called
+        assert not (target / "GE-Proton11-11").exists()
+        assert not (target / STAGING_DIR_NAME).exists()
+        assert archive.exists()
+
+    def test_staging_leftover_from_a_previous_interrupt_is_discarded(
+        self, tmp_path: Path
+    ) -> None:
+        """A run interrupted mid-staging must not poison the next one."""
+        archive = tmp_path / "proton.tar.xz"
+        src = tmp_path / "files"
+        src.mkdir()
+        (src / "version").write_text("11.0")
+        with tarfile.open(archive, "w:xz") as tar:
+            tar.add(src, arcname="files")
+
+        target = tmp_path / "extracted"
+        staging = target / STAGING_DIR_NAME
+        staging.mkdir(parents=True)
+        (staging / "half").write_text("junk")
+
+        ArchiveExtractor(FileSystemClient()).extract_archive(
+            archive, target, show_progress=False
+        )
+
+        assert (target / "files/version").read_text() == "11.0"
+        assert not staging.exists()
+
     @pytest.mark.parametrize(
         "archive_name,tar_args",
         [("proton.tar.zst", ["--zstd", "-xf"]), ("proton.tar.xz", ["-xJf"])],
@@ -262,9 +314,40 @@ class TestRealFilesystemExtraction:
             "-f",
             str(archive),
             "-C",
-            str(target),
+            str(target / STAGING_DIR_NAME),
         ]
         assert target.is_dir()
+
+    def test_skip_checksum_verifies_nothing_and_never_resumes(
+        self, tmp_path: Path, mocker: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """--skip-checksum: a digest that would fail must not fail, and no resume."""
+        (tmp_path / "asset.tar.gz.partial").write_bytes(b"stale-junk")
+
+        response = mocker.MagicMock()
+        response.__enter__.return_value = response
+        response.headers.get.return_value = "5"
+        response.read.side_effect = [b"hello", b""]
+        urlopen = mocker.patch("urllib.request.urlopen", return_value=response)
+
+        downloader = AssetDownloader(
+            mocker.MagicMock(), FileSystemClient(), verify_checksum=False
+        )
+        caplog.set_level(logging.WARNING)
+
+        path = downloader.download_asset(
+            "owner/repo",
+            "tag",
+            "asset.tar.gz",
+            tmp_path / "asset.tar.gz",
+            download_url="https://example.com/asset.tar.gz",
+            remote_size=5,
+            digest="sha256:" + "0" * 64,
+        )
+
+        assert path.read_bytes() == b"hello"
+        assert "Range" not in urlopen.call_args[0][0].headers
+        assert "--skip-checksum" in caplog.text
 
 
 # =============================================================================

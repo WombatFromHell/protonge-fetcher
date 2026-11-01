@@ -275,3 +275,10 @@ FORKS: dict[ForkName, ForkConfig] = {
     ),
 }
 DEFAULT_FORK: ForkName = ForkName.GE_PROTON
+
+
+def fork_for_link_name(link_name: str) -> ForkName | None:
+    """Return the fork that owns a link alias (e.g. 'Proton-GE'), or None."""
+    return next(
+        (fork for fork, cfg in FORKS.items() if link_name in cfg.link_names), None
+    )

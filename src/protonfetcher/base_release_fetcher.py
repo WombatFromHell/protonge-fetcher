@@ -55,6 +55,7 @@ class BaseReleaseFetcher:
         timeout: int = DEFAULT_TIMEOUT,
         network_client: NetworkClientProtocol | None = None,
         file_system_client: FileSystemClientProtocol | None = None,
+        verify_checksum: bool = True,
     ) -> None:
         self.timeout = timeout
         self.network_client = network_client or NetworkClient(timeout=timeout)
@@ -72,7 +73,7 @@ class BaseReleaseFetcher:
             platform_adapter=adapter,
         )
         self.asset_downloader = AssetDownloader(
-            self.network_client, self.file_system_client, timeout
+            self.network_client, self.file_system_client, timeout, verify_checksum
         )
         self.archive_extractor = ArchiveExtractor(self.file_system_client, timeout)
         self.link_manager = LinkManager(self.file_system_client, timeout)

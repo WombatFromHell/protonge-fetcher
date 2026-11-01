@@ -47,10 +47,12 @@ class AssetDownloader:
         network_client: NetworkClientProtocol,
         file_system_client: FileSystemClientProtocol,
         timeout: int = DEFAULT_TIMEOUT,
+        verify_checksum: bool = True,
     ) -> None:
         self.network_client = network_client
         self.file_system_client = file_system_client
         self.timeout = timeout
+        self.verify_checksum = verify_checksum
 
     def download_with_spinner(
         self,
@@ -190,6 +192,15 @@ class AssetDownloader:
         """
         logger.info(f"Checking if asset needs download from: {download_url}")
 
+        if not self.verify_checksum:
+            logger.warning(
+                f"--skip-checksum: {asset_name} is not verified against its "
+                "published checksum"
+            )
+            # Without a checksum a leftover .partial is not provably a prefix of the
+            # asset, so there is nothing to resume from and nothing to fail on.
+            digest = None
+
         partial = out_path.with_name(f"{out_path.name}.partial")
 
         if self.file_system_client.exists(out_path) and remote_size is not None:
@@ -220,7 +231,7 @@ class AssetDownloader:
         # A .partial of remote_size or more cannot be a prefix of the asset.
         resume_from = (
             self.file_system_client.size(partial)
-            if self.file_system_client.exists(partial)
+            if self.verify_checksum and self.file_system_client.exists(partial)
             else 0
         )
         if remote_size is not None and resume_from >= remote_size:

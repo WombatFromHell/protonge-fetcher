@@ -7,7 +7,7 @@ associated symbolic links.
 import logging
 from pathlib import Path
 
-from .common import FORKS, FileSystemClientProtocol, ForkName
+from .common import FORKS, FileSystemClientProtocol, ForkName, fork_for_link_name
 from .dirs import resolve_directory
 from .exceptions import LinkManagementError
 from .link_status import get_installed_versions
@@ -56,6 +56,62 @@ def remove_release(
     return True
 
 
+def remove_link(
+    extract_dir: Path,
+    link_name: str,
+    file_system: FileSystemClientProtocol | None = None,
+) -> Path | None:
+    """Remove a managed symlink and the release directory it points to.
+
+    Args:
+        extract_dir: Directory containing the links
+        link_name: Link alias, e.g. 'Proton-GE'
+        file_system: File system client
+
+    Returns:
+        The removed release directory, or None if the link was dangling
+
+    Raises:
+        LinkManagementError: If link_name is not a managed link alias, the path is
+        not a symlink, or the target lives outside extract_dir
+    """
+    file_system = file_system or FileSystemClient()
+    fork = fork_for_link_name(link_name)
+    if fork is None:
+        raise LinkManagementError(
+            f"No managed link named {link_name} (use --ls to list link aliases)"
+        )
+
+    link_path = extract_dir / link_name
+    if not file_system.is_symlink(link_path):
+        raise LinkManagementError(f"Not a symlink: {link_path}")
+
+    try:
+        target = file_system.resolve(link_path)
+    except OSError:
+        target = None
+
+    if target is None or not file_system.exists(target):
+        # Broken symlink — no target to remove, just unlink the link
+        _remove_symbolic_links([link_path], file_system)
+        return None
+
+    if not file_system.is_dir(target):
+        raise LinkManagementError(f"Link target is not a directory: {target}")
+    if target.parent != file_system.resolve(extract_dir):
+        raise LinkManagementError(
+            f"Refusing to remove link target outside {extract_dir}: {target}"
+        )
+
+    links = _identify_links_to_remove(extract_dir, target, fork, file_system)
+    if link_path not in links:
+        links.append(link_path)
+
+    _remove_release_directory(target, file_system)
+    _remove_symbolic_links(links, file_system)
+    return target
+
+
 def _determine_release_path(
     extract_dir: Path,
     tag: str,
@@ -102,6 +158,7 @@ def _identify_links_to_remove(
         List of Path objects pointing to the release
     """
     file_system = file_system or FileSystemClient()
+    release_path = file_system.resolve(release_path)
     suffixes = FORKS[fork].link_names
     links_to_remove: list[Path] = []
 
