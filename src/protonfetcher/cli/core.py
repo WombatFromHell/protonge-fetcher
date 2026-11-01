@@ -1,9 +1,14 @@
 """CLI implementation for ProtonFetcher."""
 
+import fcntl
 import logging
+import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
+from ..dirs import lock_path
 from ..exceptions import ProtonFetcherError
 from ..forgejo_fetcher import ForgejoReleaseFetcher
 from ..github_fetcher import GitHubReleaseFetcher
@@ -30,6 +35,34 @@ def setup_logging(debug: bool) -> None:
     logging.getLogger().setLevel(log_level)
     if debug:
         logger.debug("Debug logging enabled")
+
+
+@contextmanager
+def _instance_lock() -> Iterator[None]:
+    """Hold an exclusive flock for the whole run so two instances cannot race.
+
+    Concurrent runs share the same *.partial files, extraction directory and
+    compatibilitytools.d symlinks, so the second one is refused rather than waited on.
+    """
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # An O_RDWR fd starts at EOF, so the holder PID has to be read from the path.
+            holder = path.read_text().strip() or "another process"
+            raise ProtonFetcherError(
+                f"another protonfetcher (PID {holder}) is running"
+            ) from None
+        # shortcut: if this file is unlinked while held (tmpfiles ageing /tmp), a later
+        # instance locks a fresh file. Upgrade to re-open-and-relock if that ever bites.
+        os.write(fd, f"{os.getpid()}\n".encode())
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def main() -> None:
@@ -59,7 +92,8 @@ def main() -> None:
             explicit_flags=explicit_flags,
         )
 
-        _dispatch(ctx, argv_list)
+        with _instance_lock():
+            _dispatch(ctx, argv_list)
 
     except (ProtonFetcherError, OSError) as e:
         print(f"Error: {e}")

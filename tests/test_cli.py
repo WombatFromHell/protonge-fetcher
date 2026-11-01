@@ -12,7 +12,9 @@ Consolidated tests for the command-line interface including:
 - Multi-fork update mode (-f without value)
 """
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -20,7 +22,7 @@ from unittest.mock import patch
 import pytest
 
 from protonfetcher.cli.argparse_builder import build_parser, parse_args
-from protonfetcher.cli.core import main
+from protonfetcher.cli.core import _instance_lock, main
 from protonfetcher.cli.fork_utils import convert_fork_to_enum
 from protonfetcher.cli.handlers import handle_check_operation
 from protonfetcher.cli.validators import (
@@ -28,7 +30,7 @@ from protonfetcher.cli.validators import (
     validate_mutually_exclusive_args,
 )
 from protonfetcher.common import ForkName
-from protonfetcher.dirs import get_link_names
+from protonfetcher.dirs import get_link_names, lock_path
 from protonfetcher.common import HttpResponse
 from protonfetcher.exceptions import NetworkError, ProtonFetcherError
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
@@ -1082,3 +1084,64 @@ class TestCliFileErrorReporting:
             capsys.readouterr().out
             == "Error: Failed to create directory /x: is a directory\n"
         )
+
+
+# =============================================================================
+# Single-Instance Mutex Tests
+# =============================================================================
+
+
+class TestInstanceLock:
+    """Test the whole-run mutex that refuses concurrent protonfetcher instances."""
+
+    def test_lock_path_prefers_xdg_runtime_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        assert lock_path() == tmp_path / f"protonfetcher-{os.getuid()}.lock"
+
+    def test_lock_path_falls_back_scoped_by_uid(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ssh/cron sessions have no XDG_RUNTIME_DIR, so the root is /run/user/<uid> or /tmp."""
+        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+        run_user = Path(f"/run/user/{os.getuid()}")
+        root = run_user if run_user.is_dir() else Path(tempfile.gettempdir())
+        assert lock_path() == root / f"protonfetcher-{os.getuid()}.lock"
+
+    def test_lock_file_records_the_holder_pid(self) -> None:
+        with _instance_lock():
+            assert lock_path().read_text() == f"{os.getpid()}\n"
+
+    def test_second_acquire_names_the_holder(self) -> None:
+        with _instance_lock():
+            with pytest.raises(ProtonFetcherError) as exc_info:
+                with _instance_lock():
+                    pass
+            assert f"PID {os.getpid()}" in str(exc_info.value)
+
+    def test_lock_releases_when_the_context_exits(self) -> None:
+        with _instance_lock():
+            pass
+        with _instance_lock():
+            pass
+
+    def test_main_refuses_and_never_dispatches(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+        with _instance_lock():
+            monkeypatch.setattr(sys, "argv", ["protonfetcher", "--check"])
+            with patch("protonfetcher.cli.core._dispatch") as dispatch:
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+
+            assert exc_info.value.code == 1
+            dispatch.assert_not_called()
+            assert capsys.readouterr().out == (
+                f"Error: another protonfetcher (PID {os.getpid()}) is running\n"
+            )

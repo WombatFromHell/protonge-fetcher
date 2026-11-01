@@ -418,6 +418,7 @@ graph LR
         OP_DEBUG["--debug<br/>TestDebugLogging"]
         OP_ERROR["Error handling<br/>TestErrorHandling"]
         OP_PARSE["Argument Parsing<br/>TestArgumentParsing"]
+        OP_LOCK["Single-instance mutex<br/>TestInstanceLock"]
         OP_VALID["Validation<br/>TestArgumentValidation"]
         OP_PLATFORM["Platform Dispatch<br/>TestForkConfigPlatformDispatch"]
     end
@@ -726,6 +727,8 @@ graph TD
 ```mermaid
 graph TB
     subgraph CLI_SPLIT["CLI Package Tests"]
+        IL["test_cli.py<br/>TestInstanceLock (whole-run flock mutex,
+          XDG_RUNTIME_DIR / run-user / tmp roots)"]
         CD["test_cli_dispatch.py<br/>dispatch logic"]
         CH["test_cli_handlers.py<br/>handler functions"]
         CV["test_cli_validators.py<br/>CLI validation"]

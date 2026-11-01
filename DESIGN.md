@@ -362,6 +362,7 @@ graph TD
     ROOT --> DRY["--dry-run / -n\ndry_run=True"]
     ROOT --> VERSION["--version / -V\nprint version, exit"]
     ROOT --> RELEASE["--release / -r\nmanual tag (mutually exclusive with -l/-r)"]
+    ROOT -.- LOCK["whole-run flock mutex\ncli/core.py::_instance_lock()\ndirs.py::lock_path()"]
 
     FETCH --> GH["platform=github → GitHubReleaseFetcher"]
     FETCH --> FJ["platform=forgejo → ForgejoReleaseFetcher"]
@@ -390,6 +391,12 @@ graph TD
 **Validation:** `cli/validators.py::validate_mutually_exclusive_args()` enforces: `--check` vs `--dry-run`, `--check` vs `--list`/`--ls`, `--prune` vs `--check`, `--keep >= 0` (0 prunes all), `--dry-run` vs read-only ops, `--relink` requires `--fork`. `--rm` is no longer mutually exclusive with other operations.
 
 **`--check` exit codes:** `0` = up-to-date, `1` = updates available, `2` = a check failed.
+
+**Single-instance mutex:** `main()` holds an exclusive `flock` for the whole run, so a
+second instance exits 1 with `another protonfetcher (PID N) is running` instead of racing
+the same `*.partial` files, extraction directory and symlinks. The lock file lives in
+`$XDG_RUNTIME_DIR` (or `/run/user/<uid>` / `/tmp` when unset), never next to the data —
+`flock` is unreliable on NFS/SMB mounts.
 
 ---
 
