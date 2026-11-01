@@ -18,8 +18,9 @@ import pytest
 
 from protonfetcher.common import ForkName
 from protonfetcher.common import HttpResponse
-from protonfetcher.exceptions import NetworkError
+from protonfetcher.exceptions import ChecksumError, NetworkError
 from protonfetcher.filesystem import FileSystemClient
+from protonfetcher.github_fetcher import GitHubReleaseFetcher
 from protonfetcher.release_manager import ReleaseManager
 
 
@@ -766,6 +767,45 @@ class TestAssetSizeCaching:
 
         assert size == 1024
         assert digest is None
+
+    def test_stale_cached_checksum_is_dropped_when_the_download_fails(
+        self,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+        mocker: Any,
+        tmp_path: Path,
+    ) -> None:
+        """A republished asset makes the cached digest wrong — stop serving it."""
+        fs = FileSystemClient()
+        manager = ReleaseManager(mock_network_client, fs)
+        cache_path = manager._get_cache_path(self.REPO, self.TAG, self.ASSET)
+        manager._cache_asset_info(
+            self.REPO, self.TAG, self.ASSET, 800, "sha256:" + "0" * 64
+        )
+        assert cache_path.exists()
+
+        fetcher = GitHubReleaseFetcher(
+            network_client=mock_network_client,
+            file_system_client=fs,
+            timeout=30,
+        )
+        mocker.patch.object(fetcher, "_resolve_asset", return_value=self.ASSET)
+        mocker.patch.object(
+            fetcher,
+            "_build_download_url",
+            return_value=f"https://example.com/repo/releases/download/{self.TAG}/{self.ASSET}",
+        )
+        # Two attempts: the cached digest rejects the first, so the fresh retry needs bytes too.
+        mock_urllib_download(
+            chunks=[b"z" * 800, b"", b"z" * 800, b""], content_length=800
+        )
+
+        output_dir = tmp_path / "Downloads"
+        with pytest.raises(ChecksumError, match="run again"):
+            fetcher._download_asset(self.REPO, self.TAG, ForkName.GE_PROTON, output_dir)
+
+        assert not (output_dir / self.ASSET).exists()
+        assert not cache_path.exists()
 
 
 class TestAssetNameExtension:

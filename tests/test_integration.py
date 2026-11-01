@@ -699,25 +699,24 @@ class TestPartialTargetAndChecksum:
 
         assert out_path.read_bytes() == self.UPSTREAM
 
-    def test_legacy_quarantined_partial_is_discarded(
+    def test_uppercase_checksum_digest_still_verifies(
         self,
         tmp_path: Path,
         mock_network_client: Any,
         mock_urllib_download: Any,
     ) -> None:
-        """Leftover .partial.old files from the previous scheme are junk."""
-        (tmp_path / f"{self.ASSET}.partial.old").write_bytes(b"stale")
+        """Published hex can be uppercase; it must still match our lowercase hash."""
+        upper = f"sha256:{hashlib.sha256(self.UPSTREAM).hexdigest().upper()}"
 
         out_path = self._download(
             tmp_path,
             mock_network_client,
             mock_urllib_download,
             [self.UPSTREAM, b""],
-            self.DIGEST,
+            upper,
         )
 
         assert out_path.read_bytes() == self.UPSTREAM
-        assert not (tmp_path / f"{self.ASSET}.partial.old").exists()
 
 
 class TestSpinnerInExtractionWorkflow:

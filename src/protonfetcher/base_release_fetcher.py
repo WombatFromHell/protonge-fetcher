@@ -25,7 +25,7 @@ from .dirs import (
     resolve_directory,
     resolve_directory_candidates,
 )
-from .exceptions import LinkManagementError, ProtonFetcherError
+from .exceptions import ChecksumError, LinkManagementError, ProtonFetcherError
 from .filesystem import FileSystemClient
 from .link_manager import LinkManager
 from .network import NetworkClient
@@ -358,15 +358,21 @@ class BaseReleaseFetcher:
         archive_path = output_dir / asset_name
         download_url = self._build_download_url(repo, release_tag, asset_name)
         info = self.release_manager.get_asset_info(repo, release_tag, asset_name)
-        self.asset_downloader.download_asset(
-            repo,
-            release_tag,
-            asset_name,
-            archive_path,
-            download_url=download_url,
-            remote_size=info.size,
-            digest=info.digest,
-        )
+        try:
+            self.asset_downloader.download_asset(
+                repo,
+                release_tag,
+                asset_name,
+                archive_path,
+                download_url=download_url,
+                remote_size=info.size,
+                digest=info.digest,
+            )
+        except ChecksumError:
+            # The digest we were given is suspect — stop serving it, so the next
+            # run reads fresh listing info instead of failing for the whole TTL.
+            self.release_manager.invalidate_asset_info(repo, release_tag, asset_name)
+            raise
         return archive_path
 
     def _dry_run_workflow(

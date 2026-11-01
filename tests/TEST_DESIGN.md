@@ -322,8 +322,8 @@ graph TB
         NT5["TestForkConfigPlatformDispatch<br/>4 tests in test_cli.py"]
         NT6["TestReleaseManagerForgejoAdapter<br/>5 tests in test_release_manager_e2e.py"]
         NT7["TestResumeDownload<br/>9 tests in test_integration.py"]
-        NT8["TestPartialTargetAndChecksum<br/>8 tests in test_integration.py"]
-        NT9["TestAssetSizeCaching<br/>9 tests in test_release_manager_e2e.py (listing size + digest, no HEAD)"]
+        NT8["TestPartialTargetAndChecksum<br/>7 tests in test_integration.py<br/>(incl. uppercase checksum hex)"]
+        NT9["TestAssetSizeCaching<br/>10 tests in test_release_manager_e2e.py (listing size + digest, no HEAD, stale-cache invalidation)"]
         NT10["test_asset_info_comes_from_the_listing_not_a_head_request<br/>test_github_fetcher.py: fetcher stages .partial and passes the digest"]
     end
 
@@ -615,7 +615,7 @@ graph TD
 
 ```mermaid
 mindmap
-    root((Test Suite - 487 tests))
+    root((Test Suite - 488 tests))
         Files
             conftest.py - re-export layer
             data.py - centralized test data
@@ -642,7 +642,7 @@ mindmap
             test_utils.py - version parsing
         Stats
             19 test files
-            487 tests total
+            488 tests total
             ~0.7s execution
         Markers
             none registered (no pytest.mark usage)
@@ -741,8 +741,8 @@ graph TB
 
     subgraph DOWNLOAD_TESTS["Download Integrity Tests"]
         RD["TestResumeDownload<br/>test_integration.py"]
-        PC["TestPartialTargetAndChecksum<br/>test_integration.py"]
-        AC["TestAssetSizeCaching<br/>test_release_manager_e2e.py"]
+        PC["TestPartialTargetAndChecksum<br/>test_integration.py (.partial, checksum incl. uppercase hex)"]
+        AC["TestAssetSizeCaching<br/>test_release_manager_e2e.py (cache + ChecksumError invalidation)"]
         FDIG["test_asset_info_comes_from_the_listing_not_a_head_request<br/>test_github_fetcher.py"]
     end
 

@@ -181,6 +181,23 @@ class ReleaseManager:
         except IOError as e:
             logger.debug(f"Failed to write to cache: {e}")
 
+    def invalidate_asset_info(self, repo: str, tag: str, asset_name: str) -> None:
+        """Drop the cached size/checksum for an asset.
+
+        Used when a download fails its checksum: the cached digest is then suspect
+        (the asset was republished upstream), so the next run must re-read the
+        listing rather than keep serving the stale value for the rest of the TTL.
+        """
+        if not self._cache_enabled:
+            return
+
+        cache_path = self._get_cache_path(repo, tag, asset_name)
+        try:
+            if self.file_system_client.exists(cache_path):
+                self.file_system_client.unlink(cache_path)
+        except OSError as e:
+            logger.debug(f"Failed to drop cached info for {asset_name}: {e}")
+
     def _find_matching_assets(
         self, assets: list[dict[str, Any]], expected_extension: str
     ) -> list[dict[str, Any]]:

@@ -14,7 +14,7 @@ from .common import (
     Headers,
     NetworkClientProtocol,
 )
-from .exceptions import NetworkError
+from .exceptions import ChecksumError, NetworkError
 from .spinner import Spinner
 from .utils import friendly_os_error, format_bytes
 
@@ -167,10 +167,6 @@ class AssetDownloader:
         logger.info(f"Checking if asset needs download from: {download_url}")
 
         partial = out_path.with_name(f"{out_path.name}.partial")
-        quarantined = out_path.with_name(f"{out_path.name}.partial.old")
-        if self.file_system_client.exists(quarantined):
-            # Left over from the previous resume scheme; quarantined as junk then.
-            self.file_system_client.unlink(quarantined)
 
         if self.file_system_client.exists(out_path) and remote_size is not None:
             local_size = self.file_system_client.size(out_path)
@@ -221,9 +217,10 @@ class AssetDownloader:
             if not self._verify(partial, digest):
                 # A checksum mismatch is not resumable — the bytes are not ours.
                 self.file_system_client.unlink(partial)
-                raise NetworkError(
+                raise ChecksumError(
                     f"Checksum mismatch for {asset_name} (expected {digest}): the "
-                    "downloaded archive is not the upstream asset"
+                    "downloaded archive is not the upstream asset and our cached "
+                    "metadata may be stale — run again to re-check it"
                 )
 
         try:
@@ -259,7 +256,8 @@ class AssetDownloader:
         if digest is None:
             return True
 
-        expected = digest.partition(":")[2]
+        # Published hex can be uppercase; file_digest always returns lowercase.
+        expected = digest.partition(":")[2].lower()
         actual = _checksum_of(path, digest)
         if actual is None:
             return True

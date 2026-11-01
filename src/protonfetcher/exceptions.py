@@ -9,6 +9,10 @@ class NetworkError(ProtonFetcherError):
     """Raised when network operations fail."""
 
 
+class ChecksumError(NetworkError):
+    """Downloaded bytes do not match the asset's published checksum."""
+
+
 class ExtractionError(ProtonFetcherError):
     """Raised when archive extraction fails."""
 

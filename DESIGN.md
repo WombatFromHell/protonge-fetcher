@@ -153,6 +153,7 @@ graph TD
 
 - `release_manager` imports `platform_adapters` directly (not via `base_release_fetcher`)
 - `base_release_fetcher` passes `release_manager.get_asset_info()` (size + digest) into `asset_downloader.download_asset()` — the downloader no longer reaches back into `release_manager`
+- `base_release_fetcher._download_asset` catches `ChecksumError` and calls `release_manager.invalidate_asset_info()` — a checksum failure drops the cached size/digest so the next run re-reads the listing
 - `asset_downloader` uses `urllib.request` directly for spinner downloads (bypasses `network.py`)
 - `spinner` imports `format_rate` from `utils`
 - `link_manager` delegates to Layer 3a extracted modules — it is a thin orchestration facade
