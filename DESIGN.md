@@ -291,7 +291,8 @@ sequenceDiagram
     Fetcher->>RM: get_asset_info(repo, tag, asset_name) → size + digest (listing, cached)
     Fetcher->>AD: download_asset(..., remote_size, digest)
     AD->>AD: download_with_spinner() (urllib.request) into <name>.partial
-    Note over AD: .partial resumes with Range; size must match, then digest
+    Note over AD: .partial resumes with Range; a rejected Range restarts from byte 0
+    Note over AD: size must match, then digest; an interrupted run leaves <name>.partial
     Note over AD: GitHub digest from the listing, Forgejo from the .sha512sum asset
     AD->>AD: os.replace(<name>.partial, out_path)
     AD-->>Fetcher: downloaded Path

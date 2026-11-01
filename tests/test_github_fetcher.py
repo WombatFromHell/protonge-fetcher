@@ -150,7 +150,7 @@ class TestFetchAndExtractEdgeCases:
             timeout=30,
         )
 
-        def fake_fetch(url, path, headers, resume_from=None):
+        def fake_fetch(url, path, headers, resume_from=None, expected_size=None):
             path.write_bytes(b"x" * 1024)
 
         spinner = mocker.patch.object(

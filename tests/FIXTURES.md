@@ -356,7 +356,7 @@ def test_extraction(mock_tarfile_operations: Any):
 - `chunks` (list[bytes] | None): Byte chunks to return from read()
 - `content_length` (int | None): Content-Length header value
 - `status` (int): Response status — `206` to prove a resume was honoured, `200` to prove a server ignored the Range
-- `raise_on_open` (Exception | None): Exception to raise on urlopen
+- `raise_on_open` (Exception | list[Exception] | None): Exception to raise on urlopen; a list fails those attempts and then answers normally (the 416 resume self-heal needs a second attempt to succeed)
 
 **Usage:**
 ```python

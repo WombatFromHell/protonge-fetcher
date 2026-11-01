@@ -273,10 +273,6 @@ def mock_urllib_download(mocker: Any) -> Any:
     ) -> Any:
         mock_urllib = mocker.patch("urllib.request.urlopen")
 
-        if raise_on_open:
-            mock_urllib.side_effect = raise_on_open
-            return {"urlopen_mock": mock_urllib, "response": None}
-
         mock_resp_obj = mocker.MagicMock()
         mock_resp_obj.__enter__.return_value = mock_resp_obj
         mock_resp_obj.status = status
@@ -290,6 +286,15 @@ def mock_urllib_download(mocker: Any) -> Any:
             mock_resp_obj.read.side_effect = chunks
         else:
             mock_resp_obj.read.side_effect = [b"chunk", b""]
+
+        if raise_on_open is not None:
+            # A list means 'fail these attempts, then answer normally' — the
+            # resume self-heal needs a second attempt to succeed.
+            failures = (
+                raise_on_open if isinstance(raise_on_open, list) else [raise_on_open]
+            )
+            mock_urllib.side_effect = [*failures, mock_resp_obj]
+            return {"urlopen_mock": mock_urllib, "response": mock_resp_obj}
 
         mock_urllib.return_value = mock_resp_obj
         return {"urlopen_mock": mock_urllib, "response": mock_resp_obj}

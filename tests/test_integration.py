@@ -477,25 +477,61 @@ class TestResumeDownload:
                 mock_network_client, FileSystemClient()
             ).download_with_spinner(url=self.URL, output_path=out_path)
 
-    def test_range_not_satisfiable_names_the_partial_file(
+    def test_rejected_range_restarts_from_byte_zero(
         self,
         tmp_path: Path,
         mock_network_client: Any,
         mock_urllib_download: Any,
     ) -> None:
-        """HTTP 416 means the local prefix does not match the remote asset."""
+        """HTTP 416 means our prefix is not a prefix of the asset — restart, don't hand the user a delete job."""
         out_path = tmp_path / self.ASSET
-        out_path.write_bytes(b"a" * 400)
+        out_path.write_bytes(b"a" * 900)
 
         error = urllib.error.HTTPError(
             self.URL, 416, "Range Not Satisfiable", email.message.Message(), None
         )
-        mock_urllib_download(raise_on_open=error)
+        mocks = mock_urllib_download(
+            raise_on_open=[error], chunks=[b"b" * 800, b""], content_length=800
+        )
 
-        with pytest.raises(NetworkError, match="Delete"):
-            self._downloader(
-                mock_network_client, FileSystemClient()
-            ).download_with_spinner(url=self.URL, output_path=out_path, resume_from=400)
+        self._downloader(mock_network_client, FileSystemClient()).download_with_spinner(
+            url=self.URL, output_path=out_path, resume_from=900
+        )
+
+        assert mocks["urlopen_mock"].call_count == 2
+        assert "Range" not in mocks["urlopen_mock"].call_args[0][0].headers
+        assert out_path.read_bytes() == b"b" * 800
+
+    def test_resume_without_content_length_shows_the_remote_size(
+        self,
+        mocker: Any,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A 206 with no Content-Length must size the bar from the listing, not from the offset."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(b"a" * 400)
+
+        mock_urllib_download(chunks=[b"b" * 400, b""], status=206)
+
+        captured: dict[str, Any] = {}
+        original_init = Spinner.__init__
+
+        def capturing_init(self: Spinner, *args: Any, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            original_init(self, *args, **kwargs)
+
+        mocker.patch.object(Spinner, "__init__", capturing_init)
+
+        self._downloader(mock_network_client, FileSystemClient()).download_with_spinner(
+            url=self.URL,
+            output_path=out_path,
+            resume_from=400,
+            expected_size=800,
+        )
+
+        assert captured["total"] == 800
 
 
 class TestPartialTargetAndChecksum:

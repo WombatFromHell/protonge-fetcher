@@ -321,7 +321,7 @@ graph TB
         NT4["TestUpdateAllManagedForksPlatformFiltering<br/>2 tests in test_base_release_fetcher.py"]
         NT5["TestForkConfigPlatformDispatch<br/>4 tests in test_cli.py"]
         NT6["TestReleaseManagerForgejoAdapter<br/>5 tests in test_release_manager_e2e.py"]
-        NT7["TestResumeDownload<br/>9 tests in test_integration.py"]
+        NT7["TestResumeDownload<br/>10 tests in test_integration.py<br/>(incl. 416 self-heal, spinner total without Content-Length)"]
         NT8["TestPartialTargetAndChecksum<br/>7 tests in test_integration.py<br/>(incl. uppercase checksum hex)"]
         NT9["TestAssetSizeCaching<br/>10 tests in test_release_manager_e2e.py (listing size + digest, no HEAD, stale-cache invalidation)"]
         NT10["test_asset_info_comes_from_the_listing_not_a_head_request<br/>test_github_fetcher.py: fetcher stages .partial and passes the digest"]
@@ -615,7 +615,7 @@ graph TD
 
 ```mermaid
 mindmap
-    root((Test Suite - 488 tests))
+    root((Test Suite - 489 tests))
         Files
             conftest.py - re-export layer
             data.py - centralized test data
@@ -642,7 +642,7 @@ mindmap
             test_utils.py - version parsing
         Stats
             19 test files
-            488 tests total
+            489 tests total
             ~0.7s execution
         Markers
             none registered (no pytest.mark usage)

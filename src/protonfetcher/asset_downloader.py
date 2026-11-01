@@ -58,68 +58,44 @@ class AssetDownloader:
         output_path: Path,
         headers: Headers | None = None,
         resume_from: int | None = None,
+        expected_size: int | None = None,
     ) -> None:
         """Download a file with progress spinner using urllib.
 
         Args:
             resume_from: byte offset to continue from. The server must answer
-                206; any other status means it ignored the Range and we rewrite
-                the file from byte 0.
+                206; a plain 200 or a 416 means the prefix we hold is unusable,
+                so the file is rewritten from byte 0.
+            expected_size: the remote size from the release listing, used for the
+                progress bar when the response carries no Content-Length.
         """
-
-        # Create a request with headers
-        request_headers = dict(headers or {})
         offset = resume_from or 0
-        if offset:
-            request_headers["Range"] = f"bytes={offset}-"
-        req = urllib.request.Request(url, headers=request_headers)
+        request_headers = dict(headers or {})
 
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                resumed = offset > 0 and response.status == 206
-                remaining = int(response.headers.get("Content-Length", 0))
-                total = offset + remaining if resumed else remaining
+            while True:
+                if offset:
+                    request_headers["Range"] = f"bytes={offset}-"
+                else:
+                    request_headers.pop("Range", None)
 
-                if resumed:
-                    logger.info(
-                        f"Resuming {output_path.name} from {format_bytes(offset)}"
+                try:
+                    self._stream(
+                        url, output_path, request_headers, offset, expected_size
                     )
-
-                with open(output_path, "ab" if resumed else "wb") as f:
-                    chunk_size = 8192
-
-                    # Create spinner with total size if available
-                    with (
-                        Spinner(
-                            desc=f"Downloading {output_path.name}",
-                            total=total,
-                            unit="B",
-                            unit_scale=True,
-                            disable=False,
-                            fps_limit=10.0,  # Limit to 10 FPS during download to prevent excessive terminal updates
-                            show_progress=True,
-                        ) as spinner
-                    ):
-                        if resumed:
-                            # The bar starts at the bytes we already hold.
-                            spinner.update(offset)
-
-                        while True:
-                            chunk = response.read(chunk_size)
-                            if not chunk:
-                                break
-
-                            f.write(chunk)
-                            # Update spinner with the amount downloaded since last call
-                            spinner.update(len(chunk))
-
+                    return
+                except urllib.error.HTTPError as e:
+                    # An unsatisfiable Range means our .partial is not a prefix of
+                    # the remote asset — it is junk we already know is unusable.
+                    if e.code != 416 or not offset:
+                        raise
+                    logger.info(
+                        f"{output_path.name}: remote asset rejected the resume range, "
+                        "restarting from byte 0"
+                    )
+                    self.file_system_client.unlink(output_path)
+                    offset = 0
         except urllib.error.HTTPError as e:
-            if e.code == 416 and offset:
-                raise NetworkError(
-                    f"{url} rejected the resume range (bytes {resume_from}-): the local "
-                    f"file does not match the remote asset. Delete {output_path} and "
-                    "run again."
-                ) from e
             raise NetworkError(f"Failed to download {url}: {str(e)}") from e
         except urllib.error.URLError as e:
             raise NetworkError(f"Failed to download {url}: {str(e)}") from e
@@ -129,6 +105,54 @@ class AssetDownloader:
             raise friendly_os_error("download to", output_path, e) from e
         except Exception as e:
             raise NetworkError(f"Failed to download {url}: {str(e)}")
+
+    def _stream(
+        self,
+        url: str,
+        output_path: Path,
+        request_headers: Headers,
+        offset: int,
+        expected_size: int | None,
+    ) -> None:
+        """One request+write pass. Raises HTTPError for the caller to classify."""
+        req = urllib.request.Request(url, headers=request_headers)
+
+        with urllib.request.urlopen(req, timeout=self.timeout) as response:
+            resumed = offset > 0 and response.status == 206
+            remaining = int(response.headers.get("Content-Length", 0))
+            # No Content-Length (a proxy may strip it) falls back to the listing.
+            total = offset + remaining if remaining else expected_size
+
+            if resumed:
+                logger.info(f"Resuming {output_path.name} from {format_bytes(offset)}")
+
+            with open(output_path, "ab" if resumed else "wb") as f:
+                chunk_size = 8192
+
+                # Create spinner with total size if available
+                with (
+                    Spinner(
+                        desc=f"Downloading {output_path.name}",
+                        total=total,
+                        unit="B",
+                        unit_scale=True,
+                        disable=False,
+                        fps_limit=10.0,  # Limit to 10 FPS during download to prevent excessive terminal updates
+                        show_progress=True,
+                    ) as spinner
+                ):
+                    if resumed:
+                        # The bar starts at the bytes we already hold.
+                        spinner.update(offset)
+
+                    while True:
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+
+                        f.write(chunk)
+                        # Update spinner with the amount downloaded since last call
+                        spinner.update(len(chunk))
 
     def download_asset(
         self,
@@ -240,7 +264,9 @@ class AssetDownloader:
         remote_size: int | None,
     ) -> None:
         """Download into the .partial target and gate on the expected size."""
-        self.download_with_spinner(download_url, partial, headers, resume_from)
+        self.download_with_spinner(
+            download_url, partial, headers, resume_from, expected_size=remote_size
+        )
 
         if remote_size is not None:
             final_size = self.file_system_client.size(partial)
