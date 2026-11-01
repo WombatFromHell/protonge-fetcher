@@ -23,7 +23,8 @@ This document provides comprehensive documentation for all test fixtures availab
 | **Environment** | Directory structures & symlink envs | `temp_environment`, `extract_dir`, `installed_proton_versions`, `symlink_environment` |
 | **Fork Parametrization** | Multi-fork test coverage | `fork` |
 | **Component (SUT)** | System-under-test instances | `link_manager` |
-| **Mock Helpers** | Low-level patch factories | `mock_tarfile_operations`, `mock_urllib_download`, `mock_subprocess_tar`, `mock_builtin_open` |
+| **Mock Helpers** | Low-level patch factories | `mock_tarfile_operations`, `mock_urllib_download`, `mock_subprocess_tar`, `mock_builtin_open`, `FakeDownloaderClient` |
+| **Isolation** | Autouse environment hygiene | `isolated_cache_dir` |
 
 ## Factory Fixtures
 
@@ -34,8 +35,8 @@ This document provides comprehensive documentation for all test fixtures availab
 **Returns:** `MagicMock(spec=NetworkClientProtocol)` — `get()` and `head()` return `HttpResponse` objects.
 
 **Parameters:**
-- `get_response` (dict | str | None): JSON body for GET (dicts are auto-serialized); default is a sample assets payload
-- `head_response` (dict | str | None): header dump for HEAD (dicts are converted to `key: value` lines); a `Location` header sets `final_url`
+- `get_response` (dict | str | None): JSON body for GET (dicts are auto-serialized); default is a sample assets payload. Asset objects may carry `size` and `digest` — that listing is now the only source of both.
+- `head_response` (dict | str | None): header dump for HEAD (dicts are converted to `key: value` lines); a `Location` header sets `final_url`. HEAD is used only to follow the tag redirect — size never comes from a HEAD.
 - `rate_limit` (bool): GET returns a 403 rate-limit response
 - `not_found` (bool): GET and HEAD both return 404
 - `custom_returncode` (int | None): overrides the status code (22 maps to 404)
@@ -349,31 +350,30 @@ def test_extraction(mock_tarfile_operations: Any):
 
 **Purpose:** Mock urllib download operations.
 
-**Returns:** `Callable[..., Any]`
+**Returns:** `Callable[..., dict]` — `{"urlopen_mock": ..., "response": ...}` (capture it when you need to assert on the request or `call_count`).
 
 **Parameters:**
 - `chunks` (list[bytes] | None): Byte chunks to return from read()
 - `content_length` (int | None): Content-Length header value
+- `status` (int): Response status — `206` to prove a resume was honoured, `200` to prove a server ignored the Range
 - `raise_on_open` (Exception | None): Exception to raise on urlopen
 
 **Usage:**
 ```python
-def test_download(mock_urllib_download: Any, mock_builtin_open: Any):
-    # Configure mock to return chunks
-    mock_urllib_download(
-        chunks=[b"chunk1", b"chunk2", b""],
-        content_length=1048576,
+def test_resume(mock_urllib_download: Any, tmp_path: Path):
+    partial = tmp_path / "GE-Proton10-11.tar.gz.partial"
+    partial.write_bytes(b"prefix")
+
+    mocks = mock_urllib_download(chunks=[b"remainder", b""], content_length=9)
+    AssetDownloader(FakeDownloaderClient(), FileSystemClient()).download_with_spinner(
+        url, partial, resume_from=6
     )
 
-    # Capture writes
-    _, written_data = mock_builtin_open()
-
-    # Run download
-    downloader.download_with_spinner(url, output_path)
-
-    # Verify data was written
-    assert b"".join(written_data) == b"chunk1chunk2"
+    headers = mocks["urlopen_mock"].call_args[0][0].headers
+    assert headers["Range"] == "bytes=6-"
 ```
+
+Download tests write to a **real** `tmp_path` file (via `FileSystemClient`), not `mock_builtin_open` — the `.partial` target and the rename are the behaviour under test. `mock_builtin_open` remains for extraction tests.
 
 ---
 
@@ -402,6 +402,30 @@ def test_system_tar_fallback(mock_subprocess_tar: Any):
     call_args = mock_run.call_args[0][0]
     assert "tar" in call_args
 ```
+
+---
+
+### `FakeDownloaderClient`
+
+**Purpose:** Stand-in `NetworkClientProtocol` for `AssetDownloader` tests, where the GET body is an archive rather than a release listing.
+
+**Parameters:**
+- `content_length` (int): Advertised asset size
+- `digest` (str | None): `sha256:<hex>` returned by `get_asset_info()`; `None` means "nothing to verify against"
+- `digest_missing` (bool): `get_asset_info()` returns `None` — a listing with no size or checksum
+
+**Usage:**
+```python
+downloader = AssetDownloader(FakeDownloaderClient(digest=f"sha256:{hex_digest}"), FileSystemClient())
+```
+
+Release metadata lives on this client now — tests of `download_asset` never assert on `head()`.
+
+---
+
+### `isolated_cache_dir` (autouse)
+
+**Purpose:** Points `XDG_CACHE_HOME` at `tmp_path/cache` for every test, so `ReleaseManager`'s size/digest metadata cache never writes the real `~/.cache` and never leaks state between tests. No opt-in needed.
 
 ---
 
@@ -515,4 +539,4 @@ def test_prune(tmp_path):
 
 ---
 
-*Last updated: 2026-07-16*
+*Last updated: 2026-11-01*

@@ -10,6 +10,7 @@ Tests the complete release discovery workflow:
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -540,170 +541,231 @@ class TestListRecentReleases:
 
 
 class TestAssetSizeCaching:
-    """Test asset size caching behavior."""
+    """Asset size and checksum come from the release API listing, cached."""
+
+    REPO = "GloriousEggroll/proton-ge-custom"
+    TAG = "GE-Proton10-20"
+    ASSET = "GE-Proton10-20.tar.gz"
+    HEX512 = "a" * 128
+
+    @staticmethod
+    def _release_body(size: int, digest: str | None = None, name: str = ASSET) -> str:
+        asset = {"name": name, "size": size}
+        if digest is not None:
+            asset["digest"] = digest
+        return json.dumps({"assets": [asset]})
 
     def test_get_remote_asset_size_caching_behavior(
         self,
         mock_network_client: Any,
         tmp_path: Path,
     ) -> None:
-        """Test that asset size caching is disabled during tests."""
-        # Arrange
+        """The release listing is fetched once and reused from cache."""
         fs = FileSystemClient()
-
-        import os
 
         old_cache = os.environ.get("XDG_CACHE_HOME")
         os.environ["XDG_CACHE_HOME"] = str(tmp_path)
 
         try:
-            mock_head_response = HttpResponse(
-                status=200, headers={"content-length": "1048576"}
+            mock_network_client.get.return_value = HttpResponse(
+                status=200, body=self._release_body(1048576, "sha256:" + "b" * 64)
             )
-            mock_network_client.head.return_value = mock_head_response
 
             release_manager = ReleaseManager(mock_network_client, fs)
 
-            # Act: First call
             size1 = release_manager.get_remote_asset_size(
-                repo="GloriousEggroll/proton-ge-custom",
-                tag="GE-Proton10-20",
-                asset_name="GE-Proton10-20.tar.gz",
+                self.REPO, self.TAG, self.ASSET
             )
-
-            # Act: Second call (would use cache if not in test mode)
             size2 = release_manager.get_remote_asset_size(
-                repo="GloriousEggroll/proton-ge-custom",
-                tag="GE-Proton10-20",
-                asset_name="GE-Proton10-20.tar.gz",
+                self.REPO, self.TAG, self.ASSET
             )
 
-            # Assert: Both calls return the same size
             assert size1 == 1048576
             assert size2 == 1048576
-            # Note: Cache files are not created during tests to preserve test isolation
-
+            assert mock_network_client.get.call_count == 1
         finally:
-            # Restore environment
             if old_cache:
                 os.environ["XDG_CACHE_HOME"] = old_cache
             else:
                 del os.environ["XDG_CACHE_HOME"]
 
-    def test_get_cached_asset_size_expired(
+    def test_get_cached_asset_info_expired(
         self,
         mock_network_client: Any,
         tmp_path: Path,
-        mocker: pytest.FixtureRequest,
     ) -> None:
-        """Test that expired cache is not used."""
-        # Arrange
+        """Expired cache is not used."""
         fs = FileSystemClient()
-
-        import os
 
         old_cache = os.environ.get("XDG_CACHE_HOME")
         os.environ["XDG_CACHE_HOME"] = str(tmp_path)
 
         try:
-            # Create expired cache
             release_manager = ReleaseManager(mock_network_client, fs)
             cache_path = release_manager._get_cache_path(
-                "GloriousEggroll/proton-ge-custom",
-                "GE-Proton10-20",
-                "GE-Proton10-20.tar.gz",
+                self.REPO, self.TAG, self.ASSET
             )
 
-            import json
             import time
 
             expired_data = {
                 "size": 1048576,
+                "digest": "sha256:" + "b" * 64,
                 "timestamp": time.time() - 7200,  # 2 hours ago (expired)
             }
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(expired_data))
 
-            # Set file mtime to 2 hours ago to trigger cache expiration
             old_time = time.time() - 7200
             os.utime(cache_path, (old_time, old_time))
 
-            # Mock fresh network response
-            mock_head_response = HttpResponse(
-                status=200, headers={"content-length": "2097152"}
-            )
-            mock_network_client.head.return_value = mock_head_response
-
-            # Act
-            size = release_manager.get_remote_asset_size(
-                repo="GloriousEggroll/proton-ge-custom",
-                tag="GE-Proton10-20",
-                asset_name="GE-Proton10-20.tar.gz",
+            mock_network_client.get.return_value = HttpResponse(
+                status=200, body=self._release_body(2097152)
             )
 
-            # Assert: Should fetch fresh size, not use expired cache
+            size, digest = release_manager.get_asset_info(
+                self.REPO, self.TAG, self.ASSET
+            )
+
             assert size == 2097152
-
+            assert digest is None
         finally:
             if old_cache:
                 os.environ["XDG_CACHE_HOME"] = old_cache
             else:
                 del os.environ["XDG_CACHE_HOME"]
 
-    def test_get_remote_asset_size_follows_redirect(
+    def test_asset_size_comes_from_api_listing(
         self,
         mock_network_client: Any,
-        tmp_path: Path,
     ) -> None:
-        """Test that asset size fetch follows redirects."""
-        # Use real FileSystemClient to avoid mtime() mock issues
+        """Size comes from the release listing — no HEAD request, which dawn.wine rejects."""
         fs = FileSystemClient()
 
-        # Arrange: curl -L follows redirects internally, so head() is called once
-        # with the final response
-        mock_head_response = HttpResponse(
-            status=200, headers={"content-length": "1048576"}
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body=self._release_body(1048576)
         )
 
-        mock_network_client.head.return_value = mock_head_response
-
-        # Disable caching to ensure network call is made
         release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
 
-        # Act
-        size = release_manager.get_remote_asset_size(
-            repo="GloriousEggroll/proton-ge-custom",
-            tag="GE-Proton10-20",
-            asset_name="GE-Proton10-20.tar.gz",
-        )
+        size = release_manager.get_remote_asset_size(self.REPO, self.TAG, self.ASSET)
 
-        # Assert
         assert size == 1048576
-        assert mock_network_client.head.call_count == 1
+        assert mock_network_client.head.call_count == 0
 
-    def test_get_remote_asset_size_404_error(
+    def test_asset_info_missing_asset_raises(
         self,
         mock_network_client: Any,
-        tmp_path: Path,
     ) -> None:
-        """Test handling 404 error when getting asset size."""
-        # Use real FileSystemClient to avoid mtime() mock issues
+        """An asset the listing does not contain is reported as not found."""
         fs = FileSystemClient()
 
-        # Arrange
-        mock_head_response = HttpResponse(status=404)
-        mock_network_client.head.return_value = mock_head_response
+        mock_network_client.get.return_value = HttpResponse(
+            status=200, body=self._release_body(1024, name="Other.tar.gz")
+        )
 
-        # Disable caching to ensure network call is made
         release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
 
-        # Act & Assert
         with pytest.raises(NetworkError, match="Remote asset not found"):
-            release_manager.get_remote_asset_size(
-                repo="GloriousEggroll/proton-ge-custom",
-                tag="GE-Proton10-20",
-                asset_name="NonExistent.tar.gz",
-            )
+            release_manager.get_asset_info(self.REPO, self.TAG, self.ASSET)
+
+    def test_asset_info_api_failure_raises(
+        self,
+        mock_network_client: Any,
+    ) -> None:
+        """A failed API request must not look like an unknown size."""
+        fs = FileSystemClient()
+
+        mock_network_client.get.return_value = HttpResponse(status=500)
+
+        release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
+
+        with pytest.raises(NetworkError, match="HTTP 500"):
+            release_manager.get_asset_info(self.REPO, self.TAG, self.ASSET)
+
+    def test_listing_without_size_cannot_be_verified(
+        self,
+        mock_network_client: Any,
+    ) -> None:
+        """A listing asset with no size cannot gate a download."""
+        fs = FileSystemClient()
+
+        mock_network_client.get.return_value = HttpResponse(
+            status=200,
+            body=json.dumps({"assets": [{"name": self.ASSET}]}),
+        )
+
+        release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
+
+        assert (
+            release_manager.get_asset_info(self.REPO, self.TAG, self.ASSET).size is None
+        )
+        with pytest.raises(NetworkError, match="Could not determine size"):
+            release_manager.get_remote_asset_size(self.REPO, self.TAG, self.ASSET)
+
+    def test_digest_falls_back_to_the_checksum_asset(
+        self,
+        mock_network_client: Any,
+    ) -> None:
+        """Forgejo has no digest field, so the published .sha512sum asset is used."""
+        fs = FileSystemClient()
+
+        mock_network_client.get.side_effect = [
+            HttpResponse(status=200, body=self._release_body(339558796)),
+            HttpResponse(status=200, body=f"{self.HEX512}  {self.ASSET}\n"),
+        ]
+
+        release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
+
+        size, digest = release_manager.get_asset_info(self.REPO, self.TAG, self.ASSET)
+
+        assert size == 339558796
+        assert digest == f"sha512:{self.HEX512}"
+        assert mock_network_client.get.call_count == 2
+        # The stem drops the whole archive suffix, not just the last dot.
+        assert mock_network_client.get.call_args_list[1][0][0].endswith(
+            "/GE-Proton10-20.sha512sum"
+        )
+
+    def test_missing_checksum_asset_is_not_a_failure(
+        self,
+        mock_network_client: Any,
+    ) -> None:
+        """No published checksum means no digest — verification is skipped, not failed."""
+        fs = FileSystemClient()
+
+        mock_network_client.get.side_effect = [
+            HttpResponse(status=200, body=self._release_body(1024)),
+            HttpResponse(status=404),
+            HttpResponse(status=404),
+        ]
+
+        release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
+
+        size, digest = release_manager.get_asset_info(self.REPO, self.TAG, self.ASSET)
+
+        assert size == 1024
+        assert digest is None
+
+    def test_malformed_checksum_asset_is_ignored(
+        self,
+        mock_network_client: Any,
+    ) -> None:
+        """A body that is not a hex digest yields no digest."""
+        fs = FileSystemClient()
+
+        mock_network_client.get.side_effect = [
+            HttpResponse(status=200, body=self._release_body(1024)),
+            HttpResponse(status=200, body="not a checksum"),
+            HttpResponse(status=200, body="zz" * 64),
+        ]
+
+        release_manager = ReleaseManager(mock_network_client, fs, cache_enabled=False)
+
+        size, digest = release_manager.get_asset_info(self.REPO, self.TAG, self.ASSET)
+
+        assert size == 1024
+        assert digest is None
 
 
 class TestAssetNameExtension:

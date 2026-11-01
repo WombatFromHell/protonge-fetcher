@@ -152,7 +152,7 @@ graph TD
 **Cross-layer notes:**
 
 - `release_manager` imports `platform_adapters` directly (not via `base_release_fetcher`)
-- `asset_downloader` calls `release_manager.get_remote_asset_size()` (reverse dependency for size checks)
+- `base_release_fetcher` passes `release_manager.get_asset_info()` (size + digest) into `asset_downloader.download_asset()` — the downloader no longer reaches back into `release_manager`
 - `asset_downloader` uses `urllib.request` directly for spinner downloads (bypasses `network.py`)
 - `spinner` imports `format_rate` from `utils`
 - `link_manager` delegates to Layer 3a extracted modules — it is a thin orchestration facade
@@ -287,9 +287,12 @@ sequenceDiagram
     RM-->>Fetcher: asset name
 
     Fetcher->>PA: build_download_url(repo, tag, asset_name)
-    Fetcher->>AD: download_asset(repo, tag, asset_name, out_path, download_url, remote_size)
-    AD->>RM: get_remote_asset_size() (skip if local matches)
-    AD->>AD: download_with_spinner() (urllib.request)
+    Fetcher->>RM: get_asset_info(repo, tag, asset_name) → size + digest (listing, cached)
+    Fetcher->>AD: download_asset(..., remote_size, digest)
+    AD->>AD: download_with_spinner() (urllib.request) into <name>.partial
+    Note over AD: .partial resumes with Range; size must match, then digest
+    Note over AD: GitHub digest from the listing, Forgejo from the .sha512sum asset
+    AD->>AD: os.replace(<name>.partial, out_path)
     AD-->>Fetcher: downloaded Path
 
     Fetcher->>AE: extract_archive(archive_path, extract_dir, show_progress)

@@ -7,9 +7,10 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .common import (
+    DEFAULT_USER_AGENT,
     FORKS,
     GITHUB_URL_PATTERN,
     FileSystemClientProtocol,
@@ -24,6 +25,22 @@ from .platform_adapters import github_adapter
 from .utils import format_bytes, get_proton_asset_name, parse_version
 
 logger = logging.getLogger(__name__)
+
+# GitHub's release API reports a sha256 digest per asset; Forgejo reports none, so
+# the published checksum file is parsed instead — its length names the algorithm.
+_DIGEST_ALGORITHMS = {64: "sha256", 128: "sha512"}
+_HEX_DIGEST = re.compile(r"[0-9a-fA-F]+")
+
+
+class AssetInfo(NamedTuple):
+    """What a release listing tells us about an asset.
+
+    ``digest`` is None when there is nothing to verify against — never when
+    verification failed.
+    """
+
+    size: int | None
+    digest: str | None
 
 
 class ReleaseManager:
@@ -106,7 +123,7 @@ class ReleaseManager:
         Returns:
             Path to the cache file
         """
-        key_data = f"{repo}_{tag}_{asset_name}_size"
+        key_data = f"{repo}_{tag}_{asset_name}_info"
         cache_key = hashlib.md5(key_data.encode()).hexdigest()
         return self._cache_dir / cache_key
 
@@ -118,10 +135,10 @@ class ReleaseManager:
         age = time.time() - self.file_system_client.mtime(cache_path)
         return age < max_age
 
-    def _get_cached_asset_size(
+    def _get_cached_asset_info(
         self, repo: str, tag: str, asset_name: str
-    ) -> int | None:
-        """Get cached asset size if available and not expired."""
+    ) -> AssetInfo | None:
+        """Get cached asset size and checksum if available and not expired."""
         cache_path = self._get_cache_path(repo, tag, asset_name)
 
         if self._is_cache_valid(cache_path):
@@ -129,24 +146,31 @@ class ReleaseManager:
                 cached_data_bytes = self.file_system_client.read(cache_path)
                 cached_data = json.loads(cached_data_bytes.decode("utf-8"))
                 size = cached_data.get("size")
-                # Validate that size is an integer
+                digest = cached_data.get("digest")
+                # Validate that size is an integer and the digest a plain string
                 if isinstance(size, int):
-                    return size
-            except (json.JSONDecodeError, IOError):
+                    return AssetInfo(size, digest if isinstance(digest, str) else None)
+            except (json.JSONDecodeError, IOError, TypeError):
                 # If cache file is invalid, return None to force a fresh fetch
                 pass
         return None
 
-    def _cache_asset_size(
-        self, repo: str, tag: str, asset_name: str, size: int
+    def _cache_asset_info(
+        self,
+        repo: str,
+        tag: str,
+        asset_name: str,
+        size: int | None,
+        digest: str | None,
     ) -> None:
-        """Cache the asset size."""
+        """Cache the asset size and checksum."""
         cache_path = self._get_cache_path(repo, tag, asset_name)
 
         try:
             self.file_system_client.mkdir(self._cache_dir, parents=True, exist_ok=True)
             cache_data = {
                 "size": size,
+                "digest": digest,
                 "timestamp": time.time(),
                 "repo": repo,
                 "tag": tag,
@@ -173,8 +197,8 @@ class ReleaseManager:
         expected_extension: str,
         fork: ForkName | None = None,
         tag: str | None = None,
-    ) -> str:
-        """Handle the API response to find the appropriate asset.
+    ) -> dict[str, Any]:
+        """Pick the asset to download from an API response.
 
         The fork's expected asset name (from asset_template) takes precedence
         when present. Otherwise, when multiple architecture variants exist,
@@ -186,28 +210,29 @@ class ReleaseManager:
             # Prefer the exact asset name expected for this fork
             if tag is not None and fork is not None:
                 expected_name = get_proton_asset_name(tag, fork)
-                if any(asset["name"] == expected_name for asset in matching_assets):
-                    logger.debug(f"Found exact asset via API: {expected_name}")
-                    return expected_name
+                for asset in matching_assets:
+                    if asset["name"] == expected_name:
+                        logger.debug(f"Found exact asset via API: {expected_name}")
+                        return asset
             # When multiple architecture variants exist, prefer x86_64
             for asset in matching_assets:
                 if "x86_64" in asset["name"]:
                     logger.debug(f"Found x86_64 asset via API: {asset['name']}")
-                    return asset["name"]
-            # Return the name of the first matching asset
-            asset_name = matching_assets[0]["name"]
-            logger.debug(f"Found asset via API: {asset_name}")
-            return asset_name
-        else:
-            # If no matching extension assets found, use the first available asset as fallback
-            if assets:
-                asset_name = assets[0]["name"]
-                logger.debug(
-                    f"Found asset (non-matching extension) via API: {asset_name}"
-                )
-                return asset_name
-            else:
-                raise NetworkError("No assets found in release")
+                    return asset
+            # Return the first matching asset
+            asset = matching_assets[0]
+            logger.debug(f"Found asset via API: {asset['name']}")
+            return asset
+
+        # If no matching extension assets found, use the first available asset
+        if assets:
+            asset = assets[0]
+            logger.debug(
+                f"Found asset (non-matching extension) via API: {asset['name']}"
+            )
+            return asset
+
+        raise NetworkError("No assets found in release")
 
     def _try_api_approach(self, repo: str, tag: str, fork: ForkName) -> str:
         """Try to find the asset using the platform API."""
@@ -230,7 +255,20 @@ class ReleaseManager:
             raise NetworkError("No assets found in release API response")
 
         assets: list[dict[str, Any]] = release_data["assets"]
-        return self._handle_api_response(assets, FORKS[fork].archive_format, fork, tag)
+        asset = self._handle_api_response(assets, FORKS[fork].archive_format, fork, tag)
+
+        # The listing we just fetched already carries size and digest, so caching
+        # it here means the download path costs no extra request.
+        if self._cache_enabled and isinstance(asset.get("size"), int):
+            digest = asset.get("digest")
+            self._cache_asset_info(
+                repo,
+                tag,
+                asset["name"],
+                asset["size"],
+                digest if isinstance(digest, str) else None,
+            )
+        return asset["name"]
 
     def _try_html_fallback(self, repo: str, tag: str, fork: ForkName) -> str:
         """Try to find the asset by HTML parsing if API fails."""
@@ -299,7 +337,7 @@ class ReleaseManager:
                 raise fallback_error
 
     def get_remote_asset_size(self, repo: str, tag: str, asset_name: str) -> int:
-        """Get the size of a remote asset using HEAD request.
+        """Get the size of a remote asset.
 
         Args:
             repo: Repository in format 'owner/repo'
@@ -312,47 +350,113 @@ class ReleaseManager:
         Raises:
             NetworkError: If unable to get asset size
         """
-        # Try cache first (skip when caching is disabled)
-        if self._cache_enabled:
-            cached_size = self._get_cached_asset_size(repo, tag, asset_name)
-            if cached_size is not None:
-                logger.debug(
-                    f"Using cached size for {asset_name}: {format_bytes(cached_size)}"
-                )
-                return cached_size
-
-        url = self.platform_adapter.build_download_url(repo, tag, asset_name)
-        logger.debug(f"Getting remote asset size from: {url}")
-
-        response = self.network_client.head(url)
-        if response.status == 404:
-            raise NetworkError(f"Remote asset not found: {asset_name}")
-        if response.status >= 400:
-            raise NetworkError(
-                f"Failed to get remote asset size for {asset_name}: HTTP {response.status}"
-            )
-
-        size = self._parse_content_length(response.headers.get("content-length"))
-        if not size:
+        size = self.get_asset_info(repo, tag, asset_name).size
+        if size is None:
             raise NetworkError(
                 f"Could not determine size of remote asset: {asset_name}"
             )
 
         logger.debug(f"Remote asset size: {format_bytes(size)}")
-        if self._cache_enabled:
-            self._cache_asset_size(repo, tag, asset_name, size)
         return size
 
-    @staticmethod
-    def _parse_content_length(value: str | None) -> int | None:
-        """Parse a content-length header value into a positive size."""
-        if not value:
-            return None
+    def get_asset_info(self, repo: str, tag: str, asset_name: str) -> AssetInfo:
+        """Size and checksum for an asset, from the release listing (cached).
+
+        GitHub exposes a `digest` per asset for free in the listing we already
+        fetch. Forgejo exposes none, so the published
+        `<archive stem>.sha512sum` asset is fetched instead — one small request,
+        then cached. A None digest means "nothing to verify", never "failed".
+
+        Raises:
+            NetworkError: If the release listing fails or lacks the asset
+        """
+        cached = (
+            self._get_cached_asset_info(repo, tag, asset_name)
+            if self._cache_enabled
+            else None
+        )
+        if cached is not None:
+            if cached.digest is None:
+                digest = self._fetch_checksum_digest(repo, tag, asset_name)
+                if digest is not None:
+                    cached = cached._replace(digest=digest)
+                    self._cache_asset_info(repo, tag, asset_name, cached.size, digest)
+            return cached
+
+        info = self._fetch_asset_info(repo, tag, asset_name)
+        if info is None:
+            raise NetworkError(f"Remote asset not found: {asset_name}")
+        if info.digest is None:
+            info = info._replace(
+                digest=self._fetch_checksum_digest(repo, tag, asset_name)
+            )
+
+        if self._cache_enabled and info.size is not None:
+            self._cache_asset_info(repo, tag, asset_name, info.size, info.digest)
+        return info
+
+    def _fetch_asset_info(
+        self, repo: str, tag: str, asset_name: str
+    ) -> AssetInfo | None:
+        """Read size and digest for one asset from the release API listing."""
+        api_url = self.platform_adapter.build_api_url(repo, "releases", "tags", tag)
+        logger.debug(f"Fetching asset info from API: {api_url}")
+
+        response = self.network_client.get(
+            api_url, headers=dict(self.platform_adapter.default_headers)
+        )
+        if response.status >= 400:
+            raise NetworkError(
+                f"Failed to get remote asset info for {asset_name}: HTTP {response.status}"
+            )
+
         try:
-            size = int(value)
-        except ValueError:
+            release_data: dict[str, Any] = json.loads(response.body)
+        except json.JSONDecodeError as e:
+            raise NetworkError(f"Failed to parse JSON: {e}") from e
+
+        asset = next(
+            (a for a in release_data.get("assets", []) if a["name"] == asset_name),
+            None,
+        )
+        if asset is None:
             return None
-        return size if size > 0 else None
+
+        size = asset.get("size")
+        digest = asset.get("digest")
+        return AssetInfo(
+            size if isinstance(size, int) else None,
+            digest if isinstance(digest, str) else None,
+        )
+
+    def _fetch_checksum_digest(
+        self, repo: str, tag: str, asset_name: str
+    ) -> str | None:
+        """Parse a published `<hex>  <filename>` checksum asset into 'algo:hex'.
+
+        Returns None when the fork publishes no usable checksum file, so the
+        caller skips verification instead of failing the download.
+        """
+        # 'GE-Proton11-11-x86_64.tar.gz' -> 'GE-Proton11-11-x86_64'; tags keep their dots.
+        stem = asset_name.rsplit(".", 2)[0]
+
+        for suffix in (".sha512sum", ".sha256sum"):
+            response = self.network_client.get(
+                self.platform_adapter.build_download_url(repo, tag, stem + suffix),
+                headers={"User-Agent": DEFAULT_USER_AGENT},
+            )
+            if response.status != 200:
+                continue
+
+            parts = response.body.split()
+            hex_digest = parts[0] if parts else ""
+            algorithm = _DIGEST_ALGORITHMS.get(len(hex_digest))
+            if algorithm and _HEX_DIGEST.fullmatch(hex_digest):
+                logger.debug(f"Checksum for {asset_name}: {algorithm}:{hex_digest}")
+                return f"{algorithm}:{hex_digest}"
+
+        logger.debug(f"No usable checksum asset for {asset_name}")
+        return None
 
     def list_recent_releases(self, repo: str) -> ReleaseTagsList:
         """Fetch and return a list of recent release tags from the GitHub API.

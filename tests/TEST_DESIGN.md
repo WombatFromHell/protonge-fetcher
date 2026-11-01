@@ -57,6 +57,7 @@ graph LR
         T_EXTRACTION["test_extraction.py"]
         T_LINK_MGR["test_link_manager_e2e.py"]
         T_UTILS["test_utils.py"]
+        T_FILESYSTEM["test_filesystem.py"]
         C["conftest.py\nfixture module hub"]
     end
 
@@ -101,7 +102,8 @@ graph LR
     T_GITHUB --> S_GITHUB & S_FETCHER
     T_FORGEJO --> S_FORGEJO & S_ADAPTER & S_DIRS
     T_EXTRACTION --> S_EXTRACTION & S_DOWNLOAD
-    T_INTEGRATION --> S_NETWORK & S_SPINNER
+    T_INTEGRATION --> S_NETWORK & S_SPINNER & S_DOWNLOAD & S_RELEASE & S_FETCHER
+    T_FILESYSTEM --> S_FS
     T_UTILS --> S_UTILS
     T_VERSION --> S_VERSION
     T_SYMLINK_OPS --> S_SYMLINK_OPS & S_COMMON
@@ -119,7 +121,7 @@ classDiagram
         +platform: str
         +release_manager: ReleaseManager
         +fetch_and_extract()
-        +check_for_newer()
+        +check_for_updates()
         +remove_release()
         +relink_fork()
         +update_all_managed_forks()
@@ -157,6 +159,7 @@ classDiagram
         +platform_adapter: PlatformAdapter
         +find_asset_by_name()
         +list_recent_releases()
+        +get_asset_info() → AssetInfo(size, digest)
     }
 
     class ForkConfig {
@@ -174,8 +177,8 @@ classDiagram
     PlatformAdapter <|.. ForgejoPlatformAdapter
     ForkConfig --> BaseReleaseFetcher : "platform field selects adapter"
 
-    note for GitHubReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
-    note for ForgejoReleaseFetcher["~28 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
+    note for GitHubReleaseFetcher["~13 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
+    note for ForgejoReleaseFetcher["~13 lines, zero overrides<br/>Test: adapter selection + URL delegation"]
     note for BaseReleaseFetcher["~500 lines, ALL logic<br/>Test: test_base_release_fetcher.py"]
     note for PlatformAdapter["URL/header construction<br/>Test: test_forgejo_fetcher.py + test_release_manager_e2e.py (Pattern 8)"]
 ```
@@ -197,7 +200,7 @@ graph TB
         NET_MOCK["mock_network_client<br/>NetworkClientProtocol"]
         FS_MOCK["mock_filesystem_client<br/>FileSystemClientProtocol"]
         TAR_MOCK["mock_tarfile_operations<br/>tarfile.open patch"]
-        URL_MOCK["mock_urllib_download<br/>urllib.request.urlopen"]
+        URL_MOCK["mock_urllib_download<br/>urllib.request.urlopen<br/>content_range for resumes"]
         SUB_MOCK["mock_subprocess_tar<br/>subprocess.run"]
         OPEN_MOCK["mock_builtin_open<br/>builtins.open"]
     end
@@ -216,7 +219,7 @@ graph TB
     LINK_MGR --> REAL_FS
     RELEASE_MGR --> NET_MOCK
 
-    note for MOCKS["Always mock: network, tarfile,<br/>file read/write, subprocess"]
+    note for MOCKS["Always mock: network, tarfile,<br/>file read/write, subprocess<br/>Checksum hashing is REAL (hashlib.file_digest on tmp_path)<br/>Metadata cache writes are isolated by autouse isolated_cache"]
     note for REAL_FS["Never mock: symlinks<br/>(resolve() breaks with mocks)"]
 ```
 
@@ -241,6 +244,7 @@ graph TD
         EXTRACT_DIR["extract_dir"]
         INSTALLED["installed_proton_versions"]
         SYMLINK_ENV["symlink_environment"]
+        CACHE["isolated_cache_dir (autouse)<br/>XDG_CACHE_HOME -> tmp_path/cache"]
     end
 
     subgraph FORK_PARAM["Fork Parametrization (tests/fixtures.py)"]
@@ -310,13 +314,17 @@ graph TB
         E8["test_forgejo_fetcher.py"]
     end
 
-    subgraph NEW_TESTS["New Tests (2026-05)"]
+    subgraph NEW_TESTS["New Tests — adapter split (2026-05) + resume/checksum (2026-11)"]
         NT1["TestAdapterSelection<br/>2 tests in test_base_release_fetcher.py"]
         NT2["TestBuildDownloadUrl<br/>2 tests in test_base_release_fetcher.py"]
         NT3["TestHandleAlreadyExtracted<br/>2 tests in test_base_release_fetcher.py"]
         NT4["TestUpdateAllManagedForksPlatformFiltering<br/>2 tests in test_base_release_fetcher.py"]
         NT5["TestForkConfigPlatformDispatch<br/>4 tests in test_cli.py"]
         NT6["TestReleaseManagerForgejoAdapter<br/>5 tests in test_release_manager_e2e.py"]
+        NT7["TestResumeDownload<br/>9 tests in test_integration.py"]
+        NT8["TestPartialTargetAndChecksum<br/>8 tests in test_integration.py"]
+        NT9["TestAssetSizeCaching<br/>9 tests in test_release_manager_e2e.py (listing size + digest, no HEAD)"]
+        NT10["test_asset_info_comes_from_the_listing_not_a_head_request<br/>test_github_fetcher.py: fetcher stages .partial and passes the digest"]
     end
 
     P1 --> E1
@@ -400,10 +408,11 @@ graph LR
         OP_CHECK["--check<br/>TestCheckOperationFlow<br/>TestCheckCLI"]
         OP_DRYRUN["--dry-run<br/>TestDryRunCLI<br/>TestDryRunIntegration"]
         OP_LIST["--list<br/>TestListReleasesOperation"]
-        OP_LINKS["--list-links<br/>TestListLinksOperation"]
-        OP_REMOVE["--remove<br/>TestRemoveOperation"]
+        OP_LINKS["--ls<br/>TestListLinksOperation"]
+        OP_REMOVE["--rm<br/>TestRemoveOperation"]
         OP_RELINK["--relink<br/>TestRelinkOperation"]
-        OP_DOWNLOAD["--download<br/>TestDownloadOperation"]
+        OP_RELEASE["--release<br/>pin a tag"]
+        OP_DOWNLOAD["default download path<br/>TestDownloadOperation"]
         OP_PRUNE["--prune<br/>test_prune.py"]
         OP_FORK["--fork flag<br/>TestForkConversion<br/>TestForkFlagWithoutValue"]
         OP_DEBUG["--debug<br/>TestDebugLogging"]
@@ -586,7 +595,7 @@ graph TD
         HANDLER_MOD["cli/handlers.py — operation handlers"]
         FETCHER_MOD["github_fetcher.py — orchestrate()"]
         RELEASE_MOD["release_manager.py — find_asset_by_name()"]
-        DOWNLOAD_MOD["asset_downloader.py — download()"]
+        DOWNLOAD_MOD["asset_downloader.py — download_asset()<br/>stages <name>.partial, size+digest gate, os.replace"]
         EXTRACT_MOD["archive_extractor.py — extract()"]
         VERSION_MOD["version_finder.py — discover versions"]
         CANDIDATE_MOD["candidate_selection.py — select top-3"]
@@ -606,7 +615,7 @@ graph TD
 
 ```mermaid
 mindmap
-    root((Test Suite - 425 tests))
+    root((Test Suite - 487 tests))
         Files
             conftest.py - re-export layer
             data.py - centralized test data
@@ -618,8 +627,9 @@ mindmap
             test_cli_validators.py - CLI validation
             test_base_release_fetcher.py - shared workflow + adapter selection
             test_prune.py - prune feature
-            test_release_manager_e2e.py - discovery + caching
-            test_integration.py - NetworkClient + Spinner
+            test_release_manager_e2e.py - discovery + metadata cache + digests
+            test_integration.py - NetworkClient, Spinner, resume, .partial + checksum
+            test_filesystem.py - FileSystemClient protocol
             test_prune_operations.py - standalone prune ops
             test_version_finder.py - version discovery
             test_link_status.py - link inspection
@@ -631,13 +641,11 @@ mindmap
             test_link_manager_e2e.py - symlink E2E
             test_utils.py - version parsing
         Stats
-            18 test files
-            425 tests total
-            <1s execution
+            19 test files
+            487 tests total
+            ~0.7s execution
         Markers
-            integration
-            unit
-            slow
+            none registered (no pytest.mark usage)
         Commands
             uv run pytest -xvs
             uv run pytest -k ge_proton
@@ -659,7 +667,7 @@ graph TD
         end
 
         subgraph FACTORY_FIXTURES["tests/factories.py — Factory Fixtures"]
-            NET_FACT["mock_network_factory<br/>get_response, head_response,<br/>rate_limit, not_found, custom_returncode"]
+            NET_FACT["mock_network_factory<br/>get_response, head_response,<br/>rate_limit, not_found,<br/>custom_returncode, digest"]
             FS_FACT["mock_filesystem_factory<br/>exists/is_dir/is_symlink/read/size maps,<br/>use_tmp_path"]
             ARCH_FACT["sample_archive_factory<br/>format, tag, files"]
         end
@@ -670,7 +678,7 @@ graph TD
             MC_TARGZ["sample_tar_gz_archive"]
             MC_TARXZ["sample_tar_xz_archive"]
             MC_TAR["mock_tarfile_operations"]
-            MC_URL["mock_urllib_download"]
+            MC_URL["mock_urllib_download<br/>chunks, content_length, content_range"]
             MC_SUB["mock_subprocess_tar"]
             MC_OPEN["mock_builtin_open"]
         end
@@ -680,6 +688,7 @@ graph TD
             ENV_EXTRACT["extract_dir"]
             ENV_INSTALLED["installed_proton_versions"]
             ENV_SYMLINK["symlink_environment"]
+            ENV_CACHE["isolated_cache_dir (autouse)"]
         end
 
         subgraph FORK_PARAM["tests/fixtures.py — Fork Parametrization"]
@@ -730,6 +739,13 @@ graph TB
         TSO["test_symlink_operations.py<br/>symlink CRUD"]
     end
 
+    subgraph DOWNLOAD_TESTS["Download Integrity Tests"]
+        RD["TestResumeDownload<br/>test_integration.py"]
+        PC["TestPartialTargetAndChecksum<br/>test_integration.py"]
+        AC["TestAssetSizeCaching<br/>test_release_manager_e2e.py"]
+        FDIG["test_asset_info_comes_from_the_listing_not_a_head_request<br/>test_github_fetcher.py"]
+    end
+
     subgraph ADAPTER_TESTS["Adapter & Platform Tests"]
         AT["TestAdapterSelection<br/>test_base_release_fetcher.py"]
         BD["TestBuildDownloadUrl<br/>test_base_release_fetcher.py"]
@@ -748,7 +764,13 @@ graph TB
     TRO --> EXTRACTED_TESTS
     TSO --> EXTRACTED_TESTS
 
+    RD --> DOWNLOAD_TESTS
+    PC --> DOWNLOAD_TESTS
+    AC --> DOWNLOAD_TESTS
+    FDIG --> DOWNLOAD_TESTS
+
     style CLI_SPLIT fill:#e1f5e1
     style EXTRACTED_TESTS fill:#e1f5e1
+    style DOWNLOAD_TESTS fill:#e1f0f5
     style ADAPTER_TESTS fill:#fff4e1
 ```

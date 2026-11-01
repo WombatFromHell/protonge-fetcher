@@ -357,16 +357,15 @@ class BaseReleaseFetcher:
 
         archive_path = output_dir / asset_name
         download_url = self._build_download_url(repo, release_tag, asset_name)
-        remote_size = self.release_manager.get_remote_asset_size(
-            repo, release_tag, asset_name
-        )
+        info = self.release_manager.get_asset_info(repo, release_tag, asset_name)
         self.asset_downloader.download_asset(
             repo,
             release_tag,
             asset_name,
             archive_path,
             download_url=download_url,
-            remote_size=remote_size,
+            remote_size=info.size,
+            digest=info.digest,
         )
         return archive_path
 

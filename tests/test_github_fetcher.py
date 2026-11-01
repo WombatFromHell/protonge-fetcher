@@ -13,17 +13,17 @@ Adapter selection is tested in test_base_release_fetcher.py.
 Complete workflow tests are in test_cli.py to avoid duplication.
 """
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from protonfetcher.common import ForkName
-from protonfetcher.common import HttpResponse
+from protonfetcher.common import ForkName, HttpResponse
+from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.exceptions import (
     LinkManagementError,
-    NetworkError,
 )
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
@@ -115,19 +115,30 @@ class TestFetchAndExtractEdgeCases:
         assert result_path == existing_dir
         mock_network_client.get.assert_not_called()
 
-    def test_fetch_and_extract_asset_not_found_mocked(
+    def test_asset_info_comes_from_the_listing_not_a_head_request(
         self,
         mocker: Any,
         mock_network_client: Any,
-        mock_filesystem_client: Any,
+        tmp_path: Path,
     ) -> None:
-        """Test handling when asset is not found (mocked)."""
-        output_dir = Path("/mock/Downloads")
-        extract_dir = Path("/mock/compatibilitytools.d")
+        """Size and checksum come from the listing we already fetched, no extra request."""
+        output_dir = tmp_path / "Downloads"
+        extract_dir = tmp_path / "compatibilitytools.d"
 
+        digest = "sha256:" + hashlib.sha256(b"x" * 1024).hexdigest()
         mock_network_client.get.return_value = HttpResponse(
             status=200,
-            body=json.dumps({"assets": [{"name": "different.tar.gz", "size": 1024}]}),
+            body=json.dumps(
+                {
+                    "assets": [
+                        {
+                            "name": "GE-Proton10-20.tar.gz",
+                            "size": 1024,
+                            "digest": digest,
+                        }
+                    ]
+                }
+            ),
         )
         mock_network_client.head.return_value = HttpResponse(
             status=200, final_url="/releases/tag/GE-Proton10-20"
@@ -135,24 +146,36 @@ class TestFetchAndExtractEdgeCases:
 
         fetcher = GitHubReleaseFetcher(
             network_client=mock_network_client,
-            file_system_client=mock_filesystem_client,
+            file_system_client=FileSystemClient(),
             timeout=30,
         )
 
-        # Mock cache to avoid mock filesystem mtime issues
-        mocker.patch.object(
-            fetcher.release_manager, "_get_cached_asset_size", return_value=None
+        def fake_fetch(url, path, headers, resume_from=None):
+            path.write_bytes(b"x" * 1024)
+
+        spinner = mocker.patch.object(
+            fetcher.asset_downloader, "download_with_spinner", side_effect=fake_fetch
+        )
+        verify = mocker.patch.object(
+            fetcher.asset_downloader, "_verify", return_value=True
+        )
+        mocker.patch.object(fetcher, "_extract_and_manage_links")
+
+        fetcher.fetch_and_extract(
+            repo="GloriousEggroll/proton-ge-custom",
+            output_dir=output_dir,
+            extract_dir=extract_dir,
+            fork=ForkName.GE_PROTON,
+            show_progress=False,
         )
 
-        # Asset is found but get_remote_asset_size fails (mock doesn't have proper HEAD)
-        with pytest.raises(NetworkError, match="Could not determine size"):
-            fetcher.fetch_and_extract(
-                repo="GloriousEggroll/proton-ge-custom",
-                output_dir=output_dir,
-                extract_dir=extract_dir,
-                fork=ForkName.GE_PROTON,
-                show_progress=False,
-            )
+        # The only HEAD is the redirect that resolves the tag; there is no size request.
+        assert mock_network_client.head.call_count == 1
+        staged = spinner.call_args[0][1]
+        assert staged.name == "GE-Proton10-20.tar.gz.partial"
+        assert verify.call_args[0][1] == digest
+        assert (output_dir / "GE-Proton10-20.tar.gz").exists()
+        assert not (output_dir / "GE-Proton10-20.tar.gz.partial").exists()
 
     def test_relink_fork_no_versions_raises_error_mocked(
         self,

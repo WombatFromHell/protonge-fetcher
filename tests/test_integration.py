@@ -7,6 +7,7 @@ Consolidated integration tests for:
 """
 
 import email.message
+import hashlib
 import io
 import json
 import urllib.error
@@ -18,6 +19,7 @@ import pytest
 from protonfetcher.archive_extractor import ArchiveExtractor
 from protonfetcher.asset_downloader import AssetDownloader
 from protonfetcher.exceptions import NetworkError
+from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.network import NetworkClient
 from protonfetcher.spinner import Spinner
 
@@ -291,6 +293,431 @@ class TestSpinnerInDownloadWorkflow:
                 url="https://example.com/test.tar.gz",
                 output_path=output_path,
             )
+
+
+class TestResumeDownload:
+    """Test resuming an interrupted download with a byte Range."""
+
+    URL = "https://example.com/owner/repo/releases/download/GE-Proton10-11/GE-Proton10-11.tar.gz"
+    ASSET = "GE-Proton10-11.tar.gz"
+
+    @staticmethod
+    def _downloader(mock_network_client: Any, file_system: Any) -> AssetDownloader:
+        return AssetDownloader(mock_network_client, file_system)
+
+    def test_resume_sends_range_and_appends(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A 206 answer must append to the bytes already held on disk."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(b"a" * 400)
+
+        mocks = mock_urllib_download(
+            chunks=[b"b" * 400, b""], content_length=400, status=206
+        )
+
+        self._downloader(mock_network_client, FileSystemClient()).download_with_spinner(
+            url=self.URL, output_path=out_path, resume_from=400
+        )
+
+        assert mocks["urlopen_mock"].call_args[0][0].headers["Range"] == "bytes=400-"
+        assert out_path.read_bytes() == b"a" * 400 + b"b" * 400
+
+    def test_server_ignoring_range_restarts_from_byte_zero(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A plain 200 to a Range request means the prefix is unusable — rewrite it."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(b"junk" * 100)
+
+        mock_urllib_download(chunks=[b"b" * 800, b""], content_length=800, status=200)
+
+        self._downloader(mock_network_client, FileSystemClient()).download_with_spinner(
+            url=self.URL, output_path=out_path, resume_from=400
+        )
+
+        assert out_path.read_bytes() == b"b" * 800
+
+    def test_download_asset_resumes_a_partial_local_file(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """download_asset resumes from the .partial target, not the final path."""
+        out_path = tmp_path / self.ASSET
+        partial = out_path.with_name(f"{self.ASSET}.partial")
+        partial.write_bytes(b"a" * 400)
+
+        mocks = mock_urllib_download(
+            chunks=[b"b" * 400, b""], content_length=400, status=206
+        )
+
+        self._downloader(mock_network_client, FileSystemClient()).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            out_path,
+            download_url=self.URL,
+            remote_size=800,
+        )
+
+        assert mocks["urlopen_mock"].call_args[0][0].headers["Range"] == "bytes=400-"
+        assert out_path.read_bytes() == b"a" * 400 + b"b" * 400
+        assert not partial.exists()
+
+    def test_download_asset_overwrites_a_larger_local_file(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A local file bigger than the remote asset is not a prefix — no Range."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(b"old" * 300)
+
+        mocks = mock_urllib_download(chunks=[b"n" * 800, b""], content_length=800)
+
+        self._downloader(mock_network_client, FileSystemClient()).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            out_path,
+            download_url=self.URL,
+            remote_size=800,
+        )
+
+        assert "Range" not in mocks["urlopen_mock"].call_args[0][0].headers
+        assert out_path.read_bytes() == b"n" * 800
+
+    def test_download_asset_skips_a_complete_local_file(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """Matching size still skips the download entirely."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(b"x" * 800)
+
+        mocks = mock_urllib_download(chunks=[b"b" * 800, b""], content_length=800)
+
+        self._downloader(mock_network_client, FileSystemClient()).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            out_path,
+            download_url=self.URL,
+            remote_size=800,
+        )
+
+        assert mocks["urlopen_mock"].call_count == 0
+        assert out_path.read_bytes() == b"x" * 800
+
+    def test_download_asset_rejects_a_truncated_result(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A short body must fail instead of handing a broken archive to tar."""
+        out_path = tmp_path / self.ASSET
+
+        mock_urllib_download(chunks=[b"b" * 200, b""], content_length=800)
+
+        with pytest.raises(NetworkError, match="ended early"):
+            self._downloader(mock_network_client, FileSystemClient()).download_asset(
+                "owner/repo",
+                "GE-Proton10-11",
+                self.ASSET,
+                out_path,
+                download_url=self.URL,
+                remote_size=800,
+            )
+
+        # The half-written archive stays in the .partial target, out_path untouched.
+        assert out_path.exists() is False
+        assert (tmp_path / f"{self.ASSET}.partial").stat().st_size == 200
+
+    def test_http_error_is_a_download_failure(
+        self,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A non-resume HTTP status is still reported as a failed download."""
+        out_path = Path("/mock/output/GE-Proton10-11.tar.gz")
+        mock_urllib_download(
+            raise_on_open=urllib.error.HTTPError(
+                self.URL, 500, "Server Error", email.message.Message(), None
+            )
+        )
+
+        with pytest.raises(NetworkError, match="Failed to download"):
+            AssetDownloader(
+                mock_network_client, FileSystemClient()
+            ).download_with_spinner(url=self.URL, output_path=out_path)
+
+    def test_url_error_stays_a_network_error(
+        self,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A connection-level failure is reported as a download failure."""
+        out_path = Path("/mock/output/GE-Proton10-11.tar.gz")
+        mock_urllib_download(raise_on_open=urllib.error.URLError("Connection refused"))
+
+        with pytest.raises(NetworkError, match="Connection refused"):
+            AssetDownloader(
+                mock_network_client, FileSystemClient()
+            ).download_with_spinner(url=self.URL, output_path=out_path)
+
+    def test_range_not_satisfiable_names_the_partial_file(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """HTTP 416 means the local prefix does not match the remote asset."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(b"a" * 400)
+
+        error = urllib.error.HTTPError(
+            self.URL, 416, "Range Not Satisfiable", email.message.Message(), None
+        )
+        mock_urllib_download(raise_on_open=error)
+
+        with pytest.raises(NetworkError, match="Delete"):
+            self._downloader(
+                mock_network_client, FileSystemClient()
+            ).download_with_spinner(url=self.URL, output_path=out_path, resume_from=400)
+
+
+class TestPartialTargetAndChecksum:
+    """The archive is staged as <name>.partial and only renamed once size+checksum match."""
+
+    URL = "https://example.com/owner/repo/releases/download/GE-Proton10-11/GE-Proton10-11.tar.gz"
+    ASSET = "GE-Proton10-11.tar.gz"
+    UPSTREAM = b"a" * 400 + b"b" * 400
+    DIGEST = f"sha256:{hashlib.sha256(UPSTREAM).hexdigest()}"
+
+    @staticmethod
+    def _downloader(mock_network_client: Any, file_system: Any) -> AssetDownloader:
+        return AssetDownloader(mock_network_client, file_system)
+
+    def _download(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+        chunks: list[bytes],
+        digest: str | None,
+        remote_size: int | None = 800,
+    ) -> Path:
+        mock_urllib_download(chunks=chunks, content_length=len(chunks[0]))
+        return self._downloader(mock_network_client, FileSystemClient()).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            tmp_path / self.ASSET,
+            download_url=self.URL,
+            remote_size=remote_size,
+            digest=digest,
+        )
+
+    def test_fresh_download_is_staged_then_renamed(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A verified download lands at out_path and leaves no .partial behind."""
+        out_path = self._download(
+            tmp_path,
+            mock_network_client,
+            mock_urllib_download,
+            [self.UPSTREAM, b""],
+            self.DIGEST,
+        )
+
+        assert out_path.read_bytes() == self.UPSTREAM
+        assert not (tmp_path / f"{self.ASSET}.partial").exists()
+
+    def test_verified_asset_discards_a_stale_partial(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """An already-complete verified archive means any .partial is junk."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(self.UPSTREAM)
+        stale = tmp_path / f"{self.ASSET}.partial"
+        stale.write_bytes(b"junk")
+
+        mocks = mock_urllib_download(chunks=[self.UPSTREAM, b""], content_length=800)
+        result = self._downloader(
+            mock_network_client, FileSystemClient()
+        ).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            out_path,
+            download_url=self.URL,
+            remote_size=800,
+            digest=self.DIGEST,
+        )
+
+        assert result == out_path
+        assert mocks["urlopen_mock"].call_count == 0
+        assert not stale.exists()
+
+    def test_corrupt_prefix_is_discarded_and_redownloaded(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A resumed prefix that hashes wrong is thrown away, not renamed."""
+        out_path = tmp_path / self.ASSET
+        out_path.with_name(f"{self.ASSET}.partial").write_bytes(b"junk" * 100)
+
+        mocks = mock_urllib_download(
+            chunks=[b"b" * 400, b"", self.UPSTREAM, b""], content_length=400, status=206
+        )
+
+        result = self._downloader(
+            mock_network_client, FileSystemClient()
+        ).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            out_path,
+            download_url=self.URL,
+            remote_size=800,
+            digest=self.DIGEST,
+        )
+
+        # First call resumes the garbage prefix; the digest rejects it and the
+        # second call starts from byte 0 with no Range header.
+        assert mocks["urlopen_mock"].call_count == 2
+        assert "Range" not in mocks["urlopen_mock"].call_args[0][0].headers
+        assert result.read_bytes() == self.UPSTREAM
+
+    def test_checksum_mismatch_never_reaches_the_final_path(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A body that cannot match the digest fails loudly and cleans up."""
+        with pytest.raises(NetworkError, match="Checksum mismatch"):
+            self._download(
+                tmp_path,
+                mock_network_client,
+                mock_urllib_download,
+                [self.UPSTREAM, b"", self.UPSTREAM, b""],
+                "sha256:" + "0" * 64,
+            )
+
+        assert not (tmp_path / self.ASSET).exists()
+        assert not (tmp_path / f"{self.ASSET}.partial").exists()
+
+    def test_local_archive_matching_size_is_verified_before_skipping(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """Same size but wrong content must not be handed to tar."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(b"x" * 800)
+
+        mocks = mock_urllib_download(chunks=[self.UPSTREAM, b""], content_length=800)
+
+        result = self._downloader(
+            mock_network_client, FileSystemClient()
+        ).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            out_path,
+            download_url=self.URL,
+            remote_size=800,
+            digest=self.DIGEST,
+        )
+
+        assert mocks["urlopen_mock"].call_count == 1
+        assert result.read_bytes() == self.UPSTREAM
+
+    def test_verified_local_archive_is_skipped(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """A verified archive of matching size costs no request."""
+        out_path = tmp_path / self.ASSET
+        out_path.write_bytes(self.UPSTREAM)
+
+        mocks = mock_urllib_download(chunks=[self.UPSTREAM, b""], content_length=800)
+
+        result = self._downloader(
+            mock_network_client, FileSystemClient()
+        ).download_asset(
+            "owner/repo",
+            "GE-Proton10-11",
+            self.ASSET,
+            out_path,
+            download_url=self.URL,
+            remote_size=800,
+            digest=self.DIGEST,
+        )
+
+        assert mocks["urlopen_mock"].call_count == 0
+        assert result.read_bytes() == self.UPSTREAM
+
+    def test_missing_digest_skips_verification(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """No digest (HTML fallback, self-hosted) still downloads — no false failure."""
+        out_path = self._download(
+            tmp_path,
+            mock_network_client,
+            mock_urllib_download,
+            [self.UPSTREAM, b""],
+            None,
+        )
+
+        assert out_path.read_bytes() == self.UPSTREAM
+
+    def test_legacy_quarantined_partial_is_discarded(
+        self,
+        tmp_path: Path,
+        mock_network_client: Any,
+        mock_urllib_download: Any,
+    ) -> None:
+        """Leftover .partial.old files from the previous scheme are junk."""
+        (tmp_path / f"{self.ASSET}.partial.old").write_bytes(b"stale")
+
+        out_path = self._download(
+            tmp_path,
+            mock_network_client,
+            mock_urllib_download,
+            [self.UPSTREAM, b""],
+            self.DIGEST,
+        )
+
+        assert out_path.read_bytes() == self.UPSTREAM
+        assert not (tmp_path / f"{self.ASSET}.partial.old").exists()
 
 
 class TestSpinnerInExtractionWorkflow:

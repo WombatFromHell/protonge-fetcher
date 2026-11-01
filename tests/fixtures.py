@@ -255,6 +255,12 @@ def mock_tarfile_operations(mocker: Any) -> Any:
     return _setup_tarfile_mock
 
 
+@pytest.fixture(autouse=True)
+def isolated_cache_dir(tmp_path: Path, monkeypatch: Any) -> None:
+    """Keep release-metadata cache writes out of the real ~/.cache."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+
 @pytest.fixture
 def mock_urllib_download(mocker: Any) -> Any:
     """Factory for mocking urllib download operations."""
@@ -263,15 +269,17 @@ def mock_urllib_download(mocker: Any) -> Any:
         chunks: list[bytes] | None = None,
         content_length: int | None = None,
         raise_on_open: Exception | None = None,
+        status: int = 200,
     ) -> Any:
         mock_urllib = mocker.patch("urllib.request.urlopen")
 
         if raise_on_open:
             mock_urllib.side_effect = raise_on_open
-            return None
+            return {"urlopen_mock": mock_urllib, "response": None}
 
         mock_resp_obj = mocker.MagicMock()
         mock_resp_obj.__enter__.return_value = mock_resp_obj
+        mock_resp_obj.status = status
 
         if content_length is not None:
             mock_resp_obj.headers.get.return_value = str(content_length)
@@ -284,7 +292,7 @@ def mock_urllib_download(mocker: Any) -> Any:
             mock_resp_obj.read.side_effect = [b"chunk", b""]
 
         mock_urllib.return_value = mock_resp_obj
-        return mock_resp_obj
+        return {"urlopen_mock": mock_urllib, "response": mock_resp_obj}
 
     return _setup_urllib_mock
 

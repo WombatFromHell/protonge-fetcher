@@ -285,10 +285,6 @@ class TestForgejoReleaseFetcher:
             }
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        # Mock cache to avoid mock filesystem mtime issues
-        mocker.patch.object(
-            fetcher.release_manager, "_get_cached_asset_size", return_value=None
-        )
         asset = fetcher.find_asset_by_name(
             "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON
         )
@@ -307,9 +303,6 @@ class TestForgejoReleaseFetcher:
             }
         )
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        mocker.patch.object(
-            fetcher.release_manager, "_get_cached_asset_size", return_value=None
-        )
         asset = fetcher.find_asset_by_name(
             "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON
         )
@@ -328,9 +321,6 @@ class TestForgejoReleaseFetcher:
         html_response = '<a href="/releases/download/dwproton-10.0-26/dwproton-10.0-26-x86_64.tar.xz">dwproton-10.0-26-x86_64.tar.xz</a>'
         mock_network.get.return_value = HttpResponse(status=200, body=html_response)
         fetcher = ForgejoReleaseFetcher(network_client=mock_network)
-        mocker.patch.object(
-            fetcher.release_manager, "_get_cached_asset_size", return_value=None
-        )
         asset = fetcher.find_asset_by_name(
             "dawn-winery/dwproton", "dwproton-10.0-26", ForkName.DW_PROTON
         )
