@@ -31,7 +31,7 @@ from .link_manager import LinkManager
 from .network import NetworkClient
 from .platform_adapters import forgejo_adapter, github_adapter
 from .release_manager import ReleaseManager
-from .utils import format_bytes
+from .utils import errno_hint, format_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +90,10 @@ class BaseReleaseFetcher:
                 f"{directory} exists but is not a directory"
             ) from e
         except OSError as e:
+            # Kept as ProtonFetcherError: --update-all degrades per fork instead
+            # of aborting the whole run.
             raise ProtonFetcherError(
-                f"Failed to create directory {directory}: {e}"
+                f"Failed to create directory {directory}: {errno_hint(e)}"
             ) from e
 
         try:
@@ -100,7 +102,7 @@ class BaseReleaseFetcher:
             self.file_system_client.unlink(test_file)
         except OSError as e:
             raise ProtonFetcherError(
-                f"Directory {directory} is not writable: {e}"
+                f"Directory {directory} is not writable: {errno_hint(e)}"
             ) from e
 
     def _ensure_directories_writable(self, output_dir: Path, extract_dir: Path) -> None:

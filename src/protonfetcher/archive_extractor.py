@@ -110,10 +110,10 @@ class ArchiveExtractor:
             return fallback_method(archive_path, target_dir)
 
     # Format → extra tar args for the system-tar fallback
-    _TAR_ARGS: dict[str, list[str]] = {
-        "tar.gz": ["-xzf"],
-        "tar.xz": ["-xJf"],
-        "tar.zst": ["--zstd", "-xf"],
+    _TAR_ARGS: dict[str, tuple[str, ...]] = {
+        "tar.gz": ("-xzf",),
+        "tar.xz": ("-xJf",),
+        "tar.zst": ("--zstd", "-xf"),
     }
 
     def extract_archive(
@@ -127,8 +127,8 @@ class ArchiveExtractor:
         Raises:
             ExtractionError: If extraction fails
         """
-        tar_args = self._TAR_ARGS.get(self._get_archive_format(archive_path), [])
-        fallback = partial(self._extract_with_system_tar, *tar_args)
+        tar_args = self._TAR_ARGS.get(self._get_archive_format(archive_path), ())
+        fallback = partial(self._extract_with_system_tar, tar_args=tar_args)
         return self._extract_with_fallback(
             archive_path,
             target_dir,
@@ -137,7 +137,7 @@ class ArchiveExtractor:
         )
 
     def _extract_with_system_tar(
-        self, archive_path: Path, target_dir: Path, *tar_args: str
+        self, archive_path: Path, target_dir: Path, tar_args: tuple[str, ...] = ()
     ) -> Path:
         """Extract archive using the system tar command."""
         self.file_system_client.mkdir(target_dir, parents=True, exist_ok=True)
@@ -197,6 +197,9 @@ class ArchiveExtractor:
                     decompressor = self._open_decompressor(archive_path, counting)
                     with tarfile.open(fileobj=decompressor, mode="r|") as tar:
                         for member in tar:
+                            if member.issym() and member.linkname.startswith("/"):
+                                self._extract_absolute_symlink(member, target_dir)
+                                continue
                             tar.extract(member, path=target_dir, filter="data")
                 spinner.finish()
 
@@ -206,6 +209,30 @@ class ArchiveExtractor:
             raise ExtractionError(f"Failed to extract archive {archive_path}: {e}")
 
         return target_dir
+
+    def _extract_absolute_symlink(
+        self, member: tarfile.TarInfo, target_dir: Path
+    ) -> None:
+        """Recreate a symlink whose target is an absolute path.
+
+        tarfile's "data" filter refuses these, but proton forks ship them
+        (e.g. share/mesa/drirc.d/99-system.conf -> /etc/drirc) and rewriting
+        the target would leave a dangling link. Only the link itself is kept
+        inside target_dir; its target stays the archive's absolute path.
+        Hardlinks to absolute paths are rare in these archives — the system
+        tar fallback handles them.
+        """
+        dest = Path(os.path.normpath(target_dir / member.name.lstrip("/")))
+        if os.path.commonpath([str(dest), str(target_dir)]) != str(target_dir):
+            logger.warning("Skipping symlink outside target dir: %s", member.name)
+            return
+
+        self.file_system_client.mkdir(dest.parent, parents=True, exist_ok=True)
+        if self.file_system_client.exists(dest) or self.file_system_client.is_symlink(
+            dest
+        ):
+            self.file_system_client.unlink(dest)
+        self.file_system_client.symlink_to(dest, Path(member.linkname))
 
     @staticmethod
     def _open_decompressor(archive_path: Path, counting: _CountingReader):

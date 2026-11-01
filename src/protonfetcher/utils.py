@@ -1,8 +1,55 @@
 """Utility functions for ProtonFetcher."""
 
+import errno
 import re
+from pathlib import Path
 
 from .common import FORKS, ForkName
+
+# errno -> the phrase a user can act on; anything unlisted keeps the
+# original OSError detail, which is already specific.
+_ERRNO_HINTS: dict[int, str] = {
+    errno.ENOENT: "does not exist",
+    errno.ENOTDIR: "not a directory",
+    errno.EEXIST: "already exists",
+    errno.EISDIR: "is a directory",
+    errno.EACCES: "permission denied",
+    errno.EPERM: "operation not permitted",
+    errno.ENOSPC: "no space left on device",
+    errno.EROFS: "read-only filesystem",
+    errno.ENOTEMPTY: "directory not empty",
+    errno.ELOOP: "too many levels of symbolic links",
+    errno.ENAMETOOLONG: "name too long",
+    errno.EFBIG: "file too large",
+    errno.EINVAL: "invalid argument",
+    errno.ETIMEDOUT: "timed out",
+    errno.ECONNRESET: "connection reset by peer",
+    errno.ECONNABORTED: "connection aborted",
+}
+
+
+def errno_hint(error: OSError) -> str:
+    """Plain-English reason for an OSError, e.g. 'permission denied'."""
+    hint = _ERRNO_HINTS.get(error.errno) if error.errno is not None else None
+    return hint or str(error)
+
+
+def describe_os_error(action: str, path: Path | str, error: OSError) -> str:
+    """Plain-English description of a failed filesystem operation."""
+    return f"Failed to {action} {path}: {errno_hint(error)}"
+
+
+def friendly_os_error(action: str, path: Path | str, error: OSError) -> OSError:
+    """The same OSError type, re-worded, with its errno intact.
+
+    Type and errno are preserved because callers guard on FileNotFoundError,
+    FileExistsError and OSError and errno_hint() reads errno. filename is not
+    copied: the path is already in the message.
+    """
+    message = describe_os_error(action, path, error)
+    if error.errno is None:
+        return type(error)(message)
+    return type(error)(error.errno, message)
 
 
 def parse_version(

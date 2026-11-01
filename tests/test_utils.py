@@ -1,9 +1,10 @@
 """Tests for protonfetcher.utils module."""
 
+import errno
 import pytest
 
 from protonfetcher.common import ForkName
-from protonfetcher.utils import get_proton_asset_name, parse_version
+from protonfetcher.utils import describe_os_error, get_proton_asset_name, parse_version
 
 
 class TestParseVersion:
@@ -171,3 +172,28 @@ class TestParseVersion:
                 "proton-cachyos-10.0-20260227-slr-x86_64", ForkName.CACHYOS
             )
             assert v2 > v1
+
+
+class TestDescribeOsError:
+    """describe_os_error() turns an errno into plain English."""
+
+    def test_known_errno(self) -> None:
+        error = FileNotFoundError(errno.ENOENT, "No such file or directory", "/x/y")
+        assert (
+            describe_os_error("read", "/x/y", error)
+            == "Failed to read /x/y: does not exist"
+        )
+
+    def test_permission_denied(self) -> None:
+        error = PermissionError(errno.EACCES, "Permission denied", "/x")
+        assert (
+            describe_os_error("write", "/x", error)
+            == "Failed to write /x: permission denied"
+        )
+
+    def test_unknown_errno_keeps_the_original_detail(self) -> None:
+        error = OSError(errno.EIO, "Input/output error", "/x")
+        assert (
+            describe_os_error("write", "/x", error)
+            == "Failed to write /x: [Errno 5] Input/output error: '/x'"
+        )

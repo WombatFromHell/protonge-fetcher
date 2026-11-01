@@ -1058,3 +1058,27 @@ class TestForkConfigPlatformDispatch:
         captured = capsys.readouterr()
         assert "cachyos-10.0-20260207-slr" in captured.out
         mock_github_fetcher.list_recent_releases.assert_called_once()
+
+
+class TestCliFileErrorReporting:
+    """A filesystem error must be one readable line, not a traceback."""
+
+    def test_os_error_prints_one_line_and_exits_1(
+        self, mocker: Any, capsys: Any
+    ) -> None:
+        mocker.patch("sys.argv", ["protonfetcher", "--list"])
+        mocker.patch(
+            "protonfetcher.cli.core._dispatch",
+            side_effect=IsADirectoryError(
+                "Failed to create directory /x: is a directory"
+            ),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        assert (
+            capsys.readouterr().out
+            == "Error: Failed to create directory /x: is a directory\n"
+        )

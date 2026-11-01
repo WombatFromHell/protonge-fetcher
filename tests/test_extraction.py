@@ -8,7 +8,10 @@ Consolidated tests for archive extraction and asset download workflows:
 - Asset downloading with progress
 """
 
+import errno
+import subprocess
 import tarfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +20,7 @@ import pytest
 from protonfetcher.archive_extractor import ArchiveExtractor
 from protonfetcher.asset_downloader import AssetDownloader
 from protonfetcher.exceptions import ExtractionError, NetworkError
+from protonfetcher.filesystem import FileSystemClient
 
 # =============================================================================
 # Archive Extraction Tests
@@ -157,6 +161,110 @@ class TestSystemTarFallback:
                     target_dir=target_dir,
                     show_progress=False,
                 )
+
+
+# =============================================================================
+# Real-filesystem extraction (no mocks: mock mkdir hid the fallback arg bug)
+# =============================================================================
+
+
+class TestRealFilesystemExtraction:
+    """Extraction against real archives on disk."""
+
+    def test_extract_archive_with_absolute_symlink(self, tmp_path: Path) -> None:
+        """Proton forks ship symlinks to absolute paths; extraction must not fail."""
+        archive = tmp_path / "proton-wineland-11.0.tar.xz"
+        src = tmp_path / "files"
+        (src / "share/mesa/drirc.d").mkdir(parents=True)
+        (src / "version").write_text("11.0")
+        (src / "share/mesa/drirc.d/99-system.conf").symlink_to("/etc/drirc")
+        (src / "share/rel.conf").symlink_to("../version")
+        with tarfile.open(archive, "w:xz") as tar:
+            tar.add(src, arcname="files")
+
+        target = tmp_path / "extracted"
+        ArchiveExtractor(FileSystemClient()).extract_archive(
+            archive, target, show_progress=False
+        )
+
+        assert (target / "files/version").read_text() == "11.0"
+        absolute = target / "files/share/mesa/drirc.d/99-system.conf"
+        assert absolute.is_symlink()
+        assert str(absolute.readlink()) == "/etc/drirc"
+        assert str((target / "files/share/rel.conf").readlink()) == "../version"
+
+    def test_download_write_failure_is_not_a_network_error(
+        self, tmp_path: Path, mocker: Any
+    ) -> None:
+        """A denied or impossible write must not be reported as a network failure."""
+        response = mocker.MagicMock()
+        response.__enter__.return_value = response
+        response.headers.get.return_value = "4"
+        response.read.side_effect = [b"data", b""]
+        mocker.patch("urllib.request.urlopen", return_value=response)
+
+        out_path = tmp_path / "proton.tar.xz"
+        out_path.mkdir()
+        downloader = AssetDownloader(mocker.MagicMock(), FileSystemClient())
+
+        with pytest.raises(IsADirectoryError) as exc:
+            downloader.download_with_spinner("https://example.com/x", out_path)
+
+        assert exc.value.errno == errno.EISDIR
+        assert f"Failed to download to {out_path}: is a directory" in str(exc.value)
+        assert not isinstance(exc.value, NetworkError)
+
+    def test_extract_symlink_escape_is_skipped(self, tmp_path: Path) -> None:
+        """A symlink whose name escapes the target dir must not be created."""
+        archive = tmp_path / "evil.tar.xz"
+        with tarfile.open(archive, "w:xz") as tar:
+            entry = tarfile.TarInfo("files/version")
+            entry.size = 4
+            tar.addfile(entry, BytesIO(b"11.0"))
+            link = tarfile.TarInfo("../escape.conf")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "/etc/drirc"
+            tar.addfile(link)
+
+        target = tmp_path / "extracted"
+        ArchiveExtractor(FileSystemClient()).extract_archive(
+            archive, target, show_progress=False
+        )
+
+        assert (target / "files/version").read_text() == "11.0"
+        assert not (tmp_path / "escape.conf").exists()
+
+    @pytest.mark.parametrize(
+        "archive_name,tar_args",
+        [("proton.tar.zst", ["--zstd", "-xf"]), ("proton.tar.xz", ["-xJf"])],
+    )
+    def test_system_tar_fallback_builds_correct_command(
+        self, archive_name: str, tar_args: list[str], tmp_path: Path, mocker: Any
+    ) -> None:
+        """tarfile cannot read .tar.zst; the tar fallback must get real args."""
+        archive = tmp_path / archive_name
+        archive.write_bytes(b"not readable by tarfile")
+        target = tmp_path / "extracted"
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+
+        ArchiveExtractor(FileSystemClient()).extract_archive(
+            archive, target, show_progress=False
+        )
+
+        assert mock_run.call_args[0][0] == [
+            "tar",
+            "--checkpoint=1",
+            "--checkpoint-action=dot",
+            *tar_args,
+            "-f",
+            str(archive),
+            "-C",
+            str(target),
+        ]
+        assert target.is_dir()
 
 
 # =============================================================================

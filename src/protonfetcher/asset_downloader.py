@@ -1,6 +1,7 @@
 """Asset downloader implementation for ProtonFetcher."""
 
 import logging
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from .common import (
 )
 from .exceptions import NetworkError
 from .spinner import Spinner
-from .utils import format_bytes
+from .utils import friendly_os_error, format_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,12 @@ class AssetDownloader:
                             # Update spinner with the amount downloaded since last call
                             spinner.update(len(chunk))
 
+        except (urllib.error.HTTPError, urllib.error.URLError) as e:
+            raise NetworkError(f"Failed to download {url}: {str(e)}") from e
+        except OSError as e:
+            # A full disk or a denied open is a filesystem problem, not a
+            # network one — naming it as one sends users hunting for proxies.
+            raise friendly_os_error("download to", output_path, e) from e
         except Exception as e:
             raise NetworkError(f"Failed to download {url}: {str(e)}")
 

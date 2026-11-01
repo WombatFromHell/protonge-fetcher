@@ -4,10 +4,13 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import os
+
 import pytest
 
 from protonfetcher.common import ForkName
 from protonfetcher.exceptions import LinkManagementError, ProtonFetcherError
+from protonfetcher.filesystem import FileSystemClient
 from protonfetcher.forgejo_fetcher import ForgejoReleaseFetcher
 from protonfetcher.github_fetcher import GitHubReleaseFetcher
 
@@ -188,6 +191,37 @@ class TestBaseReleaseFetcherSharedWorkflow:
 
         with pytest.raises(ProtonFetcherError, match="exists but is not a directory"):
             fetcher._ensure_directory_is_writable(file_path)
+
+    def test_ensure_directory_is_writable_reports_permission_denied(
+        self, tmp_path: Path
+    ) -> None:
+        """An existing but unwritable directory says so in plain English."""
+        if os.geteuid() == 0:
+            pytest.skip("root ignores directory permissions")
+        ro = tmp_path / "ro"
+        ro.mkdir(mode=0o500)
+        fetcher = ForgejoReleaseFetcher(file_system_client=FileSystemClient())
+
+        with pytest.raises(ProtonFetcherError) as exc:
+            fetcher._ensure_directory_is_writable(ro)
+        assert str(exc.value) == f"Directory {ro} is not writable: permission denied"
+
+    def test_ensure_directory_is_writable_reports_unwritable_parent(
+        self, tmp_path: Path
+    ) -> None:
+        """A denied mkdir keeps FileSystemClient's plain-English message."""
+        if os.geteuid() == 0:
+            pytest.skip("root ignores directory permissions")
+        ro = tmp_path / "ro"
+        ro.mkdir(mode=0o500)
+        fetcher = ForgejoReleaseFetcher(file_system_client=FileSystemClient())
+
+        with pytest.raises(ProtonFetcherError) as exc:
+            fetcher._ensure_directory_is_writable(ro / "sub")
+        assert (
+            str(exc.value)
+            == f"Failed to create directory {ro / 'sub'}: permission denied"
+        )
 
     def test_dry_run_workflow_shows_download_info(
         self,

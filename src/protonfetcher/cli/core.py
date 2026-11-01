@@ -61,6 +61,6 @@ def main() -> None:
 
         _dispatch(ctx, argv_list)
 
-    except ProtonFetcherError as e:
+    except (ProtonFetcherError, OSError) as e:
         print(f"Error: {e}")
         raise SystemExit(1) from e
